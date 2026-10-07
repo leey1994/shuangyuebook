@@ -1,0 +1,24 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+
+# Android 构建产物
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/app/.cxx/
+
+# Windows 构建产物
+windows/flutter/ephemeral/
+
+# 交付物（安装包/压缩包）
+dist/
+
+# 杂项
+*.log
+.DS_Store

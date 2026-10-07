@@ -1,0 +1,33 @@
+name: novel_reader
+description: 爽阅·多源小说阅读器（Android + Windows 双端 Flutter 应用）
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  html: ^0.15.4
+  shared_preferences: ^2.2.0
+  path_provider: ^2.1.0
+  window_manager: ^0.4.0
+  url_launcher: ^6.3.0
+  flutter_tts: ^4.2.0
+  crypto: ^3.0.3 # 在线音色合成签名（Sec-MS-GEC）
+  audioplayers: ^6.1.0 # 在线音色本地 MP3 播放（Android + Windows）
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+# 本地固化 flutter_tts 补丁（Windows SAPI 引擎切换 + 崩溃守卫），见 third_party/flutter_tts
+dependency_overrides:
+  flutter_tts:
+    path: third_party/flutter_tts
+
+flutter:
+  uses-material-design: true

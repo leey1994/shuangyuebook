@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自动更新：允许 FileProvider 暴露缓存目录中的待安装 APK -->
+<paths>
+    <cache-path name="cache" path="." />
+</paths>

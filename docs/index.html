@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爽阅 · 多源聚合小说阅读器</title>
+<meta name="description" content="爽阅 — Flutter 双端小说阅读器：4 书源聚合、离线缓存、听书多声色、自动更新。Android + Windows。">
+<style>
+  :root{
+    --bg:#0f1115; --card:#181b22; --line:#262a33;
+    --fg:#e8eaf0; --dim:#9aa3b2; --accent:#5b8cff; --accent2:#7dd3a0;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f7f8fa; --card:#fff; --line:#e4e7ee; --fg:#1a1d24; --dim:#5c6575; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    background:var(--bg); color:var(--fg); line-height:1.7;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
+  header{padding:64px 0 40px;text-align:center}
+  .logo{font-size:44px;font-weight:700;letter-spacing:4px}
+  .logo em{font-style:normal;color:var(--accent)}
+  .tag{color:var(--dim);margin-top:10px;font-size:15px}
+  .badges{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .badge{
+    display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;
+    border:1px solid var(--line);color:var(--dim)
+  }
+  .badge b{color:var(--accent2);font-weight:600}
+  .cta{margin-top:28px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .btn{
+    display:inline-block;padding:12px 26px;border-radius:10px;text-decoration:none;
+    font-size:15px;font-weight:600;transition:opacity .15s
+  }
+  .btn:hover{opacity:.85}
+  .btn-p{background:var(--accent);color:#fff}
+  .btn-s{background:var(--card);color:var(--fg);border:1px solid var(--line)}
+  section{padding:36px 0}
+  h2{font-size:22px;margin-bottom:18px;display:flex;align-items:center;gap:10px}
+  h2::before{content:"";width:4px;height:20px;background:var(--accent);border-radius:2px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .card h3{font-size:16px;margin-bottom:8px;color:var(--accent)}
+  .card p{font-size:14px;color:var(--dim)}
+  .src-table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border-radius:12px;overflow:hidden}
+  .src-table th,.src-table td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  .src-table th{color:var(--dim);font-weight:600;font-size:13px}
+  .src-table tr:last-child td{border-bottom:none}
+  .ok{color:var(--accent2)}
+  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+  .dl a{
+    display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px;text-decoration:none;color:var(--fg);transition:border-color .15s
+  }
+  .dl a:hover{border-color:var(--accent)}
+  .dl .t{font-size:17px;font-weight:600}
+  .dl .d{font-size:13px;color:var(--dim);margin-top:6px}
+  .dl .u{font-size:12px;color:var(--accent);margin-top:10px;word-break:break-all}
+  footer{padding:40px 0 56px;border-top:1px solid var(--line);margin-top:20px;text-align:center}
+  footer p{font-size:13px;color:var(--dim)}
+  footer a{color:var(--accent);text-decoration:none}
+  code{background:var(--card);padding:2px 6px;border-radius:4px;font-size:13px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <div class="logo">爽<em>阅</em></div>
+  <div class="tag">Flutter 双端小说阅读器 · 多源聚合 · 离线缓存 · 听书多声色</div>
+  <div class="badges">
+    <span class="badge">Android</span>
+    <span class="badge">Windows</span>
+    <span class="badge">简体中文</span>
+    <span class="badge">开源免费</span>
+    <span class="badge">当前版本 <b>v1.0.0</b></span>
+  </div>
+  <div class="cta">
+    <a class="btn btn-p" href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">下载 Android APK</a>
+    <a class="btn btn-s" href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_windows_x64.zip">下载 Windows 版</a>
+  </div>
+</header>
+
+<section class="wrap">
+  <h2>功能亮点</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>多源聚合</h3>
+      <p>内置 4 个书源，单源或全源搜索，一处搜书全网找；支持换源续读，章节匹配当前进度。</p>
+    </div>
+    <div class="card">
+      <h3>阅读器</h3>
+      <p>左右翻页与上下滚动双模式，滚动模式读到章末自动续载；书签、进度条、字号行距、双主题。</p>
+    </div>
+    <div class="card">
+      <h3>听书 TTS</h3>
+      <p>系统语音合成逐段朗读、自动跨章、段落高亮跟随；语速 / 音调可调，多声色可选，内置「小智（温柔）」预设。</p>
+    </div>
+    <div class="card">
+      <h3>离线缓存</h3>
+      <p>读过的章节自动落盘，无网络时自动离线阅读；发现页列表与封面本地缓存，冷启动秒开。</p>
+    </div>
+    <div class="card">
+      <h3>自动更新</h3>
+      <p>启动静默检查 GitHub 新版本，弹窗公告即 Release 说明；安卓一键安装，Windows 自动替换重启。</p>
+    </div>
+    <div class="card">
+      <h3>书架与历史</h3>
+      <p>加入 / 移出书架、阅读进度与历史（可清空）、侧滑删除、长按进详情。</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>内置书源</h2>
+  <table class="src-table">
+    <tr><th>书源</th><th>首页</th><th>排行</th><th>书单</th><th>搜索</th></tr>
+    <tr><td>顶点小说</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
+    <tr><td>速读谷</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
+    <tr><td>黄金屋</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
+    <tr><td>52书库</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td></tr>
+  </table>
+</section>
+
+<section class="wrap">
+  <h2>下载</h2>
+  <div class="dl">
+    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">
+      <div class="t">Android APK</div>
+      <div class="d">arm64 · 启动自动检查更新，一键安装</div>
+      <div class="u">novel_reader_android.apk</div>
+    </a>
+    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_windows_x64.zip">
+      <div class="t">Windows x64</div>
+      <div class="d">解压即用 · 启动自动检查更新，自动替换重启</div>
+      <div class="u">novel_reader_windows_x64.zip</div>
+    </a>
+    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_source.zip">
+      <div class="t">源码</div>
+      <div class="d">Flutter 3.16+ · Android + Windows 双端单一代码库</div>
+      <div class="u">novel_reader_source.zip</div>
+    </a>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>技术说明</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>架构</h3>
+      <p>单一 Flutter 代码库覆盖 Android / Windows；书源为可扩展抽象基类，新增书源只需实现解析逻辑。</p>
+    </div>
+    <div class="card">
+      <h3>Windows 听书</h3>
+      <p>自研 SAPI5 插件（vendor 于仓库 <code>third_party/flutter_tts</code>）：经典 Desktop 音色 + OneCore 音色注册表枚举，规避 WinRT 引擎崩溃与低完整性静音问题。</p>
+    </div>
+    <div class="card">
+      <h3>Android 听书</h3>
+      <p>系统 TTS 引擎（Google / 厂商语音均可），多声色列表直接来自引擎；已在 Manifest 声明 TTS 包可见性，Android 11+ 正常发声。</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>仅用于个人学习与技术研究；内容版权归各站点所有，请勿商用。<br>
+  源码与 Release：<a href="https://github.com/leey1994/shuangyuebook">github.com/leey1994/shuangyuebook</a></p>
+</footer>
+
+</body>
+</html>
