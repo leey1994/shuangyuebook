@@ -2,6 +2,8 @@
 
 Flutter 打造的双端（Android / Windows）小说阅读器——一处搜书、全网找书，离线能读，还能听。
 
+静态主页：<https://leey1994.github.io/shuangyuebook/>
+
 ## 功能
 
 ### 多源聚合
