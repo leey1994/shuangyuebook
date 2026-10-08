@@ -174,12 +174,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: Text('邮箱：leey1994@163.com'),
               ),
               ListTile(
-                leading: const Icon(Icons.code),
-                title: const Text('GitHub'),
-                subtitle: const Text('https://github.com/leey1994'),
+                leading: const Icon(Icons.language),
+                title: const Text('静态主页'),
+                subtitle: const Text('https://leey1994.github.io/shuangyuebook/'),
                 trailing: const Icon(Icons.open_in_new, size: 18),
                 onTap: () => launchUrl(
-                    Uri.parse('https://github.com/leey1994'),
+                    Uri.parse('https://leey1994.github.io/shuangyuebook/'),
                     mode: LaunchMode.externalApplication),
               ),
               const SizedBox(height: 32),

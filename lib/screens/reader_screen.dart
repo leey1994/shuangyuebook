@@ -15,7 +15,6 @@ import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
 import '../theme.dart';
-import '../update_check.dart';
 import '../widgets.dart';
 
 /// 阅读器：左右翻页 / 上下滚动双模式，
@@ -79,12 +78,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // 听书（TTS）
   final FlutterTts _tts = FlutterTts();
-  List<Map<String, String>> _voiceList = []; // 系统音色（name/locale）
-  static const _kVoiceXiaoZhi = '__xiaozhi__'; // 小智（温柔）预设音色
-  static const _kVoiceZhTw = '__zhtw__'; // 台湾腔女声预设
-  static const _kVoiceEdgeHsiaoChen = '__edge_hsiaochen__'; // 在线·小臻
-  static const _kVoiceEdgeHsiaoYu = '__edge_hsiaoyu__'; // 在线·小瑜
-  static const _kVoiceInstallTw = '__install_tw__'; // 安装台湾语音包入口项
+  List<Map<String, String>> _voiceList = []; // 系统音色（name/locale，仅作在线失败时的垫音回退）
+  /// 在线音色表（Edge TTS）：prefs 值 → (显示名, 合成音色 id)。音色面板只列这些。
+  static const _edgeVoices = <String, (String, String)>{
+    '__edge_hsiaochen__': ('小臻（在线）', 'zh-TW-HsiaoChenNeural'),
+    '__edge_hsiaoyu__': ('小瑜（在线）', 'zh-TW-HsiaoYuNeural'),
+    '__edge_xiaoxiao__': ('晓晓·甜美女声（在线）', 'zh-CN-XiaoxiaoNeural'),
+    '__edge_yunxi__': ('云希·阳光青年（在线）', 'zh-CN-YunxiNeural'),
+    '__edge_yunjian__': ('云健·解说男声（在线）', 'zh-CN-YunjianNeural'),
+    '__edge_yunxia__': ('云夏·清亮少年（在线）', 'zh-CN-YunxiaNeural'),
+    '__edge_xiaoyi__': ('晓伊·活力女声（在线）', 'zh-CN-XiaoyiNeural'),
+    '__edge_yunyang__': ('云扬·新闻播报（在线）', 'zh-CN-YunyangNeural'),
+    '__edge_xiaobei__': ('晓北·东北味（在线）', 'zh-CN-liaoning-XiaobeiNeural'),
+    '__edge_xiaoni__': ('晓妮·陕西味（在线）', 'zh-CN-shaanxi-XiaoniNeural'),
+    '__edge_hiumaan__': ('晓曼·粤语女声（在线）', 'zh-HK-HiuMaanNeural'),
+    '__edge_yunjhe__': ('云哲·台湾男声（在线）', 'zh-TW-YunJheNeural'),
+  };
+  static const _kVoiceDefault = '__edge_hsiaochen__'; // 默认在线音色
   final AudioPlayer _edgePlayer = AudioPlayer(); // 在线音色播放器
   bool _edgeBroken = false; // 会话内合成失败过 → 本场回退系统 TTS
   Completer<void>? _utter; // 当前朗读完成信号（完成/取消/出错都会触发）
@@ -129,7 +139,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _edgePlayer.onPlayerComplete.listen((_) => _finishUtter());
     WidgetsBinding.instance.addObserver(this);
     _loadDetail();
-    _loadVoices(); // 预载系统音色清单（听书设置面板用）
+    _loadVoices(); // 预载系统音色清单（在线失败时的垫音回退用）
+    // 音色迁移：旧的系统/预设音色值 → 默认在线音色（面板只保留在线音色）
+    Future.microtask(() {
+      if (!_edgeVoices.containsKey(_prefs.ttsVoice)) {
+        _store.setTtsVoice(_kVoiceDefault);
+      }
+    });
   }
 
   Future<void> _loadVoices() async {
@@ -858,65 +874,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             Expanded(
               child: DropdownButton<String>(
                 isExpanded: true,
-                value: _prefs.ttsVoice == _kVoiceXiaoZhi ||
-                        _prefs.ttsVoice == _kVoiceZhTw ||
-                        _prefs.ttsVoice == _kVoiceEdgeHsiaoChen ||
-                        _prefs.ttsVoice == _kVoiceEdgeHsiaoYu ||
-                        _voiceList.any((v) => v['name'] == _prefs.ttsVoice)
+                value: _edgeVoices.containsKey(_prefs.ttsVoice)
                     ? _prefs.ttsVoice
-                    : null,
-                hint: Text('自动（中文）',
-                    style: TextStyle(fontSize: 12, color: c.dim)),
+                    : _kVoiceDefault,
                 items: [
-                  const DropdownMenuItem(
-                    value: _kVoiceXiaoZhi,
-                    child: Text('小智（温柔）',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                  const DropdownMenuItem(
-                    value: _kVoiceZhTw,
-                    child: Text('台湾腔女声',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                  const DropdownMenuItem(
-                    value: _kVoiceEdgeHsiaoChen,
-                    child: Text('台湾腔·小臻（在线）',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                  const DropdownMenuItem(
-                    value: _kVoiceEdgeHsiaoYu,
-                    child: Text('台湾腔·小瑜（在线）',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                  if (_voiceList.isNotEmpty && _findTwVoice() == null)
-                    const DropdownMenuItem(
-                      value: _kVoiceInstallTw,
-                      child: Text('未检测到台湾语音包 → 去安装',
-                          style: TextStyle(fontSize: 12, color: Colors.orange)),
-                    ),
-                  for (final v in _voiceList)
+                  for (final e in _edgeVoices.entries)
                     DropdownMenuItem(
-                      value: v['name'],
-                      child: Text(v['name'] ?? '',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: c.fg)),
+                      value: e.key,
+                      child: Text(
+                        e.value.$1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                 ],
                 onChanged: (n) async {
                   if (n == null) return;
-                  if (n == _kVoiceInstallTw) {
-                    await openSystemTtsSettings(); // 跳系统语音设置（不改当前音色）
-                    return;
-                  }
                   _store.setTtsVoice(n);
-                  if (n == _kVoiceXiaoZhi) {
-                    _store.setTtsPitch(0.85); // 温柔默认音调（可再手动调）
-                  }
-                  if (n == _kVoiceEdgeHsiaoChen || n == _kVoiceEdgeHsiaoYu) {
-                    await _maybeEdgeNotice(); // 首次选择：一次性联网说明
-                  }
+                  await _maybeEdgeNotice(); // 首次选择：一次性联网说明
                   setState(() {});
-                  await _initTts(); // 统一应用（含预设选音）
+                  await _initTts(); // 统一应用
                 },
               ),
             ),
@@ -982,35 +959,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     try {
       if (_voiceList.isEmpty) await _loadVoices();
       final saved = _prefs.ttsVoice;
-      // 1) 小智（温柔）预设：优先柔和女声
-      if (saved == _kVoiceXiaoZhi) {
-        final g = _pickGentleVoice();
-        if (g != null) await _tts.setVoice(g);
-        return;
-      }
-      // 1b) 台湾腔预设：zh-TW/繁体优先，女声优先，无则回退柔和中文女声
-      if (saved == _kVoiceZhTw) {
+      // 在线音色：系统 TTS 先垫好回退音色（zh-TW 优先），
+      // 合成失败时本会话直接用系统语音续读
+      if (_edgeVoices.containsKey(saved)) {
         final tw = _pickZhTwVoice();
         if (tw != null) await _tts.setVoice(tw);
         return;
       }
-      // 1c) 在线音色：系统 TTS 先垫好回退音色（zh-TW 优先），
-      //     合成失败时本会话直接用系统语音续读
-      if (saved == _kVoiceEdgeHsiaoChen || saved == _kVoiceEdgeHsiaoYu) {
-        final tw = _pickZhTwVoice();
-        if (tw != null) await _tts.setVoice(tw);
-        return;
-      }
-      // 2) 优先应用保存的音色（按名匹配）
-      if (saved.isNotEmpty) {
-        for (final v in _voiceList) {
-          if (v['name'] == saved) {
-            await _tts.setVoice(v);
-            return;
-          }
-        }
-      }
-      // 3) 回退：自动选中中文语音
+      // 回退：自动选中中文语音
       for (final v in _voiceList) {
         final s = v.values.join(' ').toLowerCase();
         if (s.contains('zh') || s.contains('chinese')) {
@@ -1062,13 +1018,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // ---- 在线音色（Edge TTS）----
 
   /// 当前是否选中在线音色。
-  bool get _edgeVoiceOn =>
-      _prefs.ttsVoice == _kVoiceEdgeHsiaoChen ||
-      _prefs.ttsVoice == _kVoiceEdgeHsiaoYu;
+  bool get _edgeVoiceOn => _edgeVoices.containsKey(_prefs.ttsVoice);
 
-  String _edgeVoiceId() => _prefs.ttsVoice == _kVoiceEdgeHsiaoYu
-      ? EdgeTts.voiceHsiaoYu
-      : EdgeTts.voiceHsiaoChen;
+  String _edgeVoiceId() =>
+      _edgeVoices[_prefs.ttsVoice]?.$2 ?? _edgeVoices[_kVoiceDefault]!.$2;
 
   /// 段落 → 本地缓存 mp3 路径（<缓存>/tts/<sha1(voice|text)>.mp3，命中直接复用）。
   Future<String> _edgeSynthFile(String text) async {

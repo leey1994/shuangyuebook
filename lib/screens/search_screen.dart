@@ -20,7 +20,6 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  String _filter = 'all'; // all | sourceId
   List<(NovelSource, Book)> _results = [];
   bool _loading = false;
   bool _searched = false;
@@ -52,9 +51,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (q.isEmpty) return;
     FocusScope.of(context).unfocus();
     AppStore.I.pushSearch(q);
-    final targets = _filter == 'all'
-        ? allSources
-        : allSources.where((s) => s.id == _filter).toList();
+    final targets = allSources;
     setState(() {
       _query = q;
       _loading = true;
@@ -123,36 +120,6 @@ class _SearchScreenState extends State<SearchScreen> {
         builder: (context, _) {
           return Column(
             children: [
-              SizedBox(
-                height: 52,
-                child: HScrollView(
-                  builder: (context, controller) => ListView(
-                    controller: controller,
-                    scrollDirection: Axis.horizontal,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: const Text('全部书源'),
-                          selected: _filter == 'all',
-                          onSelected: (_) => setState(() => _filter = 'all'),
-                        ),
-                      ),
-                      for (final s in allSources)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(s.name),
-                            selected: _filter == s.id,
-                            onSelected: (_) => setState(() => _filter = s.id),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
               if (_loading)
                 LinearProgressIndicator(
                   value: _total == 0 ? null : _done / _total,

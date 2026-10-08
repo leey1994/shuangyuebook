@@ -71,6 +71,25 @@ class Shuku52Source extends NovelSource {
         }(),
       ));
     }
+    // 首页无 excerpt 卡片：书链在 div.relates 列表（书名_作者 文本链）
+    if (out.isEmpty) {
+      for (final a in doc.querySelectorAll('div.relates a[href]')) {
+        final href = a.attributes['href'] ?? '';
+        if (!_isBookHref(href)) continue;
+        final t = cleanText(a.text);
+        if (!t.contains('_')) continue;
+        final url = absUrl(pageUrl, href);
+        if (!seen.add(url)) continue;
+        final parsed = splitTitleAuthor(t);
+        out.add(Book(
+          sourceId: 'shuku52',
+          id: url,
+          url: url,
+          title: parsed.title,
+          author: parsed.author,
+        ));
+      }
+    }
     return out;
   }
 
@@ -261,7 +280,7 @@ class Shuku52Source extends NovelSource {
 
   @override
   List<String> contentOf(Document doc, String pageUrl) =>
-      parasFrom(doc, 'div#text p, #text p');
+      parasFrom(doc, 'article.article-content p, div#text p, #text p');
 
   /// 本站「下一页」就是目录里的下一章（每“页”即一章），跟随会把后面几十章
   /// 拼进当前章（实测一次抓 18 万字）——禁止跟随，一章 = 一页。

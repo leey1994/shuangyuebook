@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 
@@ -55,10 +57,14 @@ String? findLinkByText(Document doc, String label, {bool contains = false}) {
 
 /// 通用分页「下一页」链接（列表页 / 章内分页 / 目录翻页通用）。
 /// 只认文字为「下一页」的链接：各站的「下一章」文字不同，天然区分。
-String? nextPageUrl(Document doc, String currentUrl) {
+/// [contains] 为 true 时放宽为文案包含（「下一页 ›」「下一页 »」等箭头变体）。
+String? nextPageUrl(Document doc, String currentUrl, {bool contains = false}) {
   for (final a in doc.querySelectorAll('a')) {
     final t = cleanText(a.text);
-    if (t != '下一页' && t != '下页') continue;
+    final hit = contains
+        ? (t.contains('下一页') || t.contains('下页'))
+        : (t == '下一页' || t == '下页');
+    if (!hit) continue;
     final href = a.attributes['href'];
     if (href == null || href.isEmpty || href.startsWith('javascript')) continue;
     final next = absUrl(currentUrl, href);
@@ -137,4 +143,56 @@ List<String> parasFromDocWrite(String js) {
     if (author.isEmpty) author = null;
   }
   return (title: s, author: author);
+}
+
+/// 容器内段落提取：`<p>` 优先；没有 `<p>` 时按 `<br>`/`</p|div|li|h…>` 切行
+///（篱笆好文学卡片段落、素书卷详情简介等无 `<p>` 的块级文本）。
+List<String> parasInContainer(Element? box) {
+  if (box == null) return [];
+  final ps = <String>[];
+  for (final e in box.querySelectorAll('p')) {
+    final t = cleanText(e.text);
+    if (t.isNotEmpty) ps.add(t);
+  }
+  if (ps.isNotEmpty) return ps;
+  var s = box.innerHtml;
+  s = s.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+  s = s.replaceAll(
+      RegExp(r'</(?:p|div|li|h[1-6]|tr|dd|dt)>', caseSensitive: false), '\n');
+  final text = parseHtml(s).body?.text ?? '';
+  final out = <String>[];
+  for (final line in text.split('\n')) {
+    final t = line.replaceAll('\u3000', ' ').replaceAll('\xa0', ' ').trim();
+    if (t.isNotEmpty) out.add(t);
+  }
+  return out;
+}
+
+/// base64 写入型正文（神文/智能书库 CMS）：扫 `xx.yy('BASE64')` 写入调用，
+/// 解码后仅保留含中文的块（滤掉计时器/统计等 JS 噪声）。
+final _b64WriteRe = RegExp(
+    r"[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\('([A-Za-z0-9+/]{40,}={0,2})'\)");
+final _hanRe = RegExp(r'[\u4e00-\u9fa5]');
+
+List<String> parasFromB64Writes(String html) {
+  final out = <String>[];
+  for (final m in _b64WriteRe.allMatches(html)) {
+    var raw = m.group(1)!;
+    while (raw.length % 4 != 0) {
+      raw = '$raw=';
+    }
+    List<int> bytes;
+    try {
+      bytes = base64.decode(raw);
+    } catch (_) {
+      continue;
+    }
+    final s = utf8.decode(bytes, allowMalformed: true);
+    if (!_hanRe.hasMatch(s)) continue;
+    for (final line in s.split('\n')) {
+      final t = line.replaceAll('\u3000', ' ').replaceAll('\xa0', ' ').trim();
+      if (t.isNotEmpty && !t.contains('http')) out.add(t);
+    }
+  }
+  return out;
 }

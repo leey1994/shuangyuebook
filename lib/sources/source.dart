@@ -47,7 +47,7 @@ abstract class NovelSource {
         final sr = await getOk(su, referer: url);
         out.addAll(parasFromDocWrite(sr.body));
       }
-      final next = nextPageUrl(doc, url);
+      final next = pageNextUrl(doc, url);
       url = (next != null && allowFollow(url, next)) ? next : null;
     }
     return cleanParas(out);
@@ -74,6 +74,10 @@ abstract class NovelSource {
 
   /// 正文段落提取（子类实现）。
   List<String> contentOf(Document doc, String pageUrl);
+
+  /// 章内「下一页」判定；子类可覆盖（如匹配「下一页 ›」或加文件名茎护栏）。
+  String? pageNextUrl(Document doc, String currentUrl) =>
+      nextPageUrl(doc, currentUrl);
 
   /// 是否允许跟随「下一页」链接（子类可过滤误判为翻页的下一章链接）。
   bool allowFollow(String currentUrl, String nextUrl) => true;

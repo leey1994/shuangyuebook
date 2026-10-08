@@ -70,17 +70,56 @@ class Net {
     if (jar.isNotEmpty) _cookies[host] = jar.toString().trim();
   }
 
-  /// GET；正文若为黄金屋「浏览器检查」挑战页，带 `__sc_clearance=1` 重试。
+  /// JS 种 cookie 挑战页（素书卷/神文/智能书库同 CMS：200 + 短 body +
+  /// `document.cookie = "..."` 后 `location.reload`）。
+  static bool _isJsChallenge(Resp r) =>
+      r.status == 200 &&
+      r.body.length < 4000 &&
+      r.body.contains('document.cookie = "') &&
+      r.body.contains('window.location.reload');
+
+  static bool _needsRetry(Resp r) =>
+      r.body.contains('正在检查您的浏览器') || _isJsChallenge(r);
+
+  /// 把挑战页里的每个 `document.cookie = "k=v"` 种进 jar（同名覆盖）。
+  static void _absorbJsChallengeCookie(String url, String body) {
+    final host = Uri.parse(url).host;
+    for (final m
+        in RegExp(r'document\.cookie\s*=\s*"([^"]+)"').allMatches(body)) {
+      for (final kv in m.group(1)!.split(';')) {
+        final i = kv.indexOf('=');
+        if (i <= 0) continue;
+        final k = kv.substring(0, i).trim();
+        final v = kv.substring(i + 1).trim();
+        final parts = <String>[];
+        for (final seg in (_cookies[host] ?? '').split(';')) {
+          final s = seg.trim();
+          if (s.isEmpty) continue;
+          final eq = s.indexOf('=');
+          final name = eq > 0 ? s.substring(0, eq) : s;
+          if (name == k) continue;
+          parts.add(s);
+        }
+        parts.add('$k=$v');
+        _cookies[host] = parts.join('; ');
+      }
+    }
+  }
+
+  /// GET；浏览器检查/JS 种 cookie 挑战则解锁后重试（最多 4 轮，兼容多轮种罐）。
   static Future<Resp> get(String url, {String? referer}) async {
     var r = await _get(url, referer: referer);
     var guard = 0;
-    while (guard < 2 &&
-        r.status == 200 &&
-        r.body.contains('正在检查您的浏览器')) {
-      final host = Uri.parse(url).host;
-      final jar = _cookies[host] ?? '';
-      if (!jar.contains('__sc_clearance')) {
-        _cookies[host] = '$jar; __sc_clearance=1'.trim();
+    while (guard < 4 && _needsRetry(r)) {
+      if (_isJsChallenge(r)) {
+        _absorbJsChallengeCookie(url, r.body);
+      } else {
+        // 黄金屋「浏览器检查」：带 __sc_clearance=1 重试
+        final host = Uri.parse(url).host;
+        final jar = _cookies[host] ?? '';
+        if (!jar.contains('__sc_clearance')) {
+          _cookies[host] = '$jar; __sc_clearance=1'.trim();
+        }
       }
       r = await _get(url, referer: referer);
       guard++;
@@ -106,8 +145,23 @@ class Net {
     }
   }
 
-  /// POST 表单（yewa /api/search 等）。
+  /// POST 表单（yewa /api/search 等）；同样支持 JS 种 cookie 挑战多轮解锁。
   static Future<Resp> postForm(
+    String url,
+    Map<String, String> body, {
+    String? referer,
+  }) async {
+    var r = await _post(url, body, referer: referer);
+    var guard = 0;
+    while (guard < 4 && _isJsChallenge(r)) {
+      _absorbJsChallengeCookie(url, r.body);
+      r = await _post(url, body, referer: referer);
+      guard++;
+    }
+    return r;
+  }
+
+  static Future<Resp> _post(
     String url,
     Map<String, String> body, {
     String? referer,
