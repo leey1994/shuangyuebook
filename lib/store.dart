@@ -5,7 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data/shelf_sort.dart';
+import 'local/file_scan.dart';
 import 'models.dart';
+import 'sources/local_source.dart';
+import 'sources/registry.dart';
 import 'sources/source.dart';
 
 /// 翻页方式。
@@ -138,6 +142,9 @@ class AppStore extends ChangeNotifier {
         } catch (_) {}
       }
       searchHistory = sp.getStringList('searchHistory') ?? [];
+      _shelfSort = shelfSortModeFrom(sp.getString('shelfSort'));
+      _shelfAscending = sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
+      applyShelfSort();
     }
     try {
       _cacheDir = Directory(
@@ -189,7 +196,66 @@ class AppStore extends ChangeNotifier {
     if (notify) notifyListeners();
   }
 
+  // ---------- 书架排序 ----------
+
+  ShelfSortMode _shelfSort = ShelfSortMode.recentRead;
+  bool _shelfAscending = false;
+
+  ShelfSortMode get shelfSort => _shelfSort;
+  bool get shelfAscending => _shelfAscending;
+
+  void setShelfSort(ShelfSortMode v) {
+    _shelfSort = v;
+    // 换排序方式时套用该方式的默认方向（书名升序、进度降序……）
+    _shelfAscending = v.defaultAscending;
+    _sp?.setString('shelfSort', v.name);
+    _sp?.setBool('shelfAscending', _shelfAscending);
+    notifyListeners();
+  }
+
+  void setShelfAscending(bool v) {
+    _shelfAscending = v;
+    _sp?.setBool('shelfAscending', v);
+    notifyListeners();
+  }
+
+  /// 按当前排序设置整理书架（就地排序，不重新读盘）。
+  void applyShelfSort() {
+    sortShelf(shelf, _shelfSort, ascending: _shelfAscending);
+    sortShelf(history, _shelfSort, ascending: _shelfAscending);
+  }
+
+  // ---------- 本地书 ----------
+  /// 导入一本本地书（TXT / EPUB）。
+  ///
+  /// 解析文件拿到书名 / 作者 / 封面 / 章节数后进书架。返回 false 表示
+  /// 解析失败或已在书架里 —— 调用方据此提示，不抛异常打断批量导入。
+  Future<bool> importLocalBook(String path) async {
+    if (inShelf(path)) return false;
+    try {
+      final data = await localSource.load(path);
+      if (data.chapters.isEmpty) return false;
+      final book = Book(
+        sourceId: LocalSource.sourceId,
+        id: path,
+        url: path,
+        title: data.title.isEmpty ? pathFileName(path) : data.title,
+        author: data.author.isEmpty ? null : data.author,
+        cover: data.coverPath.isEmpty ? null : data.coverPath,
+        intro: data.intro.isEmpty ? null : data.intro,
+      );
+      addToShelf(book, chapterCount: data.chapters.length);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 丢弃本地书的解析缓存（文件被改动后调用，下次阅读重新解析）。
+  void invalidateLocal([String? path]) => localSource.invalidate(path);
+
   // ---------- 阅读偏好 ----------
+
 
   void setFontSize(double v) {
     prefs.fontSize = v.clamp(12, 32).toDouble();

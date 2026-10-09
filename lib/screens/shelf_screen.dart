@@ -21,6 +21,8 @@ class ShelfScreen extends StatelessWidget {
         body: ListenableBuilder(
           listenable: AppStore.I,
           builder: (context, _) {
+            // 按设置里的排序方式就地整理（默认「最近阅读」即原顺序）
+            AppStore.I.applyShelfSort();
             return TabBarView(
               children: [
                 _EntryList(

@@ -3,6 +3,7 @@ import 'banshanren.dart';
 import 'huangjinwu.dart';
 import 'legado_source.dart';
 import 'libahao.dart';
+import 'local_source.dart';
 import 'minyuan.dart';
 import 'quanben.dart';
 import 'shenwen.dart';
@@ -30,6 +31,10 @@ final List<NovelSource> builtinSources = <NovelSource>[
   QuanbenSource(),
 ];
 
+/// 本地书源（TXT / EPUB）。放在固化源之后、导入源之前 ——
+/// 它不参与搜索，只是让本地书能走同一条阅读 / 缓存 / 书签通路。
+final LocalSource localSource = LocalSource();
+
 /// 导入的「阅读 3.0」书源适配器（由 main.dart 在加载 SourceStore 后填充）。
 final List<LegadoSource> _imported = <LegadoSource>[];
 
@@ -48,12 +53,14 @@ void syncImportedSources(List<BookSource> all, {bool Function(BookSource)? filte
 /// 当前生效的导入书源。
 List<LegadoSource> get importedSources => List.unmodifiable(_imported);
 
-/// 全部可用书源：固化书源 + 已启用的导入书源。
+/// 全部可用书源：固化书源 + 本地书 + 已启用的导入书源。
 ///
 /// 固化书源排在前面 —— 搜索结果里可信度更高，也让「换源」默认先试稳的。
+/// 本地书源不参与搜索（[LocalSource.search] 恒空），排在哪都不影响结果。
 List<NovelSource> get allSources => <NovelSource>[
       ...builtinSources,
       ..._imported,
+      localSource,
     ];
 
 /// 按 id 找书源（id 对 Legado 源即 bookSourceUrl）。

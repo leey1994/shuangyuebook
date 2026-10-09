@@ -1,9 +1,15 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/shelf_sort.dart';
+import '../sources/registry.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../ui/source/source_manager_page.dart';
 import '../update_check.dart';
+import 'bookmarks_page.dart';
+import 'local_import_page.dart';
+import 'stats_page.dart';
 
 /// 设置：阅读偏好、缓存管理、关于。
 class SettingsScreen extends StatefulWidget {
@@ -44,6 +50,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
   }
 
+  /// 书架排序方式 + 升降序选择弹层。
+  Future<void> _pickSort(BuildContext context) async {
+    final store = AppStore.I;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final m in ShelfSortMode.values)
+              ListTile(
+                title: Text(m.label),
+                trailing: store.shelfSort == m
+                    ? Icon(Icons.check, color: Theme.of(ctx).colorScheme.primary)
+                    : null,
+                onTap: () {
+                  store.setShelfSort(m);
+                  Navigator.of(ctx).pop();
+                },
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(store.shelfAscending
+                  ? Icons.arrow_upward
+                  : Icons.arrow_downward),
+              title: Text(store.shelfAscending ? '当前：正序' : '当前：倒序'),
+              onTap: () {
+                store.setShelfAscending(!store.shelfAscending);
+                Navigator.of(ctx).pop();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStore.I;
@@ -55,12 +98,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
           final p = store.prefs;
           return ListView(
             children: [
+              const _SectionHeader('书源'),
+              ListTile(
+                leading: const Icon(Icons.library_books_outlined),
+                title: const Text('书源管理'),
+                subtitle: Text(
+                    '导入 / 停用 / 导出「阅读 3.0」书源。当前启用 ${allSources.length - 1} 个，其中 ${builtinSources.length} 个为内置固化源。'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => SourceManagerPage.show(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open_outlined),
+                title: const Text('导入本地书'),
+                subtitle: const Text('从手机 / 电脑目录导入 TXT、EPUB，支持多选与批量扫描'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => showLocalImport(context),
+              ),
+              const Divider(),
               const _SectionHeader('阅读'),
+              ListTile(
+                title: const Text('翻页方式'),
+                subtitle: Text('${p.pageMode.label} · ${p.pageMode.hint}'),
+                trailing: DropdownButton<PageMode>(
+                  value: p.pageMode,
+                  underline: const SizedBox.shrink(),
+                  items: [
+                    for (final m in PageMode.values)
+                      DropdownMenuItem(
+                          value: m, child: Text(m.label, style: const TextStyle(fontSize: 13))),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) store.setPageMode(v);
+                  },
+                ),
+              ),
+              ListTile(
+                title: const Text('阅读背景'),
+                subtitle: Text(readerBgOf(p.bgIndex, p.theme).name),
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    for (var i = 0; i < kReaderBgs.length; i++)
+                      GestureDetector(
+                        onTap: () => store.setBgIndex(i),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          margin: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: kReaderBgs[i].bg,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: p.bgIndex == i
+                                  ? Theme.of(context).colorScheme.primary
+                                  : const Color(0x33888888),
+                              width: p.bgIndex == i ? 2 : 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
               SwitchListTile(
-                title: const Text('翻页模式'),
-                subtitle: Text(p.paginate ? '左右翻页（点两侧翻页，中间呼出菜单）' : '上下滚动'),
-                value: p.paginate,
-                onChanged: store.setPaginate,
+                title: const Text('页眉'),
+                subtitle: const Text('阅读时顶部显示章节名'),
+                value: p.showHeader,
+                onChanged: store.setShowHeader,
+              ),
+              SwitchListTile(
+                title: const Text('页脚'),
+                subtitle: const Text('阅读时底部显示时间、页码与电量'),
+                value: p.showFooter,
+                onChanged: store.setShowFooter,
               ),
               ListTile(
                 title: Text('字号（${p.fontSize.round()}）'),
@@ -94,6 +204,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : AppThemes.white},
                   onSelectionChanged: (s) => store.setTheme(s.first),
                 ),
+              ),
+              const Divider(),
+              const _SectionHeader('书架与记录'),
+              ListTile(
+                leading: const Icon(Icons.sort),
+                title: const Text('书架排序'),
+                subtitle: Text(
+                    '${store.shelfSort.label} · '
+                    '${store.shelfAscending ? '正序' : '倒序'}'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => _pickSort(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.bar_chart_outlined),
+                title: const Text('阅读记录'),
+                subtitle: const Text('累计时长、连续天数、最近 7 天'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const StatsPage())),
+              ),
+              ListTile(
+                leading: const Icon(Icons.bookmarks_outlined),
+                title: const Text('全部书签'),
+                subtitle: const Text('跨书查看书签并跳回原文'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const BookmarksPage())),
               ),
               const Divider(),
               const _SectionHeader('离线缓存'),
