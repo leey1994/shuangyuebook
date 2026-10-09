@@ -1,4 +1,4 @@
-# 爽看 app icon generator — draws the mark and emits all required sizes.
+﻿# 爽看 app icon generator — draws the mark and emits all required sizes.
 # Run: powershell -File assets/icon/generate_icon.ps1
 # ponytail: System.Drawing one-shot script instead of an icon-design dependency.
 Add-Type -AssemblyName System.Drawing
@@ -34,42 +34,23 @@ function New-IconBitmap([int]$size, [bool]$foregroundOnly) {
         $g.Clear([System.Drawing.Color]::Transparent)
     }
 
-    # mark: open book (two white pages) + rising spark (reading progress)
-    $white = [System.Drawing.Brushes]::White
-    $cx = $s * 0.50; $cy = $s * 0.54
-    $w = $s * 0.30   # half width of book
-    $h = $s * 0.20   # book half height
-
-    $pf = [System.Drawing.PointF]
-    # left page
-    $lp = [System.Drawing.PointF[]]@(
-        $pf::new($cx - $w, $cy - $h * 0.75),
-        $pf::new($cx - $s * 0.015, $cy - $h * 0.45),
-        $pf::new($cx - $s * 0.015, $cy + $h),
-        $pf::new($cx - $w, $cy + $h * 0.72)
-    )
-    # right page (mirror)
-    $rp = [System.Drawing.PointF[]]@(
-        $pf::new($cx + $w, $cy - $h * 0.75),
-        $pf::new($cx + $s * 0.015, $cy - $h * 0.45),
-        $pf::new($cx + $s * 0.015, $cy + $h),
-        $pf::new($cx + $w, $cy + $h * 0.72)
-    )
-    $g.FillPolygon($white, $lp)
-    $g.FillPolygon($white, $rp)
-
-    # spine shadow (slight gap between pages)
-    $spine = New-Object System.Drawing.Pen(([System.Drawing.Color]::FromArgb(70, 0, 0, 0)), ([float]($s * 0.02)))
-    $g.DrawLine($spine, $cx, $cy - $h * 0.5, $cx, $cy + $h * 0.95)
-
-    # spark: three ascending dots above the book (爽看: quick, refreshing)
+    # mark: 「爽阅」 brand characters (white bold, centered) + soft shadow + gold bar
+    $ff = New-Object System.Drawing.FontFamily('Microsoft YaHei')
+    $font = New-Object System.Drawing.Font($ff, [float]($s * 0.37), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $fmt = New-Object System.Drawing.StringFormat
+    $fmt.Alignment = [System.Drawing.StringAlignment]::Center
+    $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $layout = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
+    $shadow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(90, 0, 0, 0))
+    $soff = [float]($s * 0.022)
+    $shadowRect = New-Object System.Drawing.RectangleF(0, $soff, $s, $s)
+    $g.DrawString([string]'爽阅', $font, $shadow, $shadowRect, $fmt)
+    $g.DrawString([string]'爽阅', $font, [System.Drawing.Brushes]::White, $layout, $fmt)
+    # gold underline accent (keeps the old spark color as brand thread)
     $accent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 214, 90))
-    foreach ($t in @(0, 1, 2)) {
-        $dx = $cx + ($t - 1) * $s * 0.11
-        $dy = $cy - $s * 0.26 + (2 - $t) * $s * 0.045
-        $dr = $s * (0.026 + 0.010 * (2 - $t))
-        $g.FillEllipse($accent, $dx - $dr, $dy - $dr, $dr * 2, $dr * 2)
-    }
+    $barW = $s * 0.34; $barH = [float]($s * 0.028)
+    $g.FillRectangle($accent, ($s - $barW) / 2, $s * 0.725, $barW, $barH)
+    $font.Dispose(); $ff.Dispose()
 
     $g.Dispose()
     return $bmp
