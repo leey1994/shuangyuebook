@@ -2,10 +2,10 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
+import 'net.dart';
 import 'sources/registry.dart';
 import 'sources/source.dart';
 
@@ -80,7 +80,7 @@ class _CoverImageState extends State<CoverImage> {
       final f = File('${_dir!.path}/${_name(url)}');
       if (await f.exists()) return f;
       final r =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+          await Net.client.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
       if (r.statusCode != 200 || r.bodyBytes.length < 500) return null;
       await f.writeAsBytes(r.bodyBytes);
       return f;

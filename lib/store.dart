@@ -104,12 +104,29 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  void _save({bool notify = true}) {
-    _sp?.setString('shelf', jsonEncode(shelf.map((e) => e.toJson()).toList()));
-    _sp?.setString(
-        'history', jsonEncode(history.map((e) => e.toJson()).toList()));
-    _sp?.setString('bookmarks',
-        jsonEncode(bookmarks.map((k, v) => MapEntry(k, v.map((b) => b.toJson()).toList()))));
+  void _save({
+    bool notify = true,
+    bool shelf = true,
+    bool history = true,
+    bool bookmarks = true,
+  }) {
+    // 按需编码：只写本次实际改动的键，避免滚动进度保存等高频路径
+    // 每次都 jsonEncode + 写全部三份数据。
+    // （同名参数遮蔽同名字段，静态方法体里通过闭包外的 getter 取实际列表）
+    if (shelf) {
+      _sp?.setString(
+          'shelf', jsonEncode(this.shelf.map((e) => e.toJson()).toList()));
+    }
+    if (history) {
+      _sp?.setString(
+          'history', jsonEncode(this.history.map((e) => e.toJson()).toList()));
+    }
+    if (bookmarks) {
+      _sp?.setString(
+          'bookmarks',
+          jsonEncode(this.bookmarks
+              .map((k, v) => MapEntry(k, v.map((b) => b.toJson()).toList()))));
+    }
     if (notify) notifyListeners();
   }
 
@@ -198,12 +215,12 @@ class AppStore extends ChangeNotifier {
     final e = ShelfEntry(book: b);
     if (chapterCount > 0) e.chapterCount = chapterCount;
     shelf.insert(0, e);
-    _save();
+    _save(history: false, bookmarks: false);
   }
 
   void removeFromShelf(String bookUrl) {
     shelf.removeWhere((e) => e.book.url == bookUrl);
-    _save();
+    _save(history: false, bookmarks: false);
   }
 
   /// 记录已知总章节数（打开详情/目录翻页后调用，只增不减，防分页目录写入半截值）。
@@ -218,7 +235,7 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    if (changed) _save();
+    if (changed) _save(bookmarks: false);
   }
 
   /// 更新阅读进度（同时写书架与历史）。
@@ -260,17 +277,17 @@ class AppStore extends ChangeNotifier {
       shelf.insert(0, h);
     }
     if (history.length > 100) history.removeRange(100, history.length);
-    _save(notify: !silent);
+    _save(notify: !silent, bookmarks: false);
   }
 
   void clearHistory() {
     history.clear();
-    _save();
+    _save(shelf: false, bookmarks: false);
   }
 
   void removeFromHistory(String bookUrl) {
     history.removeWhere((e) => e.book.url == bookUrl);
-    _save();
+    _save(shelf: false, bookmarks: false);
   }
 
   // ---------- 搜索历史 ----------
@@ -301,12 +318,12 @@ class AppStore extends ChangeNotifier {
   void addBookmark(String bookUrl, Bookmark b) {
     final list = bookmarks.putIfAbsent(bookUrl, () => []);
     list.insert(0, b);
-    _save();
+    _save(shelf: false, history: false);
   }
 
   void removeBookmark(String bookUrl, int index) {
     bookmarks[bookUrl]?.removeAt(index);
-    _save();
+    _save(shelf: false, history: false);
   }
 
   // ---------- 章节离线缓存 ----------
@@ -397,8 +414,16 @@ class AppStore extends ChangeNotifier {
     final j = await _loadBookJson(detail.book.url);
     final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
     final total = detail.chapters.length;
+    // ponytail: 目录/标题不变，循环外算一次；落盘每 5 章批量一次
+    //（原每章整本 jsonEncode+flush，千章书 O(n²) 写放大），与 prefetchNext 一致。
+    j['chapters'] = detail.chapters.map((c) => c.toJson()).toList();
+    j['title'] = detail.book.title;
     for (var i = 0; i < total; i++) {
-      if (cancelled?.call() ?? false) return false;
+      if (cancelled?.call() ?? false) {
+        j['texts'] = texts;
+        await _saveBookJson(detail.book.url, j); // 取消时已下章节照常落盘
+        return false;
+      }
       final ch = detail.chapters[i];
       if (texts[ch.url] is List && (texts[ch.url] as List).isNotEmpty) {
         onProgress?.call(i + 1, total);
@@ -410,12 +435,14 @@ class AppStore extends ChangeNotifier {
       } catch (_) {
         // 单章失败不中断整本下载
       }
-      j['texts'] = texts;
-      j['chapters'] = detail.chapters.map((c) => c.toJson()).toList();
-      j['title'] = detail.book.title;
-      await _saveBookJson(detail.book.url, j);
+      if (i % 5 == 4) {
+        j['texts'] = texts;
+        await _saveBookJson(detail.book.url, j);
+      }
       onProgress?.call(i + 1, total);
     }
+    j['texts'] = texts;
+    await _saveBookJson(detail.book.url, j);
     return true;
   }
 

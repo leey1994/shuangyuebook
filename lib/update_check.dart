@@ -15,18 +15,6 @@ const String _repo = 'leey1994/shuangyuebook';
 const MethodChannel _installChannel =
     MethodChannel('dev.reader.novel_reader/update');
 
-/// 打开系统 TTS / 语音设置（安装台湾语音包引导，方案 B）。
-/// Windows：ms-settings:speech；Android：系统「文字转语音」设置页。失败静默。
-Future<void> openSystemTtsSettings() async {
-  try {
-    if (Platform.isWindows) {
-      await Process.run('cmd', ['/c', 'start', '', 'ms-settings:speech']);
-    } else if (Platform.isAndroid) {
-      await _installChannel.invokeMethod('openTtsSettings');
-    }
-  } catch (_) {}
-}
-
 /// 版本号比较：a > b → 1，相等 → 0，a < b → -1。
 /// 去掉前导 v/V 与 +构建号后按 '.' 分段做数值比较（0.1.10 > 0.1.9）。
 int compareVersion(String a, String b) {

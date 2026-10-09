@@ -27,6 +27,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _query = '';
   int _done = 0; // 已返回/失败的书源数（进度展示）
   int _total = 0;
+  int _gen = 0; // 搜索代际：换查询后作废上一轮在途结果，防止旧结果混入/进度错乱
 
   @override
   void initState() {
@@ -52,6 +53,7 @@ class _SearchScreenState extends State<SearchScreen> {
     FocusScope.of(context).unfocus();
     AppStore.I.pushSearch(q);
     final targets = allSources;
+    final gen = ++_gen;
     setState(() {
       _query = q;
       _loading = true;
@@ -70,15 +72,15 @@ class _SearchScreenState extends State<SearchScreen> {
           FeedCache.key(['search', s.id, q]),
           () => s.search(q),
         );
-        if (!mounted) return;
+        if (!mounted || gen != _gen) return;
         setState(() {
           _results = [..._results, for (final b in r) (s, b)];
         });
       } catch (e) {
-        err ??= e;
+        if (gen == _gen) err ??= e;
       } finally {
         remaining--;
-        if (mounted) {
+        if (mounted && gen == _gen) {
           setState(() {
             _done++;
             if (remaining == 0) {
@@ -89,7 +91,7 @@ class _SearchScreenState extends State<SearchScreen> {
         }
       }
     }));
-    if (!mounted) return;
+    if (!mounted || gen != _gen) return;
     if (_loading) setState(() => _loading = false);
   }
 

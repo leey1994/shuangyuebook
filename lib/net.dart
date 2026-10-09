@@ -21,6 +21,13 @@ class Net {
   /// host -> "k=v; k2=v2"
   static final Map<String, String> _cookies = {};
 
+  /// 共享 Client：keep-alive 连接复用（11 源并行搜索/聚合发现页大量同域请求，
+  /// 每请求新建 Client 会重复 TCP+TLS 握手）。进程级单例，不 close。
+  static final http.Client _client = http.Client();
+
+  /// 供站外零散 GET（封面图等）复用同一连接池。
+  static http.Client get client => _client;
+
   static bool hasCookiesFor(String url) {
     final host = Uri.parse(url).host;
     return (_cookies[host] ?? '').isNotEmpty;
@@ -128,21 +135,16 @@ class Net {
   }
 
   static Future<Resp> _get(String url, {String? referer}) async {
-    final client = http.Client();
-    try {
-      final r = await client
-          .get(Uri.parse(url), headers: _headers(url, referer: referer))
-          .timeout(_timeout);
-      _absorbCookies(url, r);
-      var body = utf8.decode(r.bodyBytes, allowMalformed: true);
-      // 个别页面声明 gbk/GB2312 时兜底（四站均 UTF-8，此为容错）
-      if (body.contains('charset=gb') || body.contains('charset=GB')) {
-        body = gbkFallback(r.bodyBytes);
-      }
-      return Resp(r.statusCode, body, url, r.headers.containsKey('set-cookie'));
-    } finally {
-      client.close();
+    final r = await _client
+        .get(Uri.parse(url), headers: _headers(url, referer: referer))
+        .timeout(_timeout);
+    _absorbCookies(url, r);
+    var body = utf8.decode(r.bodyBytes, allowMalformed: true);
+    // 个别页面声明 gbk/GB2312 时兜底（四站均 UTF-8，此为容错）
+    if (body.contains('charset=gb') || body.contains('charset=GB')) {
+      body = gbkFallback(r.bodyBytes);
     }
+    return Resp(r.statusCode, body, url, r.headers.containsKey('set-cookie'));
   }
 
   /// POST 表单（yewa /api/search 等）；同样支持 JS 种 cookie 挑战多轮解锁。
@@ -166,27 +168,22 @@ class Net {
     Map<String, String> body, {
     String? referer,
   }) async {
-    final client = http.Client();
-    try {
-      final r = await client
-          .post(
-            Uri.parse(url),
-            headers: _headers(url, referer: referer)
-              ..['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
-              ..['X-Requested-With'] = 'XMLHttpRequest',
-            body: body,
-          )
-          .timeout(_timeout);
-      _absorbCookies(url, r);
-      return Resp(
-        r.statusCode,
-        utf8.decode(r.bodyBytes, allowMalformed: true),
-        url,
-        r.headers.containsKey('set-cookie'),
-      );
-    } finally {
-      client.close();
-    }
+    final r = await _client
+        .post(
+          Uri.parse(url),
+          headers: _headers(url, referer: referer)
+            ..['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
+            ..['X-Requested-With'] = 'XMLHttpRequest',
+          body: body,
+        )
+        .timeout(_timeout);
+    _absorbCookies(url, r);
+    return Resp(
+      r.statusCode,
+      utf8.decode(r.bodyBytes, allowMalformed: true),
+      url,
+      r.headers.containsKey('set-cookie'),
+    );
   }
 
   /// 极简 GBK 容错：按字节高位猜测。仅在非 UTF-8 声明时使用。
