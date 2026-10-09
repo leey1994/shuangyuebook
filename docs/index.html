@@ -4,77 +4,167 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>爽阅 · 多源聚合小说阅读器</title>
-<meta name="description" content="爽阅 — Flutter 双端小说阅读器：11 书源聚合、离线缓存、12 款在线音色听书、实时公告、自动更新。Android + Windows。">
+<meta name="description" content="爽阅 — Flutter 双端小说阅读器：内置固化书源 + 可导入书源引擎、TXT/EPUB 本地书、四种翻页、离线缓存、在线音色听书、每日书源体检。Android + Windows。">
+<meta property="og:title" content="爽阅 · 多源聚合小说阅读器">
+<meta property="og:description" content="内置固化书源 + 可导入书源引擎，TXT/EPUB 本地书，四种翻页，Android + Windows 双端。">
 <style>
   :root{
-    --bg:#0f1115; --card:#181b22; --line:#262a33;
-    --fg:#e8eaf0; --dim:#9aa3b2; --accent:#5b8cff; --accent2:#7dd3a0;
+    --bg:#0b0d12; --bg2:#0f1219; --card:#151922; --card2:#1a1f2a;
+    --line:#252b38; --line2:#2f3746;
+    --fg:#e9ecf3; --dim:#98a2b3; --faint:#6b7688;
+    --accent:#5b8cff; --accent-soft:rgba(91,140,255,.14);
+    --ok:#5fd3a0; --ok-soft:rgba(95,211,160,.14);
+    --warn:#f0b45f;
+    --radius:16px;
+    --shadow:0 1px 2px rgba(0,0,0,.28), 0 8px 28px rgba(0,0,0,.28);
   }
   @media (prefers-color-scheme: light){
-    :root{ --bg:#f7f8fa; --card:#fff; --line:#e4e7ee; --fg:#1a1d24; --dim:#5c6575; }
+    :root{
+      --bg:#f6f7f9; --bg2:#eef0f4; --card:#fff; --card2:#fafbfc;
+      --line:#e3e6ec; --line2:#d5dae3;
+      --fg:#161a21; --dim:#5b6474; --faint:#8b94a4;
+      --accent:#2f6bdc; --accent-soft:rgba(47,107,220,.10);
+      --ok:#1f9d6b; --ok-soft:rgba(31,157,107,.10);
+      --warn:#b47518;
+      --shadow:0 1px 2px rgba(16,24,40,.05), 0 8px 24px rgba(16,24,40,.07);
+    }
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   body{
-    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
-    background:var(--bg); color:var(--fg); line-height:1.7;
+    font-family:"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--fg); line-height:1.75;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   }
-  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
-  header{padding:64px 0 40px;text-align:center}
-  .logo{font-size:44px;font-weight:700;letter-spacing:4px}
-  .logo em{font-style:normal;color:var(--accent)}
-  .tag{color:var(--dim);margin-top:10px;font-size:15px}
-  .badges{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* ---------- hero ---------- */
+  header{position:relative;overflow:hidden;padding:88px 0 64px;text-align:center}
+  header::before{
+    content:"";position:absolute;inset:-40% 50% auto;transform:translateX(-50%);
+    width:1100px;height:620px;pointer-events:none;
+    background:
+      radial-gradient(closest-side, var(--accent-soft), transparent 70%),
+      radial-gradient(closest-side, var(--ok-soft), transparent 70%);
+    background-position:-30% 30%, 40% 10%;
+    background-size:70% 70%, 60% 60%;
+    background-repeat:no-repeat;
+    filter:blur(10px);
+  }
+  header>*{position:relative}
+  .logo{
+    font-size:52px;font-weight:800;letter-spacing:6px;line-height:1.1;
+    background:linear-gradient(120deg,var(--fg) 30%,var(--accent));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .tag{color:var(--dim);margin-top:14px;font-size:16px;max-width:640px;margin-inline:auto}
+  .badges{margin-top:22px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
   .badge{
-    display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;
-    border:1px solid var(--line);color:var(--dim)
+    display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:999px;
+    font-size:12.5px;border:1px solid var(--line);background:var(--card);color:var(--dim)
   }
-  .badge b{color:var(--accent2);font-weight:600}
-  .cta{margin-top:28px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .badge b{color:var(--fg);font-weight:600}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+  .cta{margin-top:32px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
   .btn{
-    display:inline-block;padding:12px 26px;border-radius:10px;text-decoration:none;
-    font-size:15px;font-weight:600;transition:opacity .15s
+    display:inline-flex;align-items:center;gap:8px;padding:13px 28px;border-radius:12px;
+    text-decoration:none;font-size:15px;font-weight:600;transition:transform .15s, box-shadow .15s, opacity .15s;
   }
-  .btn:hover{opacity:.85}
-  .btn-p{background:var(--accent);color:#fff}
-  .btn-s{background:var(--card);color:var(--fg);border:1px solid var(--line)}
-  section{padding:36px 0}
-  h2{font-size:22px;margin-bottom:18px;display:flex;align-items:center;gap:10px}
-  h2::before{content:"";width:4px;height:20px;background:var(--accent);border-radius:2px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
-  .card h3{font-size:16px;margin-bottom:8px;color:var(--accent)}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-p{background:var(--accent);color:#fff;box-shadow:0 6px 20px rgba(47,107,220,.28)}
+  .btn-s{background:var(--card);color:var(--fg);border:1px solid var(--line2)}
+  .btn-s:hover{border-color:var(--accent)}
+
+  /* ---------- sections ---------- */
+  section{padding:52px 0}
+  h2{font-size:24px;font-weight:700;margin-bottom:8px;letter-spacing:.3px}
+  .sub{color:var(--dim);font-size:14.5px;margin-bottom:26px}
+  .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  .head h2::before{
+    content:"";display:inline-block;width:4px;height:19px;background:var(--accent);
+    border-radius:2px;margin-right:12px;vertical-align:-2px
+  }
+
+  /* ---------- feature cards ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:16px}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;transition:border-color .18s, transform .18s, box-shadow .18s
+  }
+  .card:hover{border-color:var(--line2);transform:translateY(-3px);box-shadow:var(--shadow)}
+  .ico{
+    width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+    background:var(--accent-soft);color:var(--accent);font-size:19px;margin-bottom:14px
+  }
+  .card h3{font-size:16.5px;font-weight:700;margin-bottom:7px}
   .card p{font-size:14px;color:var(--dim)}
-  .src-table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border-radius:12px;overflow:hidden}
-  .src-table th,.src-table td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
-  .src-table th{color:var(--dim);font-weight:600;font-size:13px}
-  .src-table tr:last-child td{border-bottom:none}
-  .ok{color:var(--accent2)}
-  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
-  .dl a{
-    display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:20px;text-decoration:none;color:var(--fg);transition:border-color .15s
+  .card p b{color:var(--fg);font-weight:600}
+
+  /* ---------- feature highlight strip ---------- */
+  .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .strip>div{background:var(--card);padding:20px 16px;text-align:center}
+  .strip .n{font-size:26px;font-weight:800;color:var(--accent);line-height:1.2}
+  .strip .l{font-size:12.5px;color:var(--dim);margin-top:4px}
+
+  /* ---------- table ---------- */
+  .table-wrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:11px 16px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12.5px;background:var(--card2)}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--card2)}
+  .ok{color:var(--ok);font-weight:600}
+  .no{color:var(--faint)}
+  .note{
+    margin-top:14px;font-size:13px;color:var(--faint);
+    border-left:3px solid var(--line2);padding-left:12px
   }
-  .dl a:hover{border-color:var(--accent)}
-  .dl .t{font-size:17px;font-weight:600}
+
+  /* ---------- downloads ---------- */
+  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+  .dl a{
+    display:block;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;text-decoration:none;color:var(--fg);transition:border-color .18s, transform .18s
+  }
+  .dl a:hover{border-color:var(--accent);transform:translateY(-3px)}
+  .dl .t{font-size:17px;font-weight:700}
   .dl .d{font-size:13px;color:var(--dim);margin-top:6px}
-  .dl .u{font-size:12px;color:var(--accent);margin-top:10px;word-break:break-all}
-  footer{padding:40px 0 56px;border-top:1px solid var(--line);margin-top:20px;text-align:center}
-  footer p{font-size:13px;color:var(--dim)}
+  .dl .u{font-size:11.5px;color:var(--faint);margin-top:12px;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* ---------- release ---------- */
+  .rel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .rel h3{font-size:17px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:10px}
+  .tag-v{padding:2px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700}
+  .rel ul{list-style:none;margin-top:14px;display:grid;gap:9px}
+  .rel li{font-size:14px;color:var(--dim);padding-left:18px;position:relative}
+  .rel li::before{content:"";position:absolute;left:0;top:10px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .rel li b{color:var(--fg);font-weight:600}
+
+  footer{padding:44px 0 56px;border-top:1px solid var(--line);margin-top:24px;text-align:center}
+  footer p{font-size:13px;color:var(--faint)}
   footer a{color:var(--accent);text-decoration:none}
-  code{background:var(--card);padding:2px 6px;border-radius:4px;font-size:13px;border:1px solid var(--line)}
+  footer a:hover{text-decoration:underline}
+  code{background:var(--card2);padding:2px 6px;border-radius:5px;font-size:12.5px;border:1px solid var(--line)}
+
+  @media (max-width:640px){
+    header{padding:60px 0 44px}
+    .logo{font-size:40px;letter-spacing:4px}
+    section{padding:40px 0}
+    .wrap{padding:0 18px}
+  }
 </style>
 </head>
 <body>
 
 <header class="wrap">
-  <div class="logo">爽<em>阅</em></div>
-  <div class="tag">Flutter 双端小说阅读器 · 多源聚合 · 离线缓存 · 听书多声色</div>
+  <div class="logo">爽阅</div>
+  <div class="tag">内置固化书源 + 可导入书源引擎 · 本地书与在线书同一套阅读体验 · Android / Windows 双端</div>
   <div class="badges">
+    <span class="badge"><span class="dot"></span>当前版本 <b>v1.1.0</b></span>
     <span class="badge">Android</span>
     <span class="badge">Windows</span>
     <span class="badge">简体中文</span>
     <span class="badge">开源免费</span>
-    <span class="badge">当前版本 <b>v1.0.2</b></span>
   </div>
   <div class="cta">
     <a class="btn btn-p" href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">下载 Android APK</a>
@@ -83,59 +173,128 @@
 </header>
 
 <section class="wrap">
-  <h2>功能亮点</h2>
+  <div class="strip">
+    <div><div class="n">10</div><div class="l">内置固化书源</div></div>
+    <div><div class="n">∞</div><div class="l">可导入书源</div></div>
+    <div><div class="n">4</div><div class="l">翻页方式</div></div>
+    <div><div class="n">12</div><div class="l">在线音色</div></div>
+    <div><div class="n">6</div><div class="l">阅读背景</div></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="head"><h2>v1.1.0 新增</h2></div>
+  <div class="sub">这一版把「书源」从固定清单变成了可扩展的引擎。</div>
+  <div class="rel">
+    <h3>本次更新 <span class="tag-v">v1.1.0</span></h3>
+    <ul>
+      <li><b>书源引擎</b>：支持导入「阅读 3.0」格式书源，粘贴 / 文件 / 订阅链接三种导入方式，可批量启停与导出。</li>
+      <li><b>书源体检</b>：导入后自动批量检测，搜不出内容的书源直接移除并说明原因；此后每天首次启动自动体检一次。</li>
+      <li><b>本地书</b>：支持导入 TXT 与 EPUB，自动识别编码、分章、抽取封面与插图，可按目录批量扫描。</li>
+      <li><b>阅读器升级</b>：新增滑动 / 覆盖 / 淡入 / 滚动四种翻页方式，字距、页边距、首行缩进、正文字体可调，页眉页脚可分别开关。</li>
+      <li><b>阅读记录</b>：累计时长、连续天数、最近 7 天柱状图，以及当天的书源可用情况一览。</li>
+      <li><b>搜索与推荐实时出结果</b>：任一书源返回即刻上屏，进度钉在搜索框正下方，不必等最慢的那个。</li>
+      <li><b>书架增强</b>：网格 / 小图 / 列表三种视图，六种排序方式，无封面时按书名分配占位插画。</li>
+      <li><b>文件关联</b>：文件管理器里直接用爽阅打开 TXT / EPUB / 书源 JSON。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="head"><h2>功能亮点</h2></div>
+  <div class="sub">在线书与本地书共用同一套阅读、缓存、书签与统计。</div>
   <div class="grid">
     <div class="card">
-      <h3>多源聚合</h3>
-      <p>内置 11 个书源，全源并行搜索，一处搜书全网找；发现页推荐 / 排行 / 书单聚合展示。支持换源续读，章节匹配当前进度。</p>
+      <div class="ico">◈</div>
+      <h3>书源引擎</h3>
+      <p>内置 <b>10 个固化书源</b>，另可导入「阅读 3.0」格式书源扩展。两种书源在搜索、发现、书架、换源里完全同构，可以混用。</p>
     </div>
     <div class="card">
-      <h3>阅读器</h3>
-      <p>左右翻页与上下滚动双模式，滚动模式读到章末自动续载；书签、进度条、字号行距、双主题。</p>
+      <div class="ico">✓</div>
+      <h3>书源体检</h3>
+      <p>导入后自动批量验活，失效书源直接移除并说明原因；每天首次启动自动体检，结果汇总在阅读记录页。</p>
     </div>
     <div class="card">
-      <h3>听书 TTS</h3>
-      <p>逐段朗读、自动跨章、段落高亮跟随；语速 / 音调可调，12 款在线音色（小臻、小瑜、晓晓、云希等），在线合成 + 本地缓存，断网自动回退系统语音。</p>
+      <div class="ico">▤</div>
+      <h3>本地书</h3>
+      <p>导入 <b>TXT / EPUB</b>：自动识别 UTF-8、UTF-16、GBK 编码，自动分章，抽取封面与书内插图，支持按目录批量扫描。</p>
     </div>
     <div class="card">
+      <div class="ico">⇄</div>
+      <h3>四种翻页</h3>
+      <p><b>滑动 / 覆盖 / 淡入 / 滚动</b>。覆盖模式逐行对照「阅读 3.0」的手感实现，翻页吸附按固定速率收敛，不会拖尾。</p>
+    </div>
+    <div class="card">
+      <div class="ico">Aa</div>
+      <h3>排版与背景</h3>
+      <p>字号、行距、字距、左右边距、上下留白、首行缩进、正文字体可调；<b>6 种阅读背景</b>，页眉页脚分别开关。</p>
+    </div>
+    <div class="card">
+      <div class="ico">♪</div>
+      <h3>听书</h3>
+      <p>逐段朗读、自动跨章、段落高亮跟随。<b>12 款在线音色</b>在线合成并缓存到本地，断网自动回退系统语音。</p>
+    </div>
+    <div class="card">
+      <div class="ico">⇩</div>
       <h3>离线缓存</h3>
-      <p>读过的章节自动落盘，无网络时自动离线阅读；发现页列表与封面本地缓存，冷启动秒开。</p>
+      <p>读过的章节自动落盘，无网络时离线续读；支持整本下载、断点续传，可随时暂停不白干。</p>
     </div>
     <div class="card">
+      <div class="ico">◷</div>
+      <h3>阅读记录</h3>
+      <p>累计时长、连续阅读天数、读完本数、最近 7 天柱状图，以及当天的书源可用情况。</p>
+    </div>
+    <div class="card">
+      <div class="ico">↻</div>
       <h3>自动更新</h3>
-      <p>启动静默检查 GitHub 新版本，弹窗公告即 Release 说明；安卓一键安装，Windows 自动替换重启。</p>
+      <p>启动静默检查新版本，弹窗公告即 Release 说明；安卓一键安装，Windows 自动替换重启，多线路回退不怕网络抽风。</p>
     </div>
     <div class="card">
+      <div class="ico">▣</div>
+      <h3>书架与换源</h3>
+      <p>三种视图、六种排序、无封面自动分配插画；换源保留阅读进度，按章节标题自动对齐。</p>
+    </div>
+    <div class="card">
+      <div class="ico">☰</div>
       <h3>实时公告</h3>
-      <p>启动与运行中自动检查新公告，发现即全屏直达；公告内容经 GitHub Pages 分发，发布只需改一处文件并推送。</p>
+      <p>启动与运行中自动检查公告，发现即全屏直达；发布只需改一处文件并推送。</p>
     </div>
     <div class="card">
-      <h3>书架与历史</h3>
-      <p>加入 / 移出书架、阅读进度与历史（可清空）、侧滑删除、长按进详情。</p>
+      <div class="ico">▣</div>
+      <h3>双端自适应</h3>
+      <p>同一套代码覆盖 Android 与 Windows 桌面端，宽窄屏自动切换导航形态与文字缩放。</p>
     </div>
   </div>
 </section>
 
 <section class="wrap">
-  <h2>内置书源</h2>
-  <table class="src-table">
-    <tr><th>书源</th><th>首页</th><th>排行</th><th>书单</th><th>搜索</th></tr>
-    <tr><td>顶点小说</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>速读谷</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>黄金屋</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>52书库</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td></tr>
-    <tr><td>搬山人</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>神文小说</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td>—</td></tr>
-    <tr><td>智能书库</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>素书卷</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>篱笆好文学</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>小原文学</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-    <tr><td>全本小说网</td><td class="ok">✔</td><td class="ok">✔</td><td>—</td><td class="ok">✔</td></tr>
-  </table>
+  <div class="head"><h2>内置固化书源</h2></div>
+  <div class="sub">手写适配，随包发布，不依赖任何外部配置。</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>书源</th><th>首页</th><th>排行</th><th>书单</th><th>搜索</th></tr></thead>
+      <tbody>
+        <tr><td>顶点小说</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>速读谷</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>黄金屋</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>52书库</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td></tr>
+        <tr><td>搬山人</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>神文小说</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>素书卷</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>篱笆好文学</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>小原文学</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+        <tr><td>全本小说网</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    第三方站点经常改版或关闭。失效的源会在「书源管理」里被体检标出，可随时停用或删除；
+    也可以导入自己的书源来接替。
+  </div>
 </section>
 
 <section class="wrap">
-  <h2>下载</h2>
+  <div class="head"><h2>下载</h2></div>
   <div class="dl">
     <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">
       <div class="t">Android APK</div>
@@ -144,37 +303,40 @@
     </a>
     <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_windows_x64.zip">
       <div class="t">Windows x64</div>
-      <div class="d">解压即用 · 启动自动检查更新，自动替换重启</div>
+      <div class="d">解压即用 · 自动检查更新并替换重启</div>
       <div class="u">novel_reader_windows_x64.zip</div>
     </a>
     <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_source.zip">
       <div class="t">源码</div>
-      <div class="d">Flutter 3.16+ · Android + Windows 双端单一代码库</div>
+      <div class="d">Flutter 3.x · Android + Windows 双端单一代码库</div>
       <div class="u">novel_reader_source.zip</div>
     </a>
   </div>
 </section>
 
 <section class="wrap">
-  <h2>技术说明</h2>
+  <div class="head"><h2>技术说明</h2></div>
   <div class="grid">
     <div class="card">
-      <h3>架构</h3>
-      <p>单一 Flutter 代码库覆盖 Android / Windows；书源为可扩展抽象基类，新增书源只需实现解析逻辑。</p>
+      <div class="ico">◈</div>
+      <h3>书源架构</h3>
+      <p>所有书源（固化与导入）实现同一个接口，因此搜索、发现、书架、阅读器、换源、离线缓存无需区分来源。</p>
     </div>
     <div class="card">
+      <div class="ico">♪</div>
       <h3>Windows 听书</h3>
-      <p>自研 SAPI5 插件（vendor 于仓库 <code>third_party/flutter_tts</code>）：经典 Desktop 音色 + OneCore 音色注册表枚举，规避 WinRT 引擎崩溃与低完整性静音问题。</p>
+      <p>自研 SAPI5 插件（vendored 于 <code>third_party/flutter_tts</code>）：经典 Desktop 音色 + OneCore 音色枚举，规避 WinRT 引擎崩溃与低完整性静音。</p>
     </div>
     <div class="card">
-      <h3>Android 听书</h3>
-      <p>系统 TTS 引擎（Google / 厂商语音均可），多声色列表直接来自引擎；已在 Manifest 声明 TTS 包可见性，Android 11+ 正常发声。</p>
+      <div class="ico">▤</div>
+      <h3>本地书解析</h3>
+      <p>EPUB 走 OPF / NCX / nav 双目录解析并抽取插图；TXT 按字节特征探测 UTF-8 / UTF-16 / GBK，再按章节标题模式切分。</p>
     </div>
   </div>
 </section>
 
 <footer>
-  <p>仅用于个人学习与技术研究；内容版权归各站点所有，请勿商用。<br>
+  <p>仅用于个人学习与技术研究；内容版权归各站点与作者所有，请支持正版阅读，请勿商用。<br>
   源码与 Release：<a href="https://github.com/leey1994/shuangyuebook">github.com/leey1994/shuangyuebook</a></p>
 </footer>
 
