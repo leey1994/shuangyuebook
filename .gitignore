@@ -18,6 +18,7 @@ windows/flutter/ephemeral/
 
 # 交付物（安装包/压缩包）
 dist/
+release-*/
 
 # 杂项
 *.log
