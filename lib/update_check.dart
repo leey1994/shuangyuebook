@@ -2,18 +2,32 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'platform/native_bridge.dart';
+
 /// 应用版本：构建时由 --dart-define=APP_VERSION 注入（取自 pubspec.yaml 的 version）。
 const String kAppVersion =
-    String.fromEnvironment('APP_VERSION', defaultValue: '1.0.2');
+    String.fromEnvironment('APP_VERSION', defaultValue: '1.1.0');
 
 const String _repo = 'leey1994/shuangyuebook';
-const MethodChannel _installChannel =
-    MethodChannel('dev.reader.novel_reader/update');
+
+/// 下载镜像前缀：按顺序回退，最后一档是 GitHub 直连。
+///
+/// 国内直连 GitHub Releases 经常龟速或断流，逐个回退比让用户干等强。
+/// 最后一档直连保证镜像全挂时仍能更新。
+const List<String> kDownloadMirrors = [
+  'https://gh-proxy.com/',
+  'https://ghproxy.net/',
+  'https://ghfast.top/',
+  '', // 直连
+];
+
+/// 给资产地址套上镜像前缀。
+String mirrorUrl(String assetUrl, int mirrorIndex) =>
+    '${kDownloadMirrors[mirrorIndex]}$assetUrl';
 
 /// 版本号比较：a > b → 1，相等 → 0，a < b → -1。
 /// 去掉前导 v/V 与 +构建号后按 '.' 分段做数值比较（0.1.10 > 0.1.9）。
@@ -156,33 +170,17 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       final target = File(
           '${dir.path}/${isAndroid ? 'update.apk' : 'shuangyue_update.zip'}');
 
-      // ---- 流式下载（边下边写盘，显示百分比）----
-      final client = http.Client();
-      _client = client;
-      final resp =
-          await client.send(http.Request('GET', Uri.parse(url)))
-              .timeout(const Duration(seconds: 30));
-      final total = resp.contentLength ?? 0;
-      final sink = target.openWrite();
-      var got = 0;
-      var lastPct = -1.0;
-      await for (final chunk in resp.stream) {
-        sink.add(chunk);
-        got += chunk.length;
-        if (total > 0 && mounted) {
-          final p = (got / total * 100).floorToDouble();
-          if (p != lastPct) {
-            lastPct = p;
-            setState(() => _pct = p / 100);
-          }
-        }
+      // ---- 流式下载（边下边写盘，显示百分比），镜像逐个回退 ----
+      final expected = await _downloadWithMirrors(url, target);
+      if (expected == null) {
+        throw Exception('所有下载线路都失败了，请检查网络后重试');
       }
-      await sink.close();
       if (!mounted) return;
 
       if (isAndroid) {
         // ---- 安卓：拉起系统安装器（FileProvider 由原生侧包装）----
-        await _installChannel.invokeMethod('installApk', {'path': target.path});
+        final ok = await NativeBridge.installApk(target.path);
+        if (!ok) throw Exception('拉起系统安装器失败，请检查「安装未知来源应用」授权');
         if (mounted) Navigator.of(context).pop();
         return;
       }
@@ -222,6 +220,65 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
   /// 写一个等待旧 exe 退出的批处理：替换运行目录 → 启动新版本 → 自删。
   /// 探测方式：运行中的 exe 不可写，copy 成功即代表旧进程已退出。
+  /// 按镜像列表依次尝试下载，全部失败返回 null。
+  ///
+  /// 成功返回期望字节数（用于校验）；失败会删掉半截文件再试下一条线路。
+  Future<int?> _downloadWithMirrors(String assetUrl, File target) async {
+    for (var i = 0; i < kDownloadMirrors.length; i++) {
+      final candidate = mirrorUrl(assetUrl, i);
+      try {
+        final size = await _downloadOnce(candidate, target);
+        if (size != null) return size;
+      } catch (_) {
+        // 该线路失败：清掉半截文件继续下一档
+      }
+      if (!mounted) return null;
+      try {
+        if (target.existsSync()) target.deleteSync();
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// 单条线路下载。返回实际写入字节数，失败抛异常。
+  Future<int?> _downloadOnce(String url, File target) async {
+    final client = http.Client();
+    _client = client;
+    try {
+      final resp =
+          await client.send(http.Request('GET', Uri.parse(url))).timeout(
+              const Duration(seconds: 30));
+      if (resp.statusCode != 200) {
+        throw Exception('HTTP ${resp.statusCode}');
+      }
+      final total = resp.contentLength ?? 0;
+      final sink = target.openWrite();
+      var got = 0;
+      var lastPct = -1.0;
+      await for (final chunk in resp.stream) {
+        sink.add(chunk);
+        got += chunk.length;
+        if (total > 0 && mounted) {
+          final p = (got / total * 100).floorToDouble();
+          if (p != lastPct) {
+            lastPct = p;
+            setState(() => _pct = p / 100);
+          }
+        }
+      }
+      await sink.close();
+      // 大小校验：镜像偶尔返回错误页 / 截断包，装到手机上会直接崩
+      if (total > 0 && got != total) {
+        throw Exception('下载不完整（$got/$total 字节）');
+      }
+      if (got < 1024) throw Exception('下载内容过小，可能是错误页');
+      return got;
+    } finally {
+      client.close();
+      _client = null;
+    }
+  }
+
   void _spawnUpdater(Directory stage, File zip) {
     final exe = Platform.resolvedExecutable;
     final exeDir = File(exe).parent.path;

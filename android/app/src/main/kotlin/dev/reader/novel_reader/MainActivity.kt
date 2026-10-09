@@ -12,6 +12,7 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -60,7 +61,7 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "setKeepScreenOn" -> {
-                        if (call.argument<Boolean>("value") == true) {
+                        if (stringArg(call, "value").toBoolean()) {
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                         } else {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -75,9 +76,9 @@ class MainActivity : FlutterActivity() {
                         )
                     )
                     "getBattery" -> result.success(batteryStatus())
-                    "openUrl" -> result.success(openUrl(call.argument<String>("url") ?: ""))
+                    "openUrl" -> result.success(openUrl(stringArg(call, "url")))
                     "openTtsSettings" -> result.success(openTtsSettings())
-                    "installApk" -> result.success(installApk(call.argument<String>("path") ?: ""))
+                    "installApk" -> result.success(installApk(stringArg(call, "path")))
                     "canInstallApk" -> result.success(canInstallApk())
                     "openInstallPermission" -> {
                         openInstallPermission()
@@ -122,6 +123,23 @@ class MainActivity : FlutterActivity() {
     }
 
     // ==================== 基础能力 ====================
+
+    /**
+     * 取字符串参数，兼容两种传法：
+     *  - `invokeMethod('m', '值')`     → arguments 本身就是 String
+     *  - `invokeMethod('m', {'k':'值'})` → arguments 是 Map，取 [key]
+     *
+     * Flutter 的 `call.argument(k)` 在 arguments 不是 Map 时直接返回 null，
+     * 只认其中一种写法会静默拿到空值 —— 装 APK 这种失败无提示的路径尤其致命。
+     */
+    private fun stringArg(call: MethodCall, key: String): String {
+        val a = call.arguments
+        return when (a) {
+            is String -> a
+            is Map<*, *> -> a[key]?.toString() ?: ""
+            else -> ""
+        }
+    }
 
     private fun storageRoot(): String =
         Environment.getExternalStorageDirectory()?.absolutePath ?: "/storage/emulated/0"

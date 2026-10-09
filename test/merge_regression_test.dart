@@ -160,7 +160,7 @@ void main() {
     });
 
     test('章节偏移能覆盖全文且不重叠', () {
-      final text = '第一章\n甲\n第二章\n乙\n第三章\n丙';
+      const text = '第一章\n甲\n第二章\n乙\n第三章\n丙';
       final r = TxtParser.parseText(text);
       expect(r.chapters.length, 3);
       for (final c in r.chapters) {
@@ -172,7 +172,7 @@ void main() {
     });
 
     test('正文里的「第N章」长句不误判为标题', () {
-      final long = '第${'一'}${'二'}${'三'}${'章'}${'讲'}${'述'}${'了'}${'一'}${'个'}${'很'}${'长'}${'的'}${'句'}${'子'}${'。'}';
+      const long = '第${'一'}${'二'}${'三'}${'章'}${'讲'}${'述'}${'了'}${'一'}${'个'}${'很'}${'长'}${'的'}${'句'}${'子'}${'。'}';
       final r = TxtParser.parseText('$long\n第一章 真标题\n正文');
       expect(r.chapters.length, 2);
     });

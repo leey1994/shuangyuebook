@@ -11,6 +11,7 @@ import 'data/stats_store.dart';
 import 'feed_cache.dart';
 import 'legado/source_store.dart';
 import 'legado/webview_engine.dart';
+import 'platform/open_file_dispatch.dart';
 import 'screens/discover_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -214,6 +215,8 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    // 「用爽阅打开」文件关联：txt/epub 导入并进阅读器，json 导入为书源
+    installOpenFileHandler(context);
     // 启动 2 秒后先查实时公告（GitHub 托管 JSON，新 id 全屏弹出并等关闭），
     // 结束后再静默检查 GitHub Release，避免两个弹窗叠加。
     Future.delayed(const Duration(seconds: 2), () async {
