@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'announcement.dart';
 import 'feed_cache.dart';
 import 'screens/discover_screen.dart';
 import 'screens/search_screen.dart';
@@ -13,7 +15,6 @@ import 'screens/shelf_screen.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
-import 'tts_smoke.dart';
 import 'update_check.dart';
 
 /// 宽/窄屏分界（逻辑像素）：<= 视为安卓尺寸（底部菜单 + 缩放生效），> 为宽屏（左侧菜单不缩放）。
@@ -35,10 +36,6 @@ Future<void> main(List<String> args) async {
         .writeAsStringSync('${DateTime.now().toIso8601String()} args=$args\n');
   } catch (_) {}
   WidgetsFlutterBinding.ensureInitialized();
-  // 崩溃定位自检（不经 UI，直接走听书原生调用链）
-  if (args.contains('--tts-smoke')) {
-    await ttsSmoke();
-  }
   FlutterError.onError =
       (d) => _logCrash(d.exception, d.stack ?? StackTrace.current);
   PlatformDispatcher.instance.onError = (e, s) {
@@ -189,14 +186,31 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   bool _railOpen = false; // 宽屏侧边菜单展开/收起
+  Timer? _noticePoll; // 实时公告轮询
 
   @override
   void initState() {
     super.initState();
-    // 启动 3 秒后静默检查 GitHub Release，有新版本则弹窗（公告 = 版本说明）
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) UpdateChecker.check(context);
+    // 启动 2 秒后先查实时公告（GitHub 托管 JSON，新 id 全屏弹出并等关闭），
+    // 结束后再静默检查 GitHub Release，避免两个弹窗叠加。
+    Future.delayed(const Duration(seconds: 2), () async {
+      if (mounted) await NoticeChecker.check(context);
+      if (mounted) {
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) UpdateChecker.check(context);
+        });
+      }
     });
+    // 运行期间每 10 分钟轮询一次，运行中发布的公告也能及时全屏送达
+    _noticePoll = Timer.periodic(const Duration(minutes: 10), (_) {
+      if (mounted) NoticeChecker.check(context);
+    });
+  }
+
+  @override
+  void dispose() {
+    _noticePoll?.cancel();
+    super.dispose();
   }
 
   Widget _pages() => IndexedStack(
