@@ -9,7 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 /// 应用版本：构建时由 --dart-define=APP_VERSION 注入（取自 pubspec.yaml 的 version）。
 const String kAppVersion =
-    String.fromEnvironment('APP_VERSION', defaultValue: '1.0.1');
+    String.fromEnvironment('APP_VERSION', defaultValue: '1.1.0');
 
 const String _repo = 'leey1994/shuangyuebook';
 const MethodChannel _installChannel =
