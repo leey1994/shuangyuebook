@@ -9,12 +9,16 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../edge_tts.dart';
+import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
+import '../platform/native_bridge.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../ui/reader/cover_turn.dart';
+import '../ui/reader/page_snap_physics.dart';
 import '../widgets.dart';
 
 /// 阅读器：左右翻页 / 上下滚动双模式，
@@ -54,6 +58,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final _scrollCtrl = ScrollController();
   Timer? _scrollSave;
 
+  /// 分页模式的页面控制器（滑动 / 覆盖 / 淡入共用）。
+  final _pageCtrl = PageController();
+
+  /// 阅读计时：前台活跃时累计，单次 ≤90s 防挂机（写入 StatsStore）。
+  Timer? _clock;
+  int _sinceTick = 0;
+
+  /// 页脚时钟与电量（每 30s 刷新一次即可，不必更密）。
+  String _clockText = '';
+  BatteryStatus? _battery;
+
   // 滚动模式跨章连载：已加载章节及其在合并内容中的起始像素
   // （首章起始 = 顶部内边距；后续章起始 = 旧 maxScrollExtent - 底部内边距）
   static const double _kPadTop = 12;
@@ -70,11 +85,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   TextScaler _lastScaler = TextScaler.noScaling;
   Timer? _repagTimer;
 
-  // 偏好快照：只有字体/行距/主题/翻页模式变化才重建阅读器
-  late int _pTheme;
-  late double _pFont;
-  late double _pLh;
-  late bool _pPag;
+  // 偏好快照：排版签名（字号/行距/字距/缩进/字体/边距/翻页方式/背景）变化才重建
+  late String _pLayout;
 
   // 听书（TTS）
   final FlutterTts _tts = FlutterTts();
@@ -113,19 +125,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _startPage = widget.page;
     _startOffset = widget.paragraph;
     final p = _prefs;
-    _pTheme = p.theme;
-    _pFont = p.fontSize;
-    _pLh = p.lineHeight;
-    _pPag = p.paginate;
+    _pLayout = p.layoutSignature;
     AppStore.I.addListener(_onPrefs);
+    _startClock();
+    unawaited(NativeBridge.setKeepScreenOn(true)); // 阅读时不熄屏
     _scrollCtrl.addListener(() {
-      if (_prefs.paginate) return;
+      if (_paged) return;
       final pos = _scrollCtrl.position;
       // 滚动到当前章末尾附近：自动加载下一章无缝续读
       if (pos.pixels >= pos.maxScrollExtent - 400) _loadMore();
       _scrollSave?.cancel();
       _scrollSave = Timer(const Duration(milliseconds: 600), () {
-        if (!mounted || _prefs.paginate) return;
+        if (!mounted || _paged) return;
         // 跨过章界后同步当前章节（标题/进度条跟随）
         final ci = _chapterFromScroll();
         if (ci != _chIdx) setState(() => _chIdx = ci);
@@ -148,6 +159,43 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
+  /// 每秒：累计阅读时长（写统计）+ 刷新页脚时钟；每 30s 刷一次电量。
+  ///
+  /// 单次累计封顶 [StatsStore.maxChunkSeconds] 防挂机刷时长。
+  void _startClock() {
+    _clockText = _fmtClock(DateTime.now());
+    _clock?.cancel();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      _sinceTick++;
+      if (_sinceTick >= StatsStore.maxChunkSeconds) {
+        _settleReading();
+        _sinceTick = 0;
+      }
+      final now = DateTime.now();
+      final text = _fmtClock(now);
+      if (text != _clockText && mounted) setState(() => _clockText = text);
+      if (_sinceTick % 30 == 0) {
+        NativeBridge.batteryStatus().then((b) {
+          if (mounted && b != null) setState(() => _battery = b);
+        });
+      }
+    });
+  }
+
+  /// 把累计秒数落到统计库。
+  void _settleReading() {
+    if (_sinceTick <= 0) return;
+    try {
+      StatsStore.I.addReadingSeconds(_sinceTick);
+    } catch (_) {
+      // 统计不可用不影响阅读
+    }
+    _sinceTick = 0;
+  }
+
+  static String _fmtClock(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
   Future<void> _loadVoices() async {
     try {
       final v = await _tts.getVoices;
@@ -165,6 +213,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退到后台：停表并落盘这一段，离开阅读器不再计入时长
+    if (state != AppLifecycleState.resumed) {
+      _settleReading();
+    } else if (mounted) {
+      unawaited(NativeBridge.setKeepScreenOn(true));
+    }
     // 关窗退出时引擎可能不走 widget dispose，这里兜底停掉听书
     if (state == AppLifecycleState.detached && _speaking) {
       _speaking = false;
@@ -178,19 +232,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _onPrefs() {
-    final p = _prefs;
-    if (p.theme != _pTheme ||
-        p.fontSize != _pFont ||
-        p.lineHeight != _pLh ||
-        p.paginate != _pPag) {
-      final wasPag = _pPag;
-      _pTheme = p.theme;
-      _pFont = p.fontSize;
-      _pLh = p.lineHeight;
-      _pPag = p.paginate;
+    final sig = _prefs.layoutSignature;
+    if (sig != _pLayout) {
+      final wasPaged = _paged;
+      final prevMode = _prefs.pageMode;
+      _pLayout = sig;
       if (mounted) setState(() {});
       // 滚动（已连载多章）→ 翻页：拆回当前单章再分页，避免跨章混排
-      if (p.paginate && !wasPag && _chStarts.length > 1) {
+      if (wasPaged && prevMode == PageMode.scroll && _chStarts.length > 1) {
         _loadChapter(_chIdx);
       }
     }
@@ -199,6 +248,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _clock?.cancel();
+    _settleReading(); // 离场前把这一段时长落盘
+    unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
     if (_speaking) {
       _speaking = false;
       try {
@@ -214,6 +266,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _scrollSave?.cancel();
     _repagTimer?.cancel();
     _scrollCtrl.dispose();
+    _pageCtrl.dispose();
     super.dispose();
   }
 
@@ -422,11 +475,30 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   List<List<String>> get _currentPages => _pages ?? const [[]];
 
+  /// 翻到指定页：同步 [_page] 与 PageView 控制器（两者互为对方的真值来源）。
+  void _setPage(int i, {bool animate = true}) {
+    final target = i.clamp(0, _currentPages.length - 1);
+    if (target == _page) return;
+    setState(() => _page = target);
+    _saveProgress();
+    if (_prefs.pageMode == PageMode.slide ||
+        _prefs.pageMode == PageMode.cover) {
+      if (_pageCtrl.hasClients) {
+        if (animate) {
+          _pageCtrl.animateToPage(target,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic);
+        } else {
+          _pageCtrl.jumpToPage(target);
+        }
+      }
+    }
+  }
+
   void _goNext() {
     if (_loading || _detail == null) return;
     if (_page < _currentPages.length - 1) {
-      setState(() => _page++);
-      _saveProgress();
+      _setPage(_page + 1);
       return;
     }
     if (_chIdx < _detail!.chapters.length - 1) {
@@ -440,8 +512,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _goPrev() {
     if (_loading || _detail == null) return;
     if (_page > 0) {
-      setState(() => _page--);
-      _saveProgress();
+      _setPage(_page - 1);
       return;
     }
     if (_chIdx > 0) {
@@ -460,13 +531,28 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // ---------- 主题配色（与全局主题同步） ----------
 
-  ({Color bg, Color fg, Color dim}) _colors() => readerColors(_prefs.theme);
+  /// 当前阅读配色。六种背景任选，越界时按全局主题回退。
+  ({Color bg, Color fg, Color dim}) _colors() {
+    final b = readerBgOf(_prefs.bgIndex, _prefs.theme);
+    return (bg: b.bg, fg: b.fg, dim: b.dim);
+  }
+
+  /// 正文是否处于夜间背景（决定高亮色等派生色）。
+  bool get _isNightBg => readerBgIsDark(_prefs.bgIndex, _prefs.theme);
 
   TextStyle get _bodyStyle => TextStyle(
         fontSize: _prefs.fontSize,
         height: _prefs.lineHeight,
+        letterSpacing: _prefs.letterSpacing,
+        fontFamily: _prefs.fontIndex == 1 ? kLxgwFamily : null,
         color: _colors().fg,
       );
+
+  /// 页眉 / 页脚各占的高度（关闭时为 0，正文区相应变大）。
+  double get _headerH => _prefs.showHeader ? 26 : 0;
+  double get _footerH => _prefs.showFooter ? 24 : 0;
+
+  bool get _paged => _prefs.pageMode != PageMode.scroll;
 
   // ---------- 构建 ----------
 
@@ -478,15 +564,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, box) {
-            final w = box.maxWidth - 32;
-            final h = box.maxHeight - 24;
+            // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
+            final w = box.maxWidth - _prefs.marginH * 2;
+            final h = box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
             _lastW = w;
             _lastH = h;
             final ts = MediaQuery.textScalerOf(context);
             _lastScaler = ts;
             if (w > 0 && h > 0) {
-              final key = Object.hash(identityHashCode(_paras), w, h,
-                  _prefs.fontSize, _prefs.lineHeight, ts.toString());
+              final key = Object.hash(
+                  identityHashCode(_paras), w, h, _prefs.layoutSignature, ts.toString());
               if (_pages == null) {
                 // 新章节首排：立即分页（避免白屏）
                 _pages = paginateParas(
@@ -517,24 +604,29 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
             return Stack(
               children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapUp: (d) {
-                    if (!_prefs.paginate) {
-                      setState(() => _menu = !_menu);
-                      return;
-                    }
-                    final third = box.maxWidth / 3;
-                    if (d.globalPosition.dx < third) {
-                      _goPrev();
-                    } else if (d.globalPosition.dx > third * 2) {
-                      _goNext();
-                    } else {
-                      setState(() => _menu = !_menu);
-                    }
-                  },
-                  child: _buildContent(),
+                Padding(
+                  padding: EdgeInsets.only(top: _headerH, bottom: _footerH),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: (d) {
+                      if (_prefs.pageMode == PageMode.scroll) {
+                        setState(() => _menu = !_menu);
+                        return;
+                      }
+                      final third = box.maxWidth / 3;
+                      if (d.globalPosition.dx < third) {
+                        _goPrev();
+                      } else if (d.globalPosition.dx > third * 2) {
+                        _goNext();
+                      } else {
+                        setState(() => _menu = !_menu);
+                      }
+                    },
+                    child: _buildContent(),
+                  ),
                 ),
+                if (_prefs.showHeader) Positioned(top: 0, left: 0, right: 0, child: _buildHeader(c)),
+                if (_prefs.showFooter) Positioned(bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
                 if (_loading) _overlay(const CircularProgressIndicator()),
                 if (_error != null) _overlay(_errorView()),
                 // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
@@ -574,7 +666,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     setState(() {
       _pages = pages;
       _pagesKey = Object.hash(identityHashCode(_paras), _lastW, _lastH,
-          _prefs.fontSize, _prefs.lineHeight, _lastScaler.toString());
+          _prefs.layoutSignature, _lastScaler.toString());
       _page = _page.clamp(0, pages.length - 1).toInt();
     });
   }
@@ -606,34 +698,106 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _buildContent() {
-    if (_prefs.paginate) {
-      final pages = _pages;
-      if (pages == null || pages.isEmpty) {
-        // 尺寸无效（如最小化）时绝不渲染全部段落，等重排完成
-        return Center(
-            child: CircularProgressIndicator(color: _colors().fg));
-      }
-      final idx = _page.clamp(0, pages.length - 1).toInt();
-      final page = pages[idx];
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+  /// 正文区域：按翻页方式分派。
+  Widget _buildContent() => switch (_prefs.pageMode) {
+        PageMode.scroll => _buildScrollBody(),
+        PageMode.fade => _buildFadeBody(),
+        PageMode.slide || PageMode.cover => _buildPagedBody(),
+      };
+
+  /// 首行缩进两字（中文排版惯例）。
+  ///
+  /// 用两个全角空格做「视觉缩进」，而不是 TextStyle.indent —— 后者会连同换行
+  /// 一起缩进，在分页测量里会与 cutToFit 的二分边界打架。
+  String _indent(String s) =>
+      _prefs.indentFirstLine ? '　　$s' : s;
+
+  /// 一页正文的排版（所有分页模式共用，保证测量与渲染一致）。
+  Widget _pageBody(List<String> page) => Padding(
+        padding: EdgeInsets.symmetric(
+            horizontal: _prefs.marginH, vertical: _prefs.marginV),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var i = 0; i < page.length; i++) ...[
-              Text(page[i], style: _bodyStyle),
+              Text(_indent(page[i]), style: _bodyStyle),
               if (i < page.length - 1)
                 SizedBox(height: _prefs.fontSize * 0.6),
             ],
           ],
         ),
       );
+
+  /// 滑动 / 覆盖翻页：PageView + 爽阅的页对齐物理。
+  ///
+  /// 覆盖模式额外给每页套 [CoverTurnItem]（钉住当前页、显式裁剪已揭示部分、
+  /// 前缘投影），与「阅读 3.0」的 CoverPageDelegate 行为一致。
+  Widget _buildPagedBody() {
+    final pages = _currentPages;
+    if (pages.isEmpty) {
+      // 尺寸无效（如最小化）时绝不渲染全部段落，等重排完成
+      return Center(child: CircularProgressIndicator(color: _colors().fg));
     }
+    final cover = _prefs.pageMode == PageMode.cover;
+    // 控制器页码与 _page 对齐（模式切换 / 章节切换后重建）
+    if (_pageCtrl.hasClients && _pageCtrl.page != null) {
+      final cur = _pageCtrl.page!.round();
+      if (cur != _page) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(_page);
+        });
+      }
+    }
+    return PageView.builder(
+      controller: _pageCtrl,
+      physics: const PageSnapPhysics(),
+      itemCount: pages.length,
+      onPageChanged: (i) {
+        if (!mounted || i == _page) return;
+        setState(() => _page = i);
+        _saveProgress();
+      },
+      itemBuilder: (ctx, i) {
+        final child = _pageBody(pages[i]);
+        if (!cover) return child;
+        final cur = _pageCtrl.hasClients && _pageCtrl.page != null
+            ? _pageCtrl.page!
+            : _page.toDouble();
+        return CoverTurnItem(
+          delta: i - cur,
+          width: MediaQuery.sizeOf(ctx).width,
+          shadowWidth: 14,
+          child: child,
+        );
+      },
+    );
+  }
+
+  /// 淡入淡出翻页：不跟手，整页交叉淡变（夜里翻页不刺眼）。
+  Widget _buildFadeBody() {
+    final pages = _currentPages;
+    if (pages.isEmpty) {
+      return Center(child: CircularProgressIndicator(color: _colors().fg));
+    }
+    final idx = _page.clamp(0, pages.length - 1).toInt();
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: KeyedSubtree(
+        key: ValueKey(idx),
+        child: _pageBody(pages[idx]),
+      ),
+    );
+  }
+
+  /// 上下滚动模式：跨章连载，靠底部临近自动续下一章。
+  Widget _buildScrollBody() {
     final atEnd = _atBookEnd;
     return ListView.builder(
       controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: EdgeInsets.fromLTRB(
+          _prefs.marginH, _prefs.marginV, _prefs.marginH, _prefs.marginV + 12),
       itemCount: _paras.length + (atEnd ? 1 : 0),
       itemBuilder: (context, i) {
         if (i >= _paras.length) {
@@ -648,21 +812,72 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           );
         }
+        final highlight = _speaking && _ttsCur == i;
         return Padding(
           key: _paraKeys.putIfAbsent(i, () => GlobalKey()),
           padding: EdgeInsets.only(bottom: _prefs.fontSize * 0.6),
-          child: _speaking && _ttsCur == i
+          child: highlight
               ? ColoredBox(
-                  color: _prefs.theme == AppThemes.black
+                  color: _isNightBg
                       ? const Color(0x333DDC97)
                       : const Color(0x222F6B3C),
-                  child: Text(_paras[i], style: _bodyStyle),
+                  child: Text(_indent(_paras[i]), style: _bodyStyle),
                 )
-              : Text(_paras[i], style: _bodyStyle),
+              : Text(_indent(_paras[i]), style: _bodyStyle),
         );
       },
     );
   }
+
+  /// 页眉：章节名（可关）。沉浸在状态栏高度之下。
+  Widget _buildHeader(({Color bg, Color fg, Color dim}) c) => SizedBox(
+        height: _headerH,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _chapterTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: c.dim, fontSize: 11.5),
+            ),
+          ),
+        ),
+      );
+
+  /// 页脚：时间 / 页码进度 / 电量（各自可关）。
+  Widget _buildFooter(({Color bg, Color fg, Color dim}) c) => SizedBox(
+        height: _footerH,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Text(_clockText,
+                  style: TextStyle(color: c.dim, fontSize: 11.5)),
+              const Spacer(),
+              if (_detail != null)
+                Text(
+                  _paged && _currentPages.isNotEmpty
+                      ? '第 ${_page + 1}/${_currentPages.length} 页'
+                      : '第 ${_chIdx + 1}/${_detail!.chapters.length} 章',
+                  style: TextStyle(color: c.dim, fontSize: 11.5),
+                ),
+              const SizedBox(width: 10),
+              if (_battery != null) ...[
+                Icon(
+                  _battery!.charging ? Icons.battery_charging_full : Icons.battery_std,
+                  size: 13,
+                  color: c.dim,
+                ),
+                const SizedBox(width: 2),
+                Text('${_battery!.level}%',
+                    style: TextStyle(color: c.dim, fontSize: 11.5)),
+              ],
+            ],
+          ),
+        ),
+      );
 
   // ---------- 覆盖层 ----------
 
@@ -751,7 +966,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ),
                 ),
                 Text(
-                  _prefs.paginate && inChapters > 0
+                  _paged && inChapters > 0
                       ? '${_page + 1}/$inChapters 页'
                       : '${_chIdx + 1}章',
                   style: TextStyle(color: c.dim, fontSize: 12),
@@ -773,19 +988,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     _prefs.paginate ? '字号' : '滚动',
                     c, () => setState(() => _showSettings = !_showSettings)),
                 _panelBtn(
-                    _prefs.theme == AppThemes.black
+                    readerBgIsDark(_prefs.bgIndex, _prefs.theme)
                         ? Icons.light_mode
                         : Icons.dark_mode,
-                    '主题',
+                    '明暗',
                     c,
-                    () => _store.setTheme(_prefs.theme == AppThemes.black
-                        ? AppThemes.white
-                        : AppThemes.black)),
-                _panelBtn(_prefs.paginate ? Icons.swipe : Icons.article,
-                    _prefs.paginate ? '翻页' : '滚动', c, () {
-                  _store.setPaginate(!_prefs.paginate);
-                  setState(() {});
-                }),
+                    () => _store.setBgIndex(
+                        readerBgIsDark(_prefs.bgIndex, _prefs.theme) ? 0 : 4)),
+                _panelBtn(_modeIcon(), _prefs.pageMode.label, c,
+                    _pickPageMode),
                 _panelBtn(Icons.chevron_right, '下一章', c,
                     () => _jumpChapter(_chIdx + 1)),
               ],
@@ -794,6 +1005,41 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         ),
       ),
     );
+  }
+
+  IconData _modeIcon() => switch (_prefs.pageMode) {
+        PageMode.slide => Icons.swipe,
+        PageMode.cover => Icons.layers,
+        PageMode.fade => Icons.blur_on,
+        PageMode.scroll => Icons.article,
+      };
+
+  /// 翻页方式选择弹层（滑动 / 覆盖 / 淡入 / 滚动）。
+  Future<void> _pickPageMode() async {
+    final picked = await showModalBottomSheet<PageMode>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: RadioGroup<PageMode>(
+          groupValue: _prefs.pageMode,
+          onChanged: (v) => Navigator.of(ctx).pop(v),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in PageMode.values)
+                RadioListTile<PageMode>(
+                  value: m,
+                  title: Text(m.label),
+                  subtitle:
+                      Text(m.hint, style: Theme.of(ctx).textTheme.bodySmall),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked != null && picked != _prefs.pageMode) {
+      _store.setPageMode(picked);
+    }
   }
 
   Widget _panelBtn(IconData icon, String label, ({Color bg, Color fg, Color dim}) c,
@@ -814,131 +1060,247 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
+  /// 阅读设置面板：排版 / 外观 / 听书 三页签。
+  ///
+  /// 限高约 42% 屏高并让正文保持可见 —— 这是社区反馈过的痛点：
+  /// 「设置栏太长、调字号看不到正文」。
   Widget _settingsBlock(({Color bg, Color fg, Color dim}) c) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.42,
+      child: DefaultTabController(
+        length: 3,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('字号', style: TextStyle(color: c.dim, fontSize: 12)),
-            Expanded(
-              child: Slider(
-                value: _prefs.fontSize,
-                min: 12,
-                max: 32,
-                divisions: 20,
-                onChanged: (v) {
-                  _store.setFontSize(v);
-                  setState(() {}); // 分页键含字号，rebuild 时自动重排
-                },
-              ),
+            const TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelStyle: TextStyle(fontSize: 13),
+              tabs: [
+                Tab(height: 32, text: '排版'),
+                Tab(height: 32, text: '外观'),
+                Tab(height: 32, text: '听书'),
+              ],
             ),
-            Text('行距', style: TextStyle(color: c.dim, fontSize: 12)),
-            Expanded(
-              child: Slider(
-                value: _prefs.lineHeight,
-                min: 1.2,
-                max: 2.6,
-                divisions: 14,
-                onChanged: (v) {
-                  _store.setLineHeight(v);
-                  setState(() {});
-                },
+            Flexible(
+              child: TabBarView(
+                children: [_layoutTab(c), _appearanceTab(c), _ttsTab(c)],
               ),
             ),
           ],
         ),
-        Row(
-          children: [
-            Text('语速', style: TextStyle(color: c.dim, fontSize: 12)),
-            Expanded(
-              child: Slider(
-                value: _prefs.ttsRate,
-                min: 0.1,
-                max: 1.0,
-                divisions: 9,
-                onChanged: (v) {
-                  _store.setTtsRate(v);
-                  setState(() {});
-                  unawaited(_tts.setSpeechRate(v)); // 播放中即时生效
-                },
-              ),
-            ),
-            Text(_prefs.ttsRate.toStringAsFixed(1),
-                style: TextStyle(color: c.dim, fontSize: 12)),
-          ],
-        ),
-        Row(
-          children: [
-            Text('音色', style: TextStyle(color: c.dim, fontSize: 12)),
-            Expanded(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: _edgeVoices.containsKey(_prefs.ttsVoice)
-                    ? _prefs.ttsVoice
-                    : _kVoiceDefault,
-                items: [
-                  for (final e in _edgeVoices.entries)
-                    DropdownMenuItem(
-                      value: e.key,
-                      child: Text(
-                        e.value.$1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                ],
-                onChanged: (n) async {
-                  if (n == null) return;
-                  _store.setTtsVoice(n);
-                  await _maybeEdgeNotice(); // 首次选择：一次性联网说明
-                  setState(() {});
-                  await _initTts(); // 统一应用
-                },
-              ),
-            ),
-          ],
-        ),
-        Row(
-          children: [
-            Text('音调', style: TextStyle(color: c.dim, fontSize: 12)),
-            Expanded(
-              child: Slider(
-                value: _prefs.ttsPitch.clamp(0.5, 2.0),
-                min: 0.5,
-                max: 2.0,
-                divisions: 15,
-                onChanged: (v) {
-                  _store.setTtsPitch(v);
-                  setState(() {});
-                  unawaited(_tts.setPitch(v)); // 播放中下一句生效
-                },
-              ),
-            ),
-            Text(_prefs.ttsPitch.toStringAsFixed(1),
-                style: TextStyle(color: c.dim, fontSize: 12)),
-          ],
-        ),
-        Row(
-          children: [
-            for (final (i, name) in const [
-              (AppThemes.white, '锦绣白'),
-              (AppThemes.black, '极光黑'),
-            ])
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(name, style: const TextStyle(fontSize: 12)),
-                  selected: _prefs.theme == i,
-                  onSelected: (_) => _store.setTheme(i),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-      ],
+      ),
     );
   }
+
+  Widget _slider(
+    ({Color bg, Color fg, Color dim}) c,
+    String label,
+    double value,
+    double min,
+    double max,
+    int divisions,
+    ValueChanged<double> onChanged, {
+    String? valueText,
+  }) =>
+      Row(
+        children: [
+          SizedBox(
+              width: 44,
+              child: Text(label, style: TextStyle(color: c.dim, fontSize: 12))),
+          Expanded(
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions,
+              onChanged: (v) {
+                onChanged(v);
+                setState(() {}); // 分页键含排版签名，rebuild 时自动重排
+              },
+            ),
+          ),
+          SizedBox(
+            width: 38,
+            child: Text(valueText ?? value.toStringAsFixed(1),
+                textAlign: TextAlign.right,
+                style: TextStyle(color: c.dim, fontSize: 12)),
+          ),
+        ],
+      );
+
+  Widget _layoutTab(({Color bg, Color fg, Color dim}) c) => ListView(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+        children: [
+          _slider(c, '字号', _prefs.fontSize, 12, 32, 20, _store.setFontSize,
+              valueText: '${_prefs.fontSize.round()}'),
+          _slider(c, '行距', _prefs.lineHeight, 1.2, 2.6, 14,
+              _store.setLineHeight),
+          _slider(c, '字距', _prefs.letterSpacing, -1, 8, 18,
+              _store.setLetterSpacing),
+          _slider(c, '左右', _prefs.marginH, 0, 64, 16, _store.setMarginH,
+              valueText: '${_prefs.marginH.round()}'),
+          _slider(c, '上下', _prefs.marginV, 0, 160, 16, _store.setMarginV,
+              valueText: '${_prefs.marginV.round()}'),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text('首行缩进两字',
+                style: TextStyle(color: c.fg, fontSize: 13)),
+            value: _prefs.indentFirstLine,
+            onChanged: (v) {
+              _store.setIndentFirstLine(v);
+              setState(() {});
+            },
+          ),
+        ],
+      );
+
+  Widget _appearanceTab(({Color bg, Color fg, Color dim}) c) => ListView(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+        children: [
+          Text('翻页方式', style: TextStyle(color: c.dim, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final m in PageMode.values)
+                ChoiceChip(
+                  label: Text(m.label, style: const TextStyle(fontSize: 12)),
+                  selected: _prefs.pageMode == m,
+                  onSelected: (_) => _store.setPageMode(m),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text('阅读背景', style: TextStyle(color: c.dim, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (var i = 0; i < kReaderBgs.length; i++) _bgChip(c, i)],
+          ),
+          const SizedBox(height: 14),
+          Text('正文字体', style: TextStyle(color: c.dim, fontSize: 12)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (var i = 0; i < kReaderFonts.length; i++)
+                ChoiceChip(
+                  label:
+                      Text(kReaderFonts[i], style: const TextStyle(fontSize: 12)),
+                  selected: _prefs.fontIndex == i,
+                  onSelected: (_) {
+                    _store.setFontIndex(i);
+                    setState(() {});
+                  },
+                ),
+            ],
+          ),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text('显示页眉（章节名）',
+                style: TextStyle(color: c.fg, fontSize: 13)),
+            value: _prefs.showHeader,
+            onChanged: (v) {
+              _store.setShowHeader(v);
+              setState(() {});
+            },
+          ),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text('显示页脚（时间/页码/电量）',
+                style: TextStyle(color: c.fg, fontSize: 13)),
+            value: _prefs.showFooter,
+            onChanged: (v) {
+              _store.setShowFooter(v);
+              setState(() {});
+            },
+          ),
+        ],
+      );
+
+  /// 背景色卡：色块 + 名称，选中加粗描边。
+  Widget _bgChip(({Color bg, Color fg, Color dim}) c, int i) {
+    final b = kReaderBgs[i];
+    final sel = _prefs.bgIndex == i;
+    return GestureDetector(
+      onTap: () {
+        _store.setBgIndex(i);
+        setState(() {});
+      },
+      child: Container(
+        width: 76,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: b.bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: sel ? c.fg : const Color(0x33888888),
+            width: sel ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          b.name,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              color: b.fg,
+              fontSize: 12,
+              fontWeight: sel ? FontWeight.w700 : null),
+        ),
+      ),
+    );
+  }
+
+  Widget _ttsTab(({Color bg, Color fg, Color dim}) c) => ListView(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+        children: [
+          _slider(c, '语速', _prefs.ttsRate, 0.1, 1.0, 9, _store.setTtsRate),
+          _slider(
+              c, '音调', _prefs.ttsPitch.clamp(0.5, 2.0), 0.5, 2.0, 15,
+              _store.setTtsPitch),
+          Row(
+            children: [
+              SizedBox(
+                  width: 44,
+                  child:
+                      Text('音色', style: TextStyle(color: c.dim, fontSize: 12))),
+              Expanded(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: _edgeVoices.containsKey(_prefs.ttsVoice)
+                      ? _prefs.ttsVoice
+                      : _kVoiceDefault,
+                  items: [
+                    for (final e in _edgeVoices.entries)
+                      DropdownMenuItem(
+                        value: e.key,
+                        child: Text(
+                          e.value.$1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                  ],
+                  onChanged: (n) async {
+                    if (n == null) return;
+                    _store.setTtsVoice(n);
+                    await _maybeEdgeNotice(); // 首次选择：一次性联网说明
+                    setState(() {});
+                    await _initTts(); // 统一应用
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text('在线音色由微软 Edge 合成，需要联网；合成结果会缓存在本地。',
+              style: TextStyle(color: c.dim, fontSize: 11)),
+        ],
+      );
 
   // ---------- 听书（TTS） ----------
 

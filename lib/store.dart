@@ -8,29 +8,71 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'sources/source.dart';
 
+/// 翻页方式。
+enum PageMode {
+  slide('滑动', '跟手横滑，惯性感'),
+  cover('覆盖', '页面跟随手指推开，带前缘投影'),
+  fade('淡入', '整页淡入淡出'),
+  scroll('滚动', '上下滚动，长文更省事');
+
+  const PageMode(this.label, this.hint);
+
+  final String label;
+  final String hint;
+
+  static PageMode fromName(String? v) => PageMode.values
+      .firstWhere((m) => m.name == v, orElse: () => PageMode.slide);
+}
+
 /// 阅读偏好。
 class ReaderPrefs {
   double fontSize; // 逻辑像素
   double lineHeight; // 倍数
   int theme; // 0 锦绣白 1 极光黑
-  bool paginate; // true 左右翻页 false 上下滚动
+  PageMode pageMode; // 翻页方式（scroll = 上下滚动）
   int autoCache; // 自动缓存后续章节数（0 = 关闭）
   double ttsRate; // 听书语速
   double ttsPitch; // 听书音调（0.5~2.0）
   String ttsVoice; // 听书音色名（'' = 自动选中文）
   bool edgeNotice; // 在线朗读联网说明已读
 
+  // ---- 排版（樱读融合）----
+  double marginH; // 左右页边距（逻辑像素）
+  double marginV; // 上下留白（逻辑像素）
+  double letterSpacing; // 字距（逻辑像素）
+  bool indentFirstLine; // 首行缩进两字
+  int fontIndex; // 0 系统字体 1 霞鹜文楷
+  bool showHeader; // 页眉：章节名
+  bool showFooter; // 页脚：时间 / 页码 / 电量
+  int bgIndex; // 阅读背景序号
+
+  /// 兼容旧字段：`paginate=false` 等价于滚动模式。
+  bool get paginate => pageMode != PageMode.scroll;
+
   ReaderPrefs({
     this.fontSize = 20,
     this.lineHeight = 1.7,
     this.theme = 0,
-    this.paginate = true,
+    this.pageMode = PageMode.slide,
     this.autoCache = 50,
     this.ttsRate = 0.5,
     this.ttsPitch = 1.0,
     this.ttsVoice = '',
     this.edgeNotice = false,
+    this.marginH = 16,
+    this.marginV = 12,
+    this.letterSpacing = 0,
+    this.indentFirstLine = false,
+    this.fontIndex = 0,
+    this.showHeader = true,
+    this.showFooter = true,
+    this.bgIndex = 0,
   });
+
+  /// 排版相关字段变了就重排（阅读器据此决定是否重新分页）。
+  String get layoutSignature =>
+      '$fontSize|$lineHeight|$letterSpacing|$indentFirstLine|$fontIndex|'
+      '$marginH|$marginV|${pageMode.name}|$bgIndex';
 }
 
 /// 全局状态：书架、历史、书签、偏好、章节离线缓存。
@@ -62,12 +104,29 @@ class AppStore extends ChangeNotifier {
       prefs.lineHeight = sp.getDouble('lineHeight') ?? prefs.lineHeight;
       // 旧版三主题(0白天/1护眼/2夜间)迁移为两主题(0锦绣白/1极光黑)
       prefs.theme = (sp.getInt('theme') ?? 0) == 2 ? 1 : 0;
-      prefs.paginate = sp.getBool('paginate') ?? prefs.paginate;
+      // 翻页方式：新字段优先；老版本只有 paginate(bool)，false → 滚动
+      final modeName = sp.getString('pageMode');
+      if (modeName != null) {
+        prefs.pageMode = PageMode.fromName(modeName);
+      } else {
+        prefs.pageMode =
+            (sp.getBool('paginate') ?? true) ? PageMode.slide : PageMode.scroll;
+      }
       prefs.autoCache = sp.getInt('autoCache') ?? prefs.autoCache;
       prefs.ttsRate = sp.getDouble('ttsRate') ?? prefs.ttsRate;
       prefs.ttsPitch = sp.getDouble('ttsPitch') ?? prefs.ttsPitch;
       prefs.ttsVoice = sp.getString('ttsVoice') ?? prefs.ttsVoice;
       prefs.edgeNotice = sp.getBool('edgeNotice') ?? prefs.edgeNotice;
+      prefs.marginH = sp.getDouble('marginH') ?? prefs.marginH;
+      prefs.marginV = sp.getDouble('marginV') ?? prefs.marginV;
+      prefs.letterSpacing =
+          sp.getDouble('letterSpacing') ?? prefs.letterSpacing;
+      prefs.indentFirstLine =
+          sp.getBool('indentFirstLine') ?? prefs.indentFirstLine;
+      prefs.fontIndex = sp.getInt('fontIndex') ?? prefs.fontIndex;
+      prefs.showHeader = sp.getBool('showHeader') ?? prefs.showHeader;
+      prefs.showFooter = sp.getBool('showFooter') ?? prefs.showFooter;
+      prefs.bgIndex = sp.getInt('bgIndex') ?? prefs.bgIndex;
       shelf = _loadList('shelf');
       history = _loadList('history');
       final bm = sp.getString('bookmarks');
@@ -150,9 +209,63 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setPaginate(bool v) {
-    prefs.paginate = v;
-    _sp?.setBool('paginate', v);
+  void setPageMode(PageMode v) {
+    prefs.pageMode = v;
+    _sp?.setString('pageMode', v.name);
+    // 旧字段同步写入，老版本回滚时仍能读懂
+    _sp?.setBool('paginate', v != PageMode.scroll);
+    notifyListeners();
+  }
+
+  /// 兼容旧调用点（设置页 / 阅读器面板的「翻页 ⇄ 滚动」开关）。
+  void setPaginate(bool v) =>
+      setPageMode(v ? PageMode.slide : PageMode.scroll);
+
+  void setMarginH(double v) {
+    prefs.marginH = v.clamp(0, 64).toDouble();
+    _sp?.setDouble('marginH', prefs.marginH);
+    notifyListeners();
+  }
+
+  void setMarginV(double v) {
+    prefs.marginV = v.clamp(0, 160).toDouble();
+    _sp?.setDouble('marginV', prefs.marginV);
+    notifyListeners();
+  }
+
+  void setLetterSpacing(double v) {
+    prefs.letterSpacing = v.clamp(-1, 8).toDouble();
+    _sp?.setDouble('letterSpacing', prefs.letterSpacing);
+    notifyListeners();
+  }
+
+  void setIndentFirstLine(bool v) {
+    prefs.indentFirstLine = v;
+    _sp?.setBool('indentFirstLine', v);
+    notifyListeners();
+  }
+
+  void setFontIndex(int v) {
+    prefs.fontIndex = v == 1 ? 1 : 0;
+    _sp?.setInt('fontIndex', prefs.fontIndex);
+    notifyListeners();
+  }
+
+  void setShowHeader(bool v) {
+    prefs.showHeader = v;
+    _sp?.setBool('showHeader', v);
+    notifyListeners();
+  }
+
+  void setShowFooter(bool v) {
+    prefs.showFooter = v;
+    _sp?.setBool('showFooter', v);
+    notifyListeners();
+  }
+
+  void setBgIndex(int v) {
+    prefs.bgIndex = v;
+    _sp?.setInt('bgIndex', v);
     notifyListeners();
   }
 

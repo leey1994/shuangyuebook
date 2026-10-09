@@ -35,3 +35,15 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/ # 无封面时按书名稳定分配的占位插画
+    - assets/sources/ # 内置「阅读 3.0」JSON 书源
+
+  fonts:
+    # 正文字体：霞鹜文楷 Lite（OFL-1.1，见 assets/fonts/OFL.txt）
+    # 体积提示：该字重约 13.5MB，是 APK 的大头；不想要可在
+    # lib/theme.dart 把 kReaderFonts 收成只有「系统字体」并删掉本段。
+    - family: LXGWWenKai
+      fonts:
+        - asset: assets/fonts/LXGWWenKai-Regular.ttf

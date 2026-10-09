@@ -95,3 +95,43 @@ class AppThemes {
         fg: const Color(0xFF1F2A20),
         dim: const Color(0xFF5F6E60),
       );
+
+/// 阅读背景配色（正文底色 / 正文色 / 次要色）。
+class ReaderBg {
+  const ReaderBg(this.name, this.bg, this.fg, this.dim);
+
+  final String name;
+  final Color bg;
+  final Color fg;
+  final Color dim;
+
+  bool get isDark => bg.computeLuminance() < 0.5;
+}
+
+/// 六种阅读背景（樱读融合）：日夜各三档，按阅读时段与偏好切换。
+///
+/// [index] 超出范围时回退到与全局主题一致的那档。
+const List<ReaderBg> kReaderBgs = [
+  // —— 日间 ——
+  ReaderBg('纸白', Color(0xFFFFFFFF), Color(0xFF1A1A1A), Color(0xFF8A8A8A)),
+  ReaderBg('米黄', Color(0xFFF7F0E1), Color(0xFF2E2A22), Color(0xFF8B8371)),
+  ReaderBg('护眼绿', Color(0xFFE8F0E4), Color(0xFF22301F), Color(0xFF6E7F6B)),
+  // —— 夜间 ——
+  ReaderBg('浅灰', Color(0xFF20242A), Color(0xFFD6DCE4), Color(0xFF818B98)),
+  ReaderBg('夜间', Color(0xFF12151A), Color(0xFFC9D1DA), Color(0xFF6F7884)),
+  ReaderBg('纯黑', Color(0xFF000000), Color(0xFFBFC6CE), Color(0xFF646C77)),
+];
+
+/// 取阅读背景配色：[index] 越界时按全局主题回退到日间首位 / 夜间首位。
+ReaderBg readerBgOf(int index, int theme) {
+  if (index >= 0 && index < kReaderBgs.length) return kReaderBgs[index];
+  return theme == AppThemes.black ? kReaderBgs[4] : kReaderBgs[0];
+}
+
+/// 背景是否属于夜间档（决定默认文字色是否需要反转）。
+bool readerBgIsDark(int index, int theme) =>
+    readerBgOf(index, theme).isDark;
+
+/// 内置正文字体：0 系统字体、1 霞鹜文楷（随包内置，离线可用）。
+const List<String> kReaderFonts = ['系统字体', '霞鹜文楷'];
+const String kLxgwFamily = 'LXGWWenKai';
