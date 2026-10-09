@@ -95,6 +95,21 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_loading) setState(() => _loading = false);
   }
 
+  /// 清空：输入框、结果、进度一起归零，并作废在途的那轮搜索。
+  void _clear() {
+    _gen++; // 让在途搜索的回调作废，避免清空后又冒出新结果
+    _controller.clear();
+    setState(() {
+      _results = [];
+      _loading = false;
+      _searched = false;
+      _query = '';
+      _error = null;
+      _done = 0;
+      _total = 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStore.I;
@@ -109,24 +124,26 @@ class _SearchScreenState extends State<SearchScreen> {
             border: InputBorder.none,
             suffixIcon: IconButton(
               icon: const Icon(Icons.clear),
-              onPressed: () => _controller.clear(),
+              tooltip: '清空',
+              // 连同搜索结果一起清掉，而不是只清输入框
+              onPressed: _clear,
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => _search(_controller.text), child: const Text('搜索')),
+          TextButton(
+              onPressed: () => _search(_controller.text),
+              child: const Text('搜索')),
         ],
+        // 进度钉在输入框正下方：滚动时始终可见，
+        // 且不占用结果列表的一行高度
+        bottom: _loading ? _progressBar() : null,
       ),
       body: ListenableBuilder(
         listenable: store,
         builder: (context, _) {
           return Column(
             children: [
-              if (_loading)
-                LinearProgressIndicator(
-                  value: _total == 0 ? null : _done / _total,
-                  minHeight: 2,
-                ),
               Expanded(
                 child: !_searched
                     ? _RecentSearches(
@@ -137,52 +154,36 @@ class _SearchScreenState extends State<SearchScreen> {
                         },
                         onClear: () => AppStore.I.clearSearchHistory(),
                       )
-                    : _loading
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(),
-                                const SizedBox(height: 16),
-                                Text(
-                                  '正在搜索…已完成 $_done/$_total 个书源，已找到 ${_results.length} 本',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(color: Theme.of(context).hintColor),
+                    // 已有结果就立刻展示，不等所有书源跑完
+                    // （慢源可能十几秒，不能让快源的结果白等）
+                    : _results.isNotEmpty
+                        ? _resultList(store)
+                        : _loading
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const CircularProgressIndicator(),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      '正在搜索…已完成 $_done/$_total 个书源',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              color:
+                                                  Theme.of(context).hintColor),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          )
-                        : _error != null
-                            ? Center(child: Text('搜索失败：$_error'))
-                            : _results.isEmpty
-                                ? Center(
+                              )
+                            : _error != null
+                                ? Center(child: Text('搜索失败：$_error'))
+                                : Center(
                                     child: Text('「$_query」没有结果',
                                         style: Theme.of(context)
                                             .textTheme
-                                            .bodyLarge))
-                                : ListView.builder(
-                                    itemCount: _results.length,
-                                    itemBuilder: (context, i) {
-                                      final (s, b) = _results[i];
-                                      return BookTile(
-                                        book: b,
-                                        trailing: Chip(
-                                          label: Text(s.name,
-                                              style: const TextStyle(fontSize: 11)),
-                                          padding: EdgeInsets.zero,
-                                          materialTapTargetSize:
-                                              MaterialTapTargetSize
-                                                  .shrinkWrap,
-                                        ),
-                                        onTap: () => Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                                builder: (_) =>
-                                                    BookDetailScreen(book: b))),
-                                      );
-                                    },
-                                  ),
+                                            .bodyLarge)),
               ),
             ],
           );
@@ -190,6 +191,61 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
     );
   }
+
+  /// 输入框下方的进度条：已完成 / 总数 + 文字说明。
+  PreferredSizeWidget _progressBar() => PreferredSize(
+        preferredSize: const Size.fromHeight(22),
+        child: Container(
+          height: 22,
+          color: Theme.of(context).colorScheme.surface,
+          child: Row(
+            children: [
+              Expanded(
+                child: LinearProgressIndicator(
+                  value: _total == 0 ? null : _done / _total,
+                  minHeight: 22,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  '$_done/$_total · 已找到 ${_results.length} 本',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _resultList(AppStore store) => ListView.builder(
+        itemCount: _results.length + (_loading ? 1 : 0),
+        itemBuilder: (context, i) {
+          if (i >= _results.length) {
+            // 列表末尾一行「还在搜」，其余书源回来会自动插到它前面
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text('还在搜索…已完成 $_done/$_total 个书源',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
+            );
+          }
+          final (s, b) = _results[i];
+          return BookTile(
+            book: b,
+            trailing: Chip(
+              label: Text(s.name, style: const TextStyle(fontSize: 11)),
+              padding: EdgeInsets.zero,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => BookDetailScreen(book: b))),
+          );
+        },
+      );
 }
 
 class _RecentSearches extends StatelessWidget {
@@ -206,8 +262,8 @@ class _RecentSearches extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Center(
-        child: Text('输入书名或作者开始搜索',
-            style: Theme.of(context).textTheme.bodyLarge),
+        child:
+            Text('输入书名或作者开始搜索', style: Theme.of(context).textTheme.bodyLarge),
       );
     }
     return ListView(

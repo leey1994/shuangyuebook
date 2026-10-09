@@ -249,8 +249,7 @@ class EpubParser {
       final entry = _findEntry(archive, href);
       if (entry == null || !entry.isFile) continue;
       final lower = href.toLowerCase();
-      final isHtml =
-          lower.endsWith('.xhtml') ||
+      final isHtml = lower.endsWith('.xhtml') ||
           lower.endsWith('.html') ||
           lower.endsWith('.htm') ||
           lower.endsWith('.xml');
@@ -461,8 +460,7 @@ class EpubParser {
     final doc = html_parser.parse(navStr);
     final anchors = <dom.Element>[];
     for (final nav in doc.querySelectorAll('nav')) {
-      final type =
-          nav.attributes['epub:type'] ??
+      final type = nav.attributes['epub:type'] ??
           nav.attributes['type'] ??
           nav.attributes['role'] ??
           '';

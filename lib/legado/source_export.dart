@@ -21,7 +21,9 @@ const int kClipboardExportLimitBytes = 200 * 1024;
 
 /// 导出结果。
 class SourceExportResult {
-  const SourceExportResult.clipboard() : path = null, byteLength = 0;
+  const SourceExportResult.clipboard()
+      : path = null,
+        byteLength = 0;
 
   const SourceExportResult.file(this.path, this.byteLength);
 

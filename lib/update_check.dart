@@ -61,15 +61,13 @@ class UpdateChecker {
 
   static Future<void> check(BuildContext context, {bool manual = false}) async {
     try {
-      final r = await http
-          .get(
-            Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
-            headers: {
-              'User-Agent': 'shuangyuebook-updater',
-              'Accept': 'application/vnd.github+json',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
+      final r = await http.get(
+        Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
+        headers: {
+          'User-Agent': 'shuangyuebook-updater',
+          'Accept': 'application/vnd.github+json',
+        },
+      ).timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
       final tag = (j['tag_name'] as String? ?? '').trim();
@@ -104,7 +102,11 @@ class UpdateChecker {
       await showDialog<void>(
         context: context,
         builder: (_) => _UpdateDialog(
-            tag: tag, notes: notes, htmlUrl: htmlUrl, apkUrl: apkUrl, zipUrl: zipUrl),
+            tag: tag,
+            notes: notes,
+            htmlUrl: htmlUrl,
+            apkUrl: apkUrl,
+            zipUrl: zipUrl),
       );
     } catch (_) {
       // 网络异常 / API 限流 / 无 release：静默跳过，不影响正常使用
@@ -190,8 +192,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       final stage = Directory('${dir.path}/shuangyue_update');
       if (stage.existsSync()) stage.deleteSync(recursive: true);
       stage.createSync(recursive: true);
-      var r = await Process.run(
-          'tar', ['-xf', target.path, '-C', stage.path]);
+      var r = await Process.run('tar', ['-xf', target.path, '-C', stage.path]);
       if (r.exitCode != 0) {
         // 旧系统无 tar 时退回 PowerShell
         r = await Process.run('powershell', [
@@ -245,9 +246,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     final client = http.Client();
     _client = client;
     try {
-      final resp =
-          await client.send(http.Request('GET', Uri.parse(url))).timeout(
-              const Duration(seconds: 30));
+      final resp = await client
+          .send(http.Request('GET', Uri.parse(url)))
+          .timeout(const Duration(seconds: 30));
       if (resp.statusCode != 200) {
         throw Exception('HTTP ${resp.statusCode}');
       }
@@ -304,8 +305,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     ];
     // SystemEncoding = 本机 ANSI 代码页，保证含中文/空格的路径写进 bat 不乱码
     bat.writeAsStringSync(lines.join(nl), encoding: const SystemEncoding());
-    Process.start('cmd.exe', ['/c', bat.path],
-        mode: ProcessStartMode.detached);
+    Process.start('cmd.exe', ['/c', bat.path], mode: ProcessStartMode.detached);
   }
 
   @override
@@ -331,9 +331,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                     constraints: const BoxConstraints(maxHeight: 320),
                     child: SingleChildScrollView(
                       child: Text(
-                        widget.notes.isEmpty
-                            ? '（该版本未填写发布说明）'
-                            : widget.notes,
+                        widget.notes.isEmpty ? '（该版本未填写发布说明）' : widget.notes,
                       ),
                     ),
                   ),

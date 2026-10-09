@@ -37,19 +37,19 @@ class TxtParser {
   static List<RegExp>? _patterns;
 
   static List<RegExp> get _chapterPatterns => _patterns ??= [
-    // 第1章 / 第一百二十三回 / 第 2 节 …（可带标题）
-    RegExp(r'^[ \t　]*第[0-9零一二三四五六七八九十百千万两〇]{1,12}[章回节卷篇集话部][^\n]{0,40}$'),
-    // 序章 / 楔子 / 尾声 / 番外 等
-    RegExp(
-      r'^[ \t　]*(?:序章|序言|序|楔子|引子|前言|开篇|后记|尾声|终章|尾章|番外[0-9一二三四五六七八九十]*|外传[0-9一二三四五六七八九十]*|附录[0-9一二三四五六七八九十]*)[^\n]{0,40}$',
-    ),
-    // Chapter 1 / CHAPTER 12
-    RegExp(
-      r'^[ \t　]*(?:Chapter|CHAPTER|chapter|Chap\.?|CHAP\.?)\s*[0-9IVXLCivxlc]{1,8}[^\n]{0,40}$',
-    ),
-    // 【第一章 标题】
-    RegExp(r'^[ \t　]*【[^】\n]{1,40}】[ \t　]*$'),
-  ];
+        // 第1章 / 第一百二十三回 / 第 2 节 …（可带标题）
+        RegExp(r'^[ \t　]*第[0-9零一二三四五六七八九十百千万两〇]{1,12}[章回节卷篇集话部][^\n]{0,40}$'),
+        // 序章 / 楔子 / 尾声 / 番外 等
+        RegExp(
+          r'^[ \t　]*(?:序章|序言|序|楔子|引子|前言|开篇|后记|尾声|终章|尾章|番外[0-9一二三四五六七八九十]*|外传[0-9一二三四五六七八九十]*|附录[0-9一二三四五六七八九十]*)[^\n]{0,40}$',
+        ),
+        // Chapter 1 / CHAPTER 12
+        RegExp(
+          r'^[ \t　]*(?:Chapter|CHAPTER|chapter|Chap\.?|CHAP\.?)\s*[0-9IVXLCivxlc]{1,8}[^\n]{0,40}$',
+        ),
+        // 【第一章 标题】
+        RegExp(r'^[ \t　]*【[^】\n]{1,40}】[ \t　]*$'),
+      ];
 
   /// 从文件字节解析。
   static TxtParseResult parseBytes(Uint8List bytes) {

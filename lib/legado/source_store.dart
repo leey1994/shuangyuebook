@@ -42,7 +42,7 @@ class SourceImportReport {
 /// 书源仓库（可监听，UI 依赖它刷新）。
 class SourceStore extends ChangeNotifier {
   SourceStore({AppDirs? dirsOverride, List<BookSource>? initial})
-    : _dirsOverride = dirsOverride {
+      : _dirsOverride = dirsOverride {
     if (initial != null) _sources.addAll(initial);
   }
 
@@ -107,9 +107,8 @@ class SourceStore extends ChangeNotifier {
       if (i >= 0) {
         // 保留用户当前的启用状态
         final keepEnabled = _sources[i].enabled;
-        _sources[i] = s.enabled == keepEnabled
-            ? s
-            : s.copyWith(enabled: keepEnabled);
+        _sources[i] =
+            s.enabled == keepEnabled ? s : s.copyWith(enabled: keepEnabled);
         updated++;
       } else {
         _sources.add(s);

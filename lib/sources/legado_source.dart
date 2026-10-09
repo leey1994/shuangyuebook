@@ -46,8 +46,7 @@ class LegadoSource extends NovelSource {
       _repo ?? OnlineRepo(store: SourceStore(initial: [source]));
 
   /// 本源是否支持发现页（有可静态解析的 exploreUrl）。
-  bool get hasExplore =>
-      OnlineRepo.parseExploreCategories(source).isNotEmpty;
+  bool get hasExplore => OnlineRepo.parseExploreCategories(source).isNotEmpty;
 
   /// 本源 exploreUrl 是否为 JS 脚本（静态解析不了，发现页会明确提示）。
   bool get exploreNeedsJs => OnlineRepo.hasJsExplore(source);
@@ -63,9 +62,31 @@ class LegadoSource extends NovelSource {
   @override
   String get baseUrl => source.bookSourceUrl;
 
-  /// Legado 书源没有「站点首页推荐」概念。
+  /// 「首页推荐」← 本源第一个发现分类的前 [homePerSource] 本。
+  ///
+  /// Legado 书源没有真正的站点首页概念，但它的 `exploreUrl` 第一个分类
+  /// （通常是「玄幻」「热门」之类）就是该源当下最像推荐榜的一页。
+  /// 只取前几条，避免单个源在聚合推荐里刷屏。
   @override
-  Future<List<Book>> fetchHome() async => const [];
+  Future<List<Book>> fetchHome() async {
+    if (!hasExplore) return const [];
+    try {
+      final cat = OnlineRepo.parseExploreCategories(source).first;
+      final res = await _r.exploreSource(source, cat);
+      if (res.error != null) return const [];
+      return [
+        for (final b in res.books.take(homePerSource)) _toBook(b),
+      ];
+    } catch (_) {
+      return const []; // 单源失败不影响聚合
+    }
+  }
+
+  /// 每个导入书源在聚合推荐里最多贡献几本。
+  ///
+  /// 只限导入源、不限固化源：导入源可能有几十个，不设限会把「发现」页
+  /// 撑爆并拖慢聚合；固化源就 10 个且一直是原样，保持既有观感。
+  static const int homePerSource = 5;
 
   /// Legado 书源没有「书单中心」概念。
   @override
@@ -146,8 +167,9 @@ class LegadoSource extends NovelSource {
   @override
   List<String> contentOf(Document doc, String pageUrl) => const [];
 
-  static String? _pick(String? a, String? b) =>
-      (a != null && a.isNotEmpty) ? a : ((b != null && b.isNotEmpty) ? b : null);
+  static String? _pick(String? a, String? b) => (a != null && a.isNotEmpty)
+      ? a
+      : ((b != null && b.isNotEmpty) ? b : null);
 
   /// SearchBook → 爽阅的 Book（id 用书籍页地址，与固化书源保持同一约定）。
   Book _toBook(SearchBook b) => Book(

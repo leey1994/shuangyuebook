@@ -38,8 +38,7 @@ Future<void> _dispatch(NavigatorState navigator, String path) async {
       if (!navigator.mounted) return;
       ScaffoldMessenger.of(navigator.context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-            content: Text(ok ? '已导入书架' : '已在书架，或无法解析')));
+        ..showSnackBar(SnackBar(content: Text(ok ? '已导入书架' : '已在书架，或无法解析')));
       if (!ok) return;
       // 导入后直接进阅读器
       final entry = AppStore.I.shelfEntry(path);

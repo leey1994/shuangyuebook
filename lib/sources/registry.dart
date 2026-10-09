@@ -12,7 +12,6 @@ import 'source.dart';
 import 'suduguu.dart';
 import 'sushujuan.dart';
 import 'yewa.dart';
-import 'zzbook.dart';
 
 /// 内置固化书源（手写 Dart 适配器，永远启用，离线可读）。
 ///
@@ -24,7 +23,6 @@ final List<NovelSource> builtinSources = <NovelSource>[
   Shuku52Source(),
   BanshanrenSource(),
   ShenwenSource(),
-  ZzbookSource(),
   SushujuanSource(),
   LibahaoSource(),
   MinyuanSource(),
@@ -41,7 +39,8 @@ final List<LegadoSource> _imported = <LegadoSource>[];
 /// 用导入书源刷新登记表（启动时 / 书源管理页改动后调用）。
 ///
 /// 会重建 [LegadoSource] 实例（内部持有 SourceStore 快照），因此幂等。
-void syncImportedSources(List<BookSource> all, {bool Function(BookSource)? filter}) {
+void syncImportedSources(List<BookSource> all,
+    {bool Function(BookSource)? filter}) {
   _imported
     ..clear()
     ..addAll([

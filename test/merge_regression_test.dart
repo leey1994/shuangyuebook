@@ -12,7 +12,9 @@ import 'package:novel_reader/legado/models.dart';
 import 'package:novel_reader/legado/rule_analyzer.dart';
 import 'package:novel_reader/local/txt_parser.dart';
 import 'package:novel_reader/models.dart';
+import 'package:novel_reader/sources/legado_source.dart';
 import 'package:novel_reader/sources/local_source.dart';
+import 'package:novel_reader/sources/registry.dart';
 import 'package:novel_reader/theme.dart';
 
 void main() {
@@ -238,6 +240,55 @@ void main() {
       expect(kReaderBgs.length, 6);
       expect(kReaderBgs.where((b) => !b.isDark).length, 3);
       expect(kReaderBgs.where((b) => b.isDark).length, 3);
+    });
+  });
+
+  group('内置书源登记表', () {
+    test('智能书库已移除', () {
+      expect(
+        builtinSources.any((s) => s.name == '智能书库'),
+        isFalse,
+        reason: '内置源里不应再出现「智能书库」',
+      );
+      expect(builtinSources.any((s) => s.id == 'zzbook'), isFalse);
+    });
+
+    test('其余固化源齐全（删除一个不能误伤）', () {
+      final names = builtinSources.map((s) => s.name).toSet();
+      for (final n in [
+        '顶点小说',
+        '速读谷',
+        '黄金屋',
+        '52书库',
+        '搬山人',
+        '神文小说',
+        '素书卷',
+        '篱笆好文学',
+        '小原文学',
+        '全本小说网',
+      ]) {
+        expect(names, contains(n), reason: '「$n」不应被误删');
+      }
+    });
+
+    test('书源 id 唯一', () {
+      final ids = builtinSources.map((s) => s.id).toList();
+      expect(ids.toSet().length, ids.length);
+    });
+  });
+
+  group('导入书源参与聚合的配额', () {
+    test('每个导入源在推荐里最多 5 本', () {
+      expect(LegadoSource.homePerSource, 5);
+    });
+
+    test('导入源与本地书都进了 allSources', () {
+      final all = allSources.map((s) => s.id).toSet();
+      expect(all, contains('local'));
+      // 固化源全在
+      for (final s in builtinSources) {
+        expect(all, contains(s.id));
+      }
     });
   });
 }

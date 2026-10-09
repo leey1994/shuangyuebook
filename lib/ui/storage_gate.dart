@@ -73,8 +73,9 @@ class _StoragePermissionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: AppThemes.scaffold(
-          theme.brightness == Brightness.dark ? AppThemes.black : AppThemes.white),
+      backgroundColor: AppThemes.scaffold(theme.brightness == Brightness.dark
+          ? AppThemes.black
+          : AppThemes.white),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

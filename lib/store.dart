@@ -143,7 +143,8 @@ class AppStore extends ChangeNotifier {
       }
       searchHistory = sp.getStringList('searchHistory') ?? [];
       _shelfSort = shelfSortModeFrom(sp.getString('shelfSort'));
-      _shelfAscending = sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
+      _shelfAscending =
+          sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
       _shelfView = shelfViewModeFrom(sp.getString('shelfView'));
       applyShelfSort();
     }
@@ -191,7 +192,8 @@ class AppStore extends ChangeNotifier {
     if (bookmarks) {
       _sp?.setString(
           'bookmarks',
-          jsonEncode(this.bookmarks
+          jsonEncode(this
+              .bookmarks
               .map((k, v) => MapEntry(k, v.map((b) => b.toJson()).toList()))));
     }
     if (notify) notifyListeners();
@@ -271,7 +273,6 @@ class AppStore extends ChangeNotifier {
 
   // ---------- 阅读偏好 ----------
 
-
   void setFontSize(double v) {
     prefs.fontSize = v.clamp(12, 32).toDouble();
     _sp?.setDouble('fontSize', prefs.fontSize);
@@ -299,8 +300,7 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 兼容旧调用点（设置页 / 阅读器面板的「翻页 ⇄ 滚动」开关）。
-  void setPaginate(bool v) =>
-      setPageMode(v ? PageMode.slide : PageMode.scroll);
+  void setPaginate(bool v) => setPageMode(v ? PageMode.slide : PageMode.scroll);
 
   void setMarginH(double v) {
     prefs.marginH = v.clamp(0, 64).toDouble();
@@ -491,7 +491,9 @@ class AppStore extends ChangeNotifier {
     if (q.isEmpty) return;
     searchHistory.remove(q);
     searchHistory.insert(0, q);
-    if (searchHistory.length > 20) searchHistory.removeRange(20, searchHistory.length);
+    if (searchHistory.length > 20) {
+      searchHistory.removeRange(20, searchHistory.length);
+    }
     _sp?.setStringList('searchHistory', searchHistory);
     notifyListeners();
   }
@@ -592,9 +594,8 @@ class AppStore extends ChangeNotifier {
     if (chs == null || chs.isEmpty) return null;
     return BookDetail(
       book: b,
-      chapters: chs
-          .map((e) => Chapter.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      chapters:
+          chs.map((e) => Chapter.fromJson(e as Map<String, dynamic>)).toList(),
     );
   }
 

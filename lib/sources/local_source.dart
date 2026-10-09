@@ -167,8 +167,7 @@ class LocalSource extends NovelSource {
     final bytes = await f.readAsBytes();
     final r = TxtParser.parseBytes(bytes);
     final paras = <List<String>>[
-      for (final c in r.chapters)
-        r.text.substring(c.start, c.end).split('\n')
+      for (final c in r.chapters) r.text.substring(c.start, c.end).split('\n')
     ];
     // 作者：正文前 20 行里找「作者：xxx」
     final head = r.text.substring(0, r.text.length.clamp(0, 4000));
@@ -187,8 +186,8 @@ class LocalSource extends NovelSource {
     var coverPath = '';
     final bytes = r.coverBytes;
     if (bytes != null && bytes.isNotEmpty) {
-      coverPath = await _writeCover(
-          '${_hash(f.path)}.${r.coverExtension}', bytes);
+      coverPath =
+          await _writeCover('${_hash(f.path)}.${r.coverExtension}', bytes);
     }
     return LocalBookData(
       title: r.meta.title.isEmpty ? _fileName(f.path) : r.meta.title,

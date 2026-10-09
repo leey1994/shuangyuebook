@@ -90,20 +90,20 @@ class SearchBook {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'origin': origin,
-    'originName': originName,
-    'name': name,
-    'author': author,
-    'kind': kind,
-    'intro': intro,
-    'coverUrl': coverUrl,
-    'bookUrl': bookUrl,
-    'tocUrl': tocUrl,
-    'latestChapterTitle': latestChapterTitle,
-    'latestChapterUrl': latestChapterUrl,
-    'wordCount': wordCount,
-    'time': time,
-  });
+        'origin': origin,
+        'originName': originName,
+        'name': name,
+        'author': author,
+        'kind': kind,
+        'intro': intro,
+        'coverUrl': coverUrl,
+        'bookUrl': bookUrl,
+        'tocUrl': tocUrl,
+        'latestChapterTitle': latestChapterTitle,
+        'latestChapterUrl': latestChapterUrl,
+        'wordCount': wordCount,
+        'time': time,
+      });
 }
 
 /// 搜索规则（ruleSearch）。
@@ -152,18 +152,18 @@ class SearchRule {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'checkKeyWord': checkKeyWord,
-    'bookList': bookList,
-    'name': name,
-    'author': author,
-    'intro': intro,
-    'kind': kind,
-    'lastChapter': lastChapter,
-    'updateTime': updateTime,
-    'bookUrl': bookUrl,
-    'coverUrl': coverUrl,
-    'wordCount': wordCount,
-  });
+        'checkKeyWord': checkKeyWord,
+        'bookList': bookList,
+        'name': name,
+        'author': author,
+        'intro': intro,
+        'kind': kind,
+        'lastChapter': lastChapter,
+        'updateTime': updateTime,
+        'bookUrl': bookUrl,
+        'coverUrl': coverUrl,
+        'wordCount': wordCount,
+      });
 }
 
 /// 详情页规则（ruleBookInfo）。
@@ -215,19 +215,19 @@ class BookInfoRule {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'init': init,
-    'name': name,
-    'author': author,
-    'intro': intro,
-    'kind': kind,
-    'lastChapter': lastChapter,
-    'updateTime': updateTime,
-    'coverUrl': coverUrl,
-    'tocUrl': tocUrl,
-    'wordCount': wordCount,
-    'canReName': canReName,
-    'downloadUrls': downloadUrls,
-  });
+        'init': init,
+        'name': name,
+        'author': author,
+        'intro': intro,
+        'kind': kind,
+        'lastChapter': lastChapter,
+        'updateTime': updateTime,
+        'coverUrl': coverUrl,
+        'tocUrl': tocUrl,
+        'wordCount': wordCount,
+        'canReName': canReName,
+        'downloadUrls': downloadUrls,
+      });
 }
 
 /// 目录规则（ruleToc）。
@@ -270,16 +270,16 @@ class TocRule {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'preUpdateJs': preUpdateJs,
-    'chapterList': chapterList,
-    'chapterName': chapterName,
-    'chapterUrl': chapterUrl,
-    'isVolume': isVolume,
-    'isVip': isVip,
-    'isPay': isPay,
-    'updateTime': updateTime,
-    'nextTocUrl': nextTocUrl,
-  });
+        'preUpdateJs': preUpdateJs,
+        'chapterList': chapterList,
+        'chapterName': chapterName,
+        'chapterUrl': chapterUrl,
+        'isVolume': isVolume,
+        'isVip': isVip,
+        'isPay': isPay,
+        'updateTime': updateTime,
+        'nextTocUrl': nextTocUrl,
+      });
 }
 
 /// 正文规则（ruleContent）。
@@ -316,14 +316,14 @@ class ContentRule {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'content': content,
-    'nextContentUrl': nextContentUrl,
-    'webJs': webJs,
-    'sourceRegex': sourceRegex,
-    'replaceRegex': replaceRegex,
-    'imageStyle': imageStyle,
-    'payAction': payAction,
-  });
+        'content': content,
+        'nextContentUrl': nextContentUrl,
+        'webJs': webJs,
+        'sourceRegex': sourceRegex,
+        'replaceRegex': replaceRegex,
+        'imageStyle': imageStyle,
+        'payAction': payAction,
+      });
 }
 
 /// 发现页规则（ruleExplore，M4 使用）。
@@ -369,17 +369,17 @@ class ExploreRule {
   }
 
   Map<String, dynamic> toJson() => _compact({
-    'bookList': bookList,
-    'name': name,
-    'author': author,
-    'intro': intro,
-    'kind': kind,
-    'lastChapter': lastChapter,
-    'updateTime': updateTime,
-    'bookUrl': bookUrl,
-    'coverUrl': coverUrl,
-    'wordCount': wordCount,
-  });
+        'bookList': bookList,
+        'name': name,
+        'author': author,
+        'intro': intro,
+        'kind': kind,
+        'lastChapter': lastChapter,
+        'updateTime': updateTime,
+        'bookUrl': bookUrl,
+        'coverUrl': coverUrl,
+        'wordCount': wordCount,
+      });
 }
 
 /// 书源顶层模型。字段顺序与含义对照 Legado 书源 JSON 的公开格式。
@@ -515,9 +515,8 @@ class BookSource {
           ? null
           : ExploreRule.fromJson(m['ruleExplore']),
       searchUrl: _s(m['searchUrl']),
-      searchRule: m['ruleSearch'] == null
-          ? null
-          : SearchRule.fromJson(m['ruleSearch']),
+      searchRule:
+          m['ruleSearch'] == null ? null : SearchRule.fromJson(m['ruleSearch']),
       bookInfoRule: m['ruleBookInfo'] == null
           ? null
           : BookInfoRule.fromJson(m['ruleBookInfo']),
@@ -530,65 +529,65 @@ class BookSource {
   }
 
   Map<String, dynamic> toJson() => {
-    ...extra,
-    'bookSourceUrl': bookSourceUrl,
-    'bookSourceName': bookSourceName,
-    if (bookSourceGroup != null) 'bookSourceGroup': bookSourceGroup,
-    'bookSourceType': bookSourceType,
-    if (bookUrlPattern != null) 'bookUrlPattern': bookUrlPattern,
-    'customOrder': customOrder,
-    'enabled': enabled,
-    'enabledExplore': enabledExplore,
-    'enabledCookieJar': enabledCookieJar,
-    if (concurrentRate != null) 'concurrentRate': concurrentRate,
-    if (header != null) 'header': header,
-    if (loginUrl != null) 'loginUrl': loginUrl,
-    if (loginUi != null) 'loginUi': loginUi,
-    if (loginCheckJs != null) 'loginCheckJs': loginCheckJs,
-    if (bookSourceComment != null) 'bookSourceComment': bookSourceComment,
-    if (variableComment != null) 'variableComment': variableComment,
-    if (lastUpdateTime != null) 'lastUpdateTime': lastUpdateTime,
-    if (respondTime != null) 'respondTime': respondTime,
-    'weight': weight,
-    if (exploreUrl != null) 'exploreUrl': exploreUrl,
-    if (exploreRule != null) 'ruleExplore': exploreRule!.toJson(),
-    if (searchUrl != null) 'searchUrl': searchUrl,
-    if (searchRule != null) 'ruleSearch': searchRule!.toJson(),
-    if (bookInfoRule != null) 'ruleBookInfo': bookInfoRule!.toJson(),
-    if (tocRule != null) 'ruleToc': tocRule!.toJson(),
-    if (contentRule != null) 'ruleContent': contentRule!.toJson(),
-  };
+        ...extra,
+        'bookSourceUrl': bookSourceUrl,
+        'bookSourceName': bookSourceName,
+        if (bookSourceGroup != null) 'bookSourceGroup': bookSourceGroup,
+        'bookSourceType': bookSourceType,
+        if (bookUrlPattern != null) 'bookUrlPattern': bookUrlPattern,
+        'customOrder': customOrder,
+        'enabled': enabled,
+        'enabledExplore': enabledExplore,
+        'enabledCookieJar': enabledCookieJar,
+        if (concurrentRate != null) 'concurrentRate': concurrentRate,
+        if (header != null) 'header': header,
+        if (loginUrl != null) 'loginUrl': loginUrl,
+        if (loginUi != null) 'loginUi': loginUi,
+        if (loginCheckJs != null) 'loginCheckJs': loginCheckJs,
+        if (bookSourceComment != null) 'bookSourceComment': bookSourceComment,
+        if (variableComment != null) 'variableComment': variableComment,
+        if (lastUpdateTime != null) 'lastUpdateTime': lastUpdateTime,
+        if (respondTime != null) 'respondTime': respondTime,
+        'weight': weight,
+        if (exploreUrl != null) 'exploreUrl': exploreUrl,
+        if (exploreRule != null) 'ruleExplore': exploreRule!.toJson(),
+        if (searchUrl != null) 'searchUrl': searchUrl,
+        if (searchRule != null) 'ruleSearch': searchRule!.toJson(),
+        if (bookInfoRule != null) 'ruleBookInfo': bookInfoRule!.toJson(),
+        if (tocRule != null) 'ruleToc': tocRule!.toJson(),
+        if (contentRule != null) 'ruleContent': contentRule!.toJson(),
+      };
 
   /// 复制并替换部分字段（当前用于启用状态切换）。
   BookSource copyWith({bool? enabled}) => BookSource(
-    bookSourceUrl: bookSourceUrl,
-    bookSourceName: bookSourceName,
-    bookSourceGroup: bookSourceGroup,
-    bookSourceType: bookSourceType,
-    bookUrlPattern: bookUrlPattern,
-    customOrder: customOrder,
-    enabled: enabled ?? this.enabled,
-    enabledExplore: enabledExplore,
-    enabledCookieJar: enabledCookieJar,
-    concurrentRate: concurrentRate,
-    header: header,
-    loginUrl: loginUrl,
-    loginUi: loginUi,
-    loginCheckJs: loginCheckJs,
-    bookSourceComment: bookSourceComment,
-    variableComment: variableComment,
-    lastUpdateTime: lastUpdateTime,
-    respondTime: respondTime,
-    weight: weight,
-    exploreUrl: exploreUrl,
-    exploreRule: exploreRule,
-    searchUrl: searchUrl,
-    searchRule: searchRule,
-    bookInfoRule: bookInfoRule,
-    tocRule: tocRule,
-    contentRule: contentRule,
-    extra: extra,
-  );
+        bookSourceUrl: bookSourceUrl,
+        bookSourceName: bookSourceName,
+        bookSourceGroup: bookSourceGroup,
+        bookSourceType: bookSourceType,
+        bookUrlPattern: bookUrlPattern,
+        customOrder: customOrder,
+        enabled: enabled ?? this.enabled,
+        enabledExplore: enabledExplore,
+        enabledCookieJar: enabledCookieJar,
+        concurrentRate: concurrentRate,
+        header: header,
+        loginUrl: loginUrl,
+        loginUi: loginUi,
+        loginCheckJs: loginCheckJs,
+        bookSourceComment: bookSourceComment,
+        variableComment: variableComment,
+        lastUpdateTime: lastUpdateTime,
+        respondTime: respondTime,
+        weight: weight,
+        exploreUrl: exploreUrl,
+        exploreRule: exploreRule,
+        searchUrl: searchUrl,
+        searchRule: searchRule,
+        bookInfoRule: bookInfoRule,
+        tocRule: tocRule,
+        contentRule: contentRule,
+        extra: extra,
+      );
 
   /// 从 JSON（单个对象或数组）解析书源列表；容错：坏条目跳过。
   static List<BookSource> listFromJson(dynamic json) {

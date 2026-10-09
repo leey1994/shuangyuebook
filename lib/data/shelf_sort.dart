@@ -24,13 +24,13 @@ enum ShelfSortMode {
   /// - 书名 / 作者：A→Z 顺读 → 升序；
   /// - 阅读进度 / 字数：多的在前 → 降序。
   bool get defaultAscending => switch (this) {
-    ShelfSortMode.recentRead => false,
-    ShelfSortMode.addedTime => false,
-    ShelfSortMode.title => true,
-    ShelfSortMode.author => true,
-    ShelfSortMode.progress => false,
-    ShelfSortMode.chars => false,
-  };
+        ShelfSortMode.recentRead => false,
+        ShelfSortMode.addedTime => false,
+        ShelfSortMode.title => true,
+        ShelfSortMode.author => true,
+        ShelfSortMode.progress => false,
+        ShelfSortMode.chars => false,
+      };
 }
 
 /// 书架显示方式。
@@ -46,20 +46,20 @@ enum ShelfViewMode {
 
 /// 存储字符串 → 排序方式（未知 / 空回退「最近阅读」）。
 ShelfSortMode shelfSortModeFrom(String? value) => switch (value) {
-  'addedTime' => ShelfSortMode.addedTime,
-  'title' => ShelfSortMode.title,
-  'author' => ShelfSortMode.author,
-  'progress' => ShelfSortMode.progress,
-  'chars' => ShelfSortMode.chars,
-  _ => ShelfSortMode.recentRead,
-};
+      'addedTime' => ShelfSortMode.addedTime,
+      'title' => ShelfSortMode.title,
+      'author' => ShelfSortMode.author,
+      'progress' => ShelfSortMode.progress,
+      'chars' => ShelfSortMode.chars,
+      _ => ShelfSortMode.recentRead,
+    };
 
 /// 存储字符串 → 显示方式（未知 / 空回退「网格」）。
 ShelfViewMode shelfViewModeFrom(String? value) => switch (value) {
-  'compact' => ShelfViewMode.compact,
-  'list' => ShelfViewMode.list,
-  _ => ShelfViewMode.grid,
-};
+      'compact' => ShelfViewMode.compact,
+      'list' => ShelfViewMode.list,
+      _ => ShelfViewMode.grid,
+    };
 
 /// 进度比例（0~1）。总章数未知时按已读章数封顶，至少给一点进度。
 double shelfProgressOf(ShelfEntry e) {

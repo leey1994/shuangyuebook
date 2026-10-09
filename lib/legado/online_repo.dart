@@ -592,7 +592,10 @@ class OnlineRepo {
 
     final n = concurrency.clamp(1, tasks.length);
     await Future.wait(List.generate(n, (_) => worker()));
-    return [for (final r in results) if (r != null) r];
+    return [
+      for (final r in results)
+        if (r != null) r
+    ];
   }
 
   /// 所有支持发现页的书源（按名称排序），供发现页顶部选择。

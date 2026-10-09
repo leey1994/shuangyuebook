@@ -12,7 +12,8 @@ import '../store.dart';
 import '../theme.dart';
 
 /// 打开本地书导入页。
-Future<void> showLocalImport(BuildContext context) => Navigator.of(context).push(
+Future<void> showLocalImport(BuildContext context) =>
+    Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const LocalImportPage()),
     );
 
@@ -317,9 +318,8 @@ class _LocalImportPageState extends State<LocalImportPage> {
 /// Android 上需要「所有文件访问」权限才能列这些目录；拿不到时列表为空，
 /// 用户仍可通过「上一级」从可读目录进入。
 List<String> defaultScanRoots() {
-  final home = Platform.environment['USERPROFILE'] ??
-      Platform.environment['HOME'] ??
-      '';
+  final home =
+      Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '';
   if (Platform.isWindows) {
     return [
       if (home.isNotEmpty) home,

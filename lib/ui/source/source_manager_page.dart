@@ -38,7 +38,8 @@ class SourceManagerPage extends StatefulWidget {
 
 class _SourceManagerPageState extends State<SourceManagerPage> {
   /// main.dart 已监听 store 并同步登记表，这里不再重复调用 syncImportedSources。
-  late final SourceStore _store = widget.store ?? SourceStore.shared ?? _fresh();
+  late final SourceStore _store =
+      widget.store ?? SourceStore.shared ?? _fresh();
 
   /// 批量管理：非空表示正在多选（值为已选书源地址）。
   final Set<String> _selected = {};
@@ -370,7 +371,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(s.bookSourceName.isEmpty ? s.bookSourceUrl : s.bookSourceName,
+              Text(
+                  s.bookSourceName.isEmpty ? s.bookSourceUrl : s.bookSourceName,
                   style: Theme.of(ctx).textTheme.titleMedium),
               const SizedBox(height: 2),
               Text(
@@ -456,7 +458,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               child: Text(k, style: Theme.of(ctx).textTheme.bodySmall),
             ),
             Expanded(
-              child: SelectableText(v, style: Theme.of(ctx).textTheme.bodySmall),
+              child:
+                  SelectableText(v, style: Theme.of(ctx).textTheme.bodySmall),
             ),
           ],
         ),
@@ -609,8 +612,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   Future<void> _importFromText() async {
-    final text = await _prompt('粘贴书源 JSON', '在此粘贴书源 JSON…',
-        confirm: '导入', maxLines: 8);
+    final text =
+        await _prompt('粘贴书源 JSON', '在此粘贴书源 JSON…', confirm: '导入', maxLines: 8);
     if (text == null || text.isEmpty || !mounted) return;
     _report(_store.importFromText(text));
   }

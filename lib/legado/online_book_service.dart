@@ -44,7 +44,7 @@ class OnlineBookInfo {
 /// 在线书籍服务。
 class OnlineBookService {
   OnlineBookService({SourceHttpClient? client})
-    : _client = client ?? SourceHttpClient();
+      : _client = client ?? SourceHttpClient();
 
   final SourceHttpClient _client;
 

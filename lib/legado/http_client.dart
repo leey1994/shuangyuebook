@@ -52,8 +52,14 @@ class SourceHttpException implements Exception {
 /// 轻量请求客户端。
 class SourceHttpClient {
   SourceHttpClient({http.Client? client, Duration? timeout})
-    : _client = client ?? http.Client(),
-      defaultTimeout = timeout ?? const Duration(seconds: 15);
+      : _client = client ?? sharedClient,
+        defaultTimeout = timeout ?? const Duration(seconds: 15);
+
+  /// 进程级共享连接池。
+  ///
+  /// 书源管理页每改动一次就会重建全部 [LegadoSource]，若每个实例各建一个
+  /// http.Client，反复启停书源会不断泄漏连接池。爽阅的 Net 也是同样做法。
+  static final http.Client sharedClient = http.Client();
 
   final http.Client _client;
   final Duration defaultTimeout;
@@ -66,14 +72,15 @@ class SourceHttpClient {
     String? charset,
     Duration? timeout,
     int retries = 1,
-  }) => request(
-    'GET',
-    url,
-    headers: headers,
-    charset: charset,
-    timeout: timeout,
-    retries: retries,
-  );
+  }) =>
+      request(
+        'GET',
+        url,
+        headers: headers,
+        charset: charset,
+        timeout: timeout,
+        retries: retries,
+      );
 
   /// POST（body 为原始字符串，通常已在模板层渲染好）。
   Future<SourceResponse> post(
@@ -83,15 +90,16 @@ class SourceHttpClient {
     String? charset,
     Duration? timeout,
     int retries = 1,
-  }) => request(
-    'POST',
-    url,
-    headers: headers,
-    body: body,
-    charset: charset,
-    timeout: timeout,
-    retries: retries,
-  );
+  }) =>
+      request(
+        'POST',
+        url,
+        headers: headers,
+        body: body,
+        charset: charset,
+        timeout: timeout,
+        retries: retries,
+      );
 
   /// 通用请求（带重试与 Cookie）。
   Future<SourceResponse> request(
@@ -164,7 +172,12 @@ class SourceHttpClient {
     }
   }
 
-  void close() => _client.close();
+  /// 只关自己创建的连接池；共享的那个由进程生命周期托管，关了会影响全 App。
+  void close() {
+    if (_ownsClient) _client.close();
+  }
+
+  bool get _ownsClient => !identical(_client, sharedClient);
 }
 
 /// 解析 `concurrentRate`：`N/M`（M 秒 N 次）或 `N`（每秒 N 次）。

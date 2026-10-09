@@ -128,9 +128,8 @@ class AnalyzeRule {
   List<Object> getElements(String rule, {Object? ctx}) {
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
       final raw = _evalPiece(alt, ctx);
-      final els = raw
-          .where((o) => o is dom.Element || o is xml.XmlElement)
-          .toList();
+      final els =
+          raw.where((o) => o is dom.Element || o is xml.XmlElement).toList();
       if (els.isNotEmpty) return els;
     }
     return const [];

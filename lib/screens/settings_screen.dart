@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/shelf_sort.dart';
@@ -63,7 +63,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 title: Text(m.label),
                 trailing: store.shelfSort == m
-                    ? Icon(Icons.check, color: Theme.of(ctx).colorScheme.primary)
+                    ? Icon(Icons.check,
+                        color: Theme.of(ctx).colorScheme.primary)
                     : null,
                 onTap: () {
                   store.setShelfSort(m);
@@ -125,7 +126,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   items: [
                     for (final m in PageMode.values)
                       DropdownMenuItem(
-                          value: m, child: Text(m.label, style: const TextStyle(fontSize: 13))),
+                          value: m,
+                          child: Text(m.label,
+                              style: const TextStyle(fontSize: 13))),
                   ],
                   onChanged: (v) {
                     if (v != null) store.setPageMode(v);
@@ -199,9 +202,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ButtonSegment(value: AppThemes.white, label: Text('锦绣白')),
                     ButtonSegment(value: AppThemes.black, label: Text('极光黑')),
                   ],
-                  selected: {p.theme == AppThemes.black
-                      ? AppThemes.black
-                      : AppThemes.white},
+                  selected: {
+                    p.theme == AppThemes.black
+                        ? AppThemes.black
+                        : AppThemes.white
+                  },
                   onSelectionChanged: (s) => store.setTheme(s.first),
                 ),
               ),
@@ -210,8 +215,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.sort),
                 title: const Text('书架排序'),
-                subtitle: Text(
-                    '${store.shelfSort.label} · '
+                subtitle: Text('${store.shelfSort.label} · '
                     '${store.shelfAscending ? '正序' : '倒序'}'),
                 trailing: const Icon(Icons.chevron_right, size: 18),
                 onTap: () => _pickSort(context),
@@ -229,8 +233,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: const Text('全部书签'),
                 subtitle: const Text('跨书查看书签并跳回原文'),
                 trailing: const Icon(Icons.chevron_right, size: 18),
-                onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const BookmarksPage())),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const BookmarksPage())),
               ),
               const Divider(),
               const _SectionHeader('离线缓存'),
@@ -313,7 +317,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.language),
                 title: const Text('静态主页'),
-                subtitle: const Text('https://leey1994.github.io/shuangyuebook/'),
+                subtitle:
+                    const Text('https://leey1994.github.io/shuangyuebook/'),
                 trailing: const Icon(Icons.open_in_new, size: 18),
                 onTap: () => launchUrl(
                     Uri.parse('https://leey1994.github.io/shuangyuebook/'),

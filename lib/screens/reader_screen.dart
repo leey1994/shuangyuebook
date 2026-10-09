@@ -41,7 +41,8 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver {
+class _ReaderScreenState extends State<ReaderScreen>
+    with WidgetsBindingObserver {
   late NovelSource _src;
   BookDetail? _detail;
   Object? _error;
@@ -274,9 +275,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   ReaderPrefs get _prefs => _store.prefs;
 
   Book get _book => _detail?.book ?? widget.book;
-  String get _chapterTitle => _chIdx >= 0 && _chIdx < (_detail?.chapters.length ?? 0)
-      ? _detail!.chapters[_chIdx].title
-      : '';
+  String get _chapterTitle =>
+      _chIdx >= 0 && _chIdx < (_detail?.chapters.length ?? 0)
+          ? _detail!.chapters[_chIdx].title
+          : '';
 
   Future<void> _loadDetail() async {
     setState(() {
@@ -309,7 +311,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return;
     }
     _chIdx = _chIdx.clamp(0, _detail!.chapters.length - 1).toInt();
-    await _loadChapter(_chIdx, startPage: widget.page, startOffset: widget.paragraph);
+    await _loadChapter(_chIdx,
+        startPage: widget.page, startOffset: widget.paragraph);
   }
 
   Future<void> _loadChapter(
@@ -468,7 +471,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+      ..showSnackBar(
+          SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
   // ---------- 翻页 / 换章 ----------
@@ -572,8 +576,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             final ts = MediaQuery.textScalerOf(context);
             _lastScaler = ts;
             if (w > 0 && h > 0) {
-              final key = Object.hash(
-                  identityHashCode(_paras), w, h, _prefs.layoutSignature, ts.toString());
+              final key = Object.hash(identityHashCode(_paras), w, h,
+                  _prefs.layoutSignature, ts.toString());
               if (_pages == null) {
                 // 新章节首排：立即分页（避免白屏）
                 _pages = paginateParas(
@@ -594,8 +598,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               } else if (_pagesKey != key) {
                 // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
                 _repagTimer?.cancel();
-                _repagTimer = Timer(
-                    const Duration(milliseconds: 160), _repaginate);
+                _repagTimer =
+                    Timer(const Duration(milliseconds: 160), _repaginate);
               }
             }
             if (_pages != null && _pages!.isNotEmpty) {
@@ -625,12 +629,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     child: _buildContent(),
                   ),
                 ),
-                if (_prefs.showHeader) Positioned(top: 0, left: 0, right: 0, child: _buildHeader(c)),
-                if (_prefs.showFooter) Positioned(bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
+                if (_prefs.showHeader)
+                  Positioned(top: 0, left: 0, right: 0, child: _buildHeader(c)),
+                if (_prefs.showFooter)
+                  Positioned(
+                      bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
                 if (_loading) _overlay(const CircularProgressIndicator()),
                 if (_error != null) _overlay(_errorView()),
                 // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
-                if ((_loading || _error != null) && Navigator.of(context).canPop())
+                if ((_loading || _error != null) &&
+                    Navigator.of(context).canPop())
                   Positioned(
                     top: 4,
                     left: 4,
@@ -687,7 +695,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text('加载失败：$_error',
-                textAlign: TextAlign.center, style: TextStyle(color: _colors().dim)),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _colors().dim)),
           ),
           OutlinedButton(
             onPressed: () => _loadChapter(_chIdx),
@@ -709,8 +718,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   ///
   /// 用两个全角空格做「视觉缩进」，而不是 TextStyle.indent —— 后者会连同换行
   /// 一起缩进，在分页测量里会与 cutToFit 的二分边界打架。
-  String _indent(String s) =>
-      _prefs.indentFirstLine ? '　　$s' : s;
+  String _indent(String s) => _prefs.indentFirstLine ? '　　$s' : s;
 
   /// 一页正文的排版（所有分页模式共用，保证测量与渲染一致）。
   Widget _pageBody(List<String> page) => Padding(
@@ -721,8 +729,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           children: [
             for (var i = 0; i < page.length; i++) ...[
               Text(_indent(page[i]), style: _bodyStyle),
-              if (i < page.length - 1)
-                SizedBox(height: _prefs.fontSize * 0.6),
+              if (i < page.length - 1) SizedBox(height: _prefs.fontSize * 0.6),
             ],
           ],
         ),
@@ -853,8 +860,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              Text(_clockText,
-                  style: TextStyle(color: c.dim, fontSize: 11.5)),
+              Text(_clockText, style: TextStyle(color: c.dim, fontSize: 11.5)),
               const Spacer(),
               if (_detail != null)
                 Text(
@@ -866,7 +872,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               const SizedBox(width: 10),
               if (_battery != null) ...[
                 Icon(
-                  _battery!.charging ? Icons.battery_charging_full : Icons.battery_std,
+                  _battery!.charging
+                      ? Icons.battery_charging_full
+                      : Icons.battery_std,
                   size: 13,
                   color: c.dim,
                 ),
@@ -986,7 +994,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 _panelBtn(
                     _prefs.paginate ? Icons.format_size : Icons.swap_vert,
                     _prefs.paginate ? '字号' : '滚动',
-                    c, () => setState(() => _showSettings = !_showSettings)),
+                    c,
+                    () => setState(() => _showSettings = !_showSettings)),
                 _panelBtn(
                     readerBgIsDark(_prefs.bgIndex, _prefs.theme)
                         ? Icons.light_mode
@@ -995,8 +1004,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     c,
                     () => _store.setBgIndex(
                         readerBgIsDark(_prefs.bgIndex, _prefs.theme) ? 0 : 4)),
-                _panelBtn(_modeIcon(), _prefs.pageMode.label, c,
-                    _pickPageMode),
+                _panelBtn(_modeIcon(), _prefs.pageMode.label, c, _pickPageMode),
                 _panelBtn(Icons.chevron_right, '下一章', c,
                     () => _jumpChapter(_chIdx + 1)),
               ],
@@ -1042,8 +1050,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  Widget _panelBtn(IconData icon, String label, ({Color bg, Color fg, Color dim}) c,
-      VoidCallback onTap) {
+  Widget _panelBtn(IconData icon, String label,
+      ({Color bg, Color fg, Color dim}) c, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1134,8 +1142,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         children: [
           _slider(c, '字号', _prefs.fontSize, 12, 32, 20, _store.setFontSize,
               valueText: '${_prefs.fontSize.round()}'),
-          _slider(c, '行距', _prefs.lineHeight, 1.2, 2.6, 14,
-              _store.setLineHeight),
+          _slider(
+              c, '行距', _prefs.lineHeight, 1.2, 2.6, 14, _store.setLineHeight),
           _slider(c, '字距', _prefs.letterSpacing, -1, 8, 18,
               _store.setLetterSpacing),
           _slider(c, '左右', _prefs.marginH, 0, 64, 16, _store.setMarginH,
@@ -1145,8 +1153,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           SwitchListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            title: Text('首行缩进两字',
-                style: TextStyle(color: c.fg, fontSize: 13)),
+            title: Text('首行缩进两字', style: TextStyle(color: c.fg, fontSize: 13)),
             value: _prefs.indentFirstLine,
             onChanged: (v) {
               _store.setIndentFirstLine(v);
@@ -1178,7 +1185,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: [for (var i = 0; i < kReaderBgs.length; i++) _bgChip(c, i)],
+            children: [
+              for (var i = 0; i < kReaderBgs.length; i++) _bgChip(c, i)
+            ],
           ),
           const SizedBox(height: 14),
           Text('正文字体', style: TextStyle(color: c.dim, fontSize: 12)),
@@ -1188,8 +1197,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             children: [
               for (var i = 0; i < kReaderFonts.length; i++)
                 ChoiceChip(
-                  label:
-                      Text(kReaderFonts[i], style: const TextStyle(fontSize: 12)),
+                  label: Text(kReaderFonts[i],
+                      style: const TextStyle(fontSize: 12)),
                   selected: _prefs.fontIndex == i,
                   onSelected: (_) {
                     _store.setFontIndex(i);
@@ -1201,8 +1210,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           SwitchListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            title: Text('显示页眉（章节名）',
-                style: TextStyle(color: c.fg, fontSize: 13)),
+            title:
+                Text('显示页眉（章节名）', style: TextStyle(color: c.fg, fontSize: 13)),
             value: _prefs.showHeader,
             onChanged: (v) {
               _store.setShowHeader(v);
@@ -1259,8 +1268,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
         children: [
           _slider(c, '语速', _prefs.ttsRate, 0.1, 1.0, 9, _store.setTtsRate),
-          _slider(
-              c, '音调', _prefs.ttsPitch.clamp(0.5, 2.0), 0.5, 2.0, 15,
+          _slider(c, '音调', _prefs.ttsPitch.clamp(0.5, 2.0), 0.5, 2.0, 15,
               _store.setTtsPitch),
           Row(
             children: [
@@ -1436,7 +1444,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }
     }
     // Android 引擎挂死时 speak future 可能永不返回 → 限时防循环卡死
-    await _tts.speak(text)
+    await _tts
+        .speak(text)
         .timeout(Duration(seconds: (text.length * 0.4 + 20).toInt()));
   }
 
@@ -1449,8 +1458,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('在线朗读说明'),
-        content: const Text(
-            '该音色通过微软 Edge 在线合成语音，需要联网；\n合成结果会缓存在本地，重复收听不再耗流量。'),
+        content: const Text('该音色通过微软 Edge 在线合成语音，需要联网；\n合成结果会缓存在本地，重复收听不再耗流量。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -1623,8 +1631,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (off == null) {
         // 段落未渲染：平均段高估算
         final pos = _scrollCtrl.position;
-        final avg =
-            pos.maxScrollExtent / (_paras.isEmpty ? 1 : _paras.length);
+        final avg = pos.maxScrollExtent / (_paras.isEmpty ? 1 : _paras.length);
         off = _kPadTop + i * (avg > 1 ? avg : 40);
       }
       off = off.clamp(0.0, _scrollCtrl.position.maxScrollExtent).toDouble();
@@ -1655,9 +1662,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             const SizedBox(width: 4),
             Expanded(
               child: Text(
-                _ttsPaused
-                    ? '已暂停'
-                    : '正在朗读 · ${_ttsCur + 1}/${_paras.length} 段',
+                _ttsPaused ? '已暂停' : '正在朗读 · ${_ttsCur + 1}/${_paras.length} 段',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: c.dim, fontSize: 12),
@@ -1723,80 +1728,80 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           builder: (ctx2, setSheetState) {
             final list = _store.bookmarksOf(_book.url);
             return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Text('书签', style: Theme.of(ctx).textTheme.titleMedium),
-                      const Spacer(),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('添加当前页'),
-                        onPressed: () {
-                          final snippet = _paras.isEmpty
-                              ? ''
-                              : _paras.first.substring(
-                                  0, _paras.first.length.clamp(0, 30).toInt());
-                          _store.addBookmark(
-                            _book.url,
-                            Bookmark(
-                              chapterIndex: _chIdx,
-                              page: _page,
-                              paragraph: _prefs.paginate
-                                  ? 0
-                                  : _scrollCtrl.hasClients
-                                      ? _scrollCtrl.offset.round()
-                                      : 0,
-                              chapterTitle: _chapterTitle,
-                              snippet: snippet,
-                            ),
-                          );
-                          setSheetState(() {});
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                if (list.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('暂无书签'),
-                  )
-                else
-                  Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: list.length,
-                      itemBuilder: (ctx3, i) {
-                        final b = list[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text(b.chapterTitle,
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(
-                              '${b.snippet}  ·  ${b.createdAt.month}/${b.createdAt.day}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () {
-                              _store.removeBookmark(_book.url, i);
-                              setSheetState(() {});
-                            },
-                          ),
-                          onTap: () {
-                            Navigator.of(ctx).pop();
-                            _jumpChapterTo(b);
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Text('书签', style: Theme.of(ctx).textTheme.titleMedium),
+                        const Spacer(),
+                        FilledButton.icon(
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('添加当前页'),
+                          onPressed: () {
+                            final snippet = _paras.isEmpty
+                                ? ''
+                                : _paras.first.substring(0,
+                                    _paras.first.length.clamp(0, 30).toInt());
+                            _store.addBookmark(
+                              _book.url,
+                              Bookmark(
+                                chapterIndex: _chIdx,
+                                page: _page,
+                                paragraph: _prefs.paginate
+                                    ? 0
+                                    : _scrollCtrl.hasClients
+                                        ? _scrollCtrl.offset.round()
+                                        : 0,
+                                chapterTitle: _chapterTitle,
+                                snippet: snippet,
+                              ),
+                            );
+                            setSheetState(() {});
                           },
-                        );
-                      },
+                        ),
+                      ],
                     ),
                   ),
-              ],
-            ),
+                  if (list.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('暂无书签'),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: list.length,
+                        itemBuilder: (ctx3, i) {
+                          final b = list[i];
+                          return ListTile(
+                            dense: true,
+                            title: Text(b.chapterTitle,
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                                '${b.snippet}  ·  ${b.createdAt.month}/${b.createdAt.day}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () {
+                                _store.removeBookmark(_book.url, i);
+                                setSheetState(() {});
+                              },
+                            ),
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              _jumpChapterTo(b);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
             );
           },
         );
@@ -1849,8 +1854,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  static String _norm(String s) =>
-      s.replaceAll(RegExp(r'[^一-龥a-zA-Z0-9]'), '');
+  static String _norm(String s) => s.replaceAll(RegExp(r'[^一-龥a-zA-Z0-9]'), '');
 
   int _matchChapter(BookDetail nd, String oldTitle) {
     final t = _norm(oldTitle);

@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -100,8 +100,9 @@ class _CoverImageState extends State<CoverImage> {
       if (!await _dir!.exists()) await _dir!.create(recursive: true);
       final f = File('${_dir!.path}/${_name(url)}');
       if (await f.exists()) return f;
-      final r =
-          await Net.client.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      final r = await Net.client
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200 || r.bodyBytes.length < 500) return null;
       await f.writeAsBytes(r.bodyBytes);
       return f;
@@ -177,8 +178,7 @@ class TagPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color =
-        dim ? theme.hintColor : theme.colorScheme.primary;
+    final color = dim ? theme.hintColor : theme.colorScheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -299,8 +299,7 @@ class BookTile extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    if (book.status?.isNotEmpty ?? false)
-                      TagPill(book.status!),
+                    if (book.status?.isNotEmpty ?? false) TagPill(book.status!),
                     if (srcName != null) TagPill(srcName, dim: true),
                   ],
                 ),
@@ -383,7 +382,8 @@ void showSourceSwitch(
                 for (final (s, b) in items)
                   ListTile(
                     leading: CoverImage(url: b.cover, width: 40, height: 56),
-                    title: Text(b.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(b.title,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
                       '${s.name} · ${b.author ?? ""}',
                       maxLines: 1,

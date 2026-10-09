@@ -26,7 +26,8 @@ class AppThemes {
         scaffoldBackgroundColor: const Color(0xFF0B0F14),
         canvasColor: const Color(0xFF0B0F14),
         cardColor: const Color(0xFF151B22),
-        colorScheme: base.colorScheme.copyWith(surface: const Color(0xFF0B0F14)),
+        colorScheme:
+            base.colorScheme.copyWith(surface: const Color(0xFF0B0F14)),
         hintColor: const Color(0xFF8B97A5),
         dividerTheme: const DividerThemeData(
             color: Color(0xFF232B34), thickness: 1, space: 1),
@@ -59,7 +60,8 @@ class AppThemes {
 
   /// 排版规范：正文加大加高行距、标题加粗、主/次文字高对比，
   /// 保证 Windows 下长时间阅读不费力。
-  static TextTheme _text(TextTheme base, {required Color fg, required Color dim}) {
+  static TextTheme _text(TextTheme base,
+      {required Color fg, required Color dim}) {
     return base.copyWith(
       headlineSmall: base.headlineSmall?.copyWith(
           fontSize: 22, fontWeight: FontWeight.w700, color: fg, height: 1.3),
@@ -69,15 +71,15 @@ class AppThemes {
           fontSize: 17, fontWeight: FontWeight.w700, color: fg, height: 1.4),
       titleSmall: base.titleSmall?.copyWith(
           fontSize: 15, fontWeight: FontWeight.w700, color: fg, height: 1.4),
-      bodyLarge: base.bodyLarge
-          ?.copyWith(fontSize: 16, color: fg, height: 1.6),
-      bodyMedium: base.bodyMedium
-          ?.copyWith(fontSize: 15, color: fg, height: 1.55),
-      bodySmall: base.bodySmall
-          ?.copyWith(fontSize: 13, color: dim, height: 1.45),
-      labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w600, color: fg),
-      labelMedium:
-          base.labelMedium?.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: dim),
+      bodyLarge: base.bodyLarge?.copyWith(fontSize: 16, color: fg, height: 1.6),
+      bodyMedium:
+          base.bodyMedium?.copyWith(fontSize: 15, color: fg, height: 1.55),
+      bodySmall:
+          base.bodySmall?.copyWith(fontSize: 13, color: dim, height: 1.45),
+      labelLarge:
+          base.labelLarge?.copyWith(fontWeight: FontWeight.w600, color: fg),
+      labelMedium: base.labelMedium
+          ?.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: dim),
       labelSmall: base.labelSmall?.copyWith(fontSize: 12, color: dim),
     );
   }
@@ -129,8 +131,7 @@ ReaderBg readerBgOf(int index, int theme) {
 }
 
 /// 背景是否属于夜间档（决定默认文字色是否需要反转）。
-bool readerBgIsDark(int index, int theme) =>
-    readerBgOf(index, theme).isDark;
+bool readerBgIsDark(int index, int theme) => readerBgOf(index, theme).isDark;
 
 /// 内置正文字体：0 系统字体、1 霞鹜文楷（随包内置，离线可用）。
 const List<String> kReaderFonts = ['系统字体', '霞鹜文楷'];

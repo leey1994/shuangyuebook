@@ -11,8 +11,8 @@ int naturalCompare(String a, String b) {
       if (c != 0) return c;
     } else {
       final c = x.toString().toLowerCase().compareTo(
-        y.toString().toLowerCase(),
-      );
+            y.toString().toLowerCase(),
+          );
       if (c != 0) return c;
     }
   }
