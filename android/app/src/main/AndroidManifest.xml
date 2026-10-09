@@ -1,7 +1,16 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- 自动更新：Android 8+ 安装 APK 必需，缺失时系统安装器不出现在选择列表 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 本地书导入：Android 10 及以下走运行时权限，11+ 走「所有文件访问」授权页 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
+    <!-- Android 11+ 遍历用户书库导入 TXT / EPUB 所需（应用不联网存储内容，仅本地读取） -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage"/>
     <application
         android:label="爽阅"
         android:name="${applicationName}"
@@ -26,6 +35,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- 「用爽阅打开」文件关联：txt / epub 导入书架并直接进阅读器 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="application/octet-stream"/>
+                <data android:scheme="file"/>
+                <data android:scheme="content"/>
             </intent-filter>
         </activity>
         <!-- 自动更新：APK 下载到缓存目录后经 FileProvider 交给系统安装器 -->
