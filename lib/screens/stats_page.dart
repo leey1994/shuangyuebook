@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../data/format.dart';
 import '../data/stats_store.dart';
+import '../legado/source_health.dart';
 
-/// 阅读统计：累计时长、连续天数、读完书数、最近 7 天柱状图。
+/// 阅读统计：累计时长、连续天数、读完书数、最近 7 天柱状图、当日书源体检。
 class StatsPage extends StatelessWidget {
   const StatsPage({super.key});
 
@@ -13,7 +14,7 @@ class StatsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('阅读记录')),
       body: ListenableBuilder(
-        listenable: stats,
+        listenable: Listenable.merge([stats, SourceHealthStore.I]),
         builder: (context, _) {
           final days = stats.recentDays(7);
           var maxSeconds = 1;
@@ -46,9 +47,101 @@ class StatsPage extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _weeklyCard(context, days, maxSeconds),
+              const SizedBox(height: 12),
+              _sourceCard(context),
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 今日书源体检：多少可用、多少失效，各是谁、为什么。
+  Widget _sourceCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final health = SourceHealthStore.I;
+    final today = health.today;
+    if (today.isEmpty) {
+      return Card(
+        margin: EdgeInsets.zero,
+        child: ListTile(
+          leading: Icon(Icons.fact_check_outlined, color: scheme.primary),
+          title: const Text('今日书源检测'),
+          subtitle: Text(
+            health.checkedToday ? '今天没有需要检测的导入书源' : '每天首次启动自动检测一次',
+          ),
+        ),
+      );
+    }
+    final bad = today.where((h) => !h.ok).toList();
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fact_check_outlined, size: 20),
+                const SizedBox(width: 8),
+                const Text('今日书源检测',
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Text('${health.todayOk}/${today.length}',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: bad.isEmpty ? scheme.primary : scheme.error)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              bad.isEmpty
+                  ? '全部可用 · 每天首次启动自动检测'
+                  : '${bad.length} 个失效，其余 ${health.todayOk} 个可用',
+              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            // 失效的排前面：这是用户唯一需要动手处理的信息
+            for (final h in [...bad, ...today.where((x) => x.ok)])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      h.ok ? Icons.check_circle : Icons.error_outline,
+                      size: 16,
+                      color: h.ok ? scheme.primary : scheme.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(h.name,
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text(
+                            h.ok
+                                ? '${h.ms}ms · ${h.books} 条结果'
+                                : (h.error ?? '不可用'),
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: h.ok
+                                    ? scheme.onSurfaceVariant
+                                    : scheme.error),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

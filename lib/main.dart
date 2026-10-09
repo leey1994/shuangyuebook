@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import 'announcement.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
+import 'legado/source_health.dart';
 import 'legado/source_store.dart';
 import 'legado/webview_engine.dart';
 import 'platform/open_file_dispatch.dart';
@@ -82,6 +83,16 @@ Future<void> main(List<String> args) async {
     SourceStore.shared = sources;
     syncImportedSources(sources.enabled);
     sources.addListener(() => syncImportedSources(sources.enabled));
+  } catch (_) {}
+  try {
+    // 书源健康档案：每天首次启动自动体检一次（只标记不删源）
+    await SourceHealthStore.I.load();
+    unawaited(SourceHealthStore.I.autoRunIfNeeded().then((r) {
+      // 有失效书源就提醒一句，具体清单去「阅读记录」里看
+      if (r != null && r.hasFailure && r.failed.isNotEmpty) {
+        debugPrint('[书源体检] ${r.summary}');
+      }
+    }));
   } catch (_) {}
   runApp(const NovelApp());
 }

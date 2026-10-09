@@ -71,16 +71,6 @@ List<Book> _interleave(List<List<Book>> perSource) {
   return out;
 }
 
-/// 并行取全部书源的首页推荐（带缓存，单源失败返回空）。
-Future<List<List<Book>>> _fetchAllHomes() => Future.wait(allSources.map((s) async {
-      try {
-        return await FeedCache.reach(
-            FeedCache.key(['home', s.id]), s.fetchHome);
-      } catch (_) {
-        return <Book>[];
-      }
-    }));
-
 /// 并行取全部书源的排行标签。
 Future<List<(NovelSource, List<RankTab>)>> _fetchAllRankTabs() =>
     Future.wait(allSources.map((s) async {
@@ -106,6 +96,17 @@ class _HomeTab extends StatefulWidget {
 class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
   List<Book> _home = [];
   List<Book> _rank = [];
+
+  /// 已回结果的源数 / 总数（实时上屏的进度）。
+  int _done = 0;
+  int _total = 0;
+
+  /// 加载代数：下拉刷新后作废上一轮在途结果。
+  int _gen = 0;
+
+  /// 已上屏的推荐按源分组，供下一源到达时重新交错（保证各源轮流露头）。
+  final Map<String, List<Book>> _bySource = {};
+
   bool _loading = true;
   Object? _error;
 
@@ -119,42 +120,61 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
   }
 
   Future<void> _load() async {
-    try {
-      final homesF = _fetchAllHomes();
-      final tabsF = _fetchAllRankTabs();
-      final perSource = await homesF;
-      List<Book> rank = [];
+    final gen = ++_gen;
+    final sources = allSources;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _home = [];
+      _rank = [];
+      _bySource.clear();
+      _done = 0;
+      _total = sources.length;
+    });
+
+    // ---- 推荐：全源并行，每个源一回来就上屏 ----
+    // 原来 await 完所有源才 setState，慢源会把快源的结果一起拖到十几秒后。
+    await Future.wait(sources.map((s) async {
+      List<Book> books = const [];
       try {
-        final tabs = await tabsF;
-        final pages = await Future.wait(tabs.where((x) => x.$2.isNotEmpty).map(
-            (x) async {
-          try {
-            final p = await FeedCache.reach(
-              FeedCache.key(['rank', x.$1.id, x.$2.first.url]),
-              () => x.$1.fetchRank(x.$2.first),
-            );
-            return p.items;
-          } catch (_) {
-            return <Book>[];
-          }
-        }));
-        rank = _interleave(pages);
+        books =
+            await FeedCache.reach(FeedCache.key(['home', s.id]), s.fetchHome);
       } catch (_) {
-        // 排行榜失败不影响推荐展示
+        books = const []; // 单源失败只少几本，不影响整体
       }
-      if (!mounted) return;
+      if (!mounted || gen != _gen) return;
       setState(() {
-        _home = _interleave(perSource);
-        _rank = rank;
-        _loading = false;
-        _error = null;
+        _done++;
+        _bySource[s.id] = books;
+        _home = _interleave(_bySource.values.toList());
+        // 一旦有书可看就撤掉转圈，不再空等
+        if (_home.isNotEmpty) _loading = false;
       });
-    } catch (e) {
-      if (!mounted) return;
+    }));
+
+    // ---- 排行精选：与推荐并行，拿到后单独填充；失败不影响推荐 ----
+    try {
+      final tabs = await _fetchAllRankTabs();
+      if (!mounted || gen != _gen) return;
+      final pages =
+          await Future.wait(tabs.where((x) => x.$2.isNotEmpty).map((x) async {
+        try {
+          final p = await FeedCache.reach(
+            FeedCache.key(['rank', x.$1.id, x.$2.first.url]),
+            () => x.$1.fetchRank(x.$2.first),
+          );
+          return p.items;
+        } catch (_) {
+          return <Book>[];
+        }
+      }));
+      if (!mounted || gen != _gen) return;
       setState(() {
+        _rank = _interleave(pages);
         _loading = false;
-        _error = e;
       });
+    } catch (_) {
+      if (mounted && gen == _gen) setState(() => _loading = false);
     }
   }
 
@@ -170,7 +190,9 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading && _home.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (_home.isEmpty) {
       return Center(
         child: Column(
@@ -184,8 +206,10 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
       );
     }
 
-    final banners =
-        _home.where((b) => b.cover != null && b.cover!.isNotEmpty).take(6).toList();
+    final banners = _home
+        .where((b) => b.cover != null && b.cover!.isNotEmpty)
+        .take(6)
+        .toList();
     final bannerBooks = banners.isEmpty ? _home.take(6).toList() : banners;
     final row1 = _home.take(36).toList();
     final row2 = _rank.take(36).toList();
@@ -197,6 +221,22 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
+          if (_loading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 13,
+                    height: 13,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('正在汇总其它书源…已完成 $_done/$_total',
+                      style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
           if (bannerBooks.isNotEmpty) _AutoBanner(books: bannerBooks),
           if (row1.isNotEmpty)
             _Shelf(title: '热门推荐', books: row1, showRank: false),
@@ -271,7 +311,8 @@ class _AutoBannerState extends State<_AutoBanner> {
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => BookDetailScreen(book: b))),
                 child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                   clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
@@ -367,7 +408,8 @@ class _Shelf extends StatelessWidget {
   final String title;
   final List<Book> books;
   final bool showRank;
-  const _Shelf({required this.title, required this.books, this.showRank = false});
+  const _Shelf(
+      {required this.title, required this.books, this.showRank = false});
 
   @override
   Widget build(BuildContext context) {
@@ -424,8 +466,8 @@ class _BookCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => BookDetailScreen(book: book))),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => BookDetailScreen(book: book))),
             child: Stack(
               children: [
                 ClipRRect(
@@ -479,14 +521,12 @@ class _BookCard extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             [
-              if (book.author != null && book.author!.isNotEmpty)
-                book.author!,
+              if (book.author != null && book.author!.isNotEmpty) book.author!,
               if (srcName.isNotEmpty) srcName,
             ].join(' · '),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.hintColor),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],
       ),
@@ -791,9 +831,8 @@ class _BooklistTabState extends State<_BooklistTab>
   /// 加载更多：所有还有下一页的源并行翻页。
   Future<void> _loadMore() async {
     if (_loading) return;
-    final pending = allSources
-        .where((s) => (_next[s.id] ?? '').isNotEmpty)
-        .toList();
+    final pending =
+        allSources.where((s) => (_next[s.id] ?? '').isNotEmpty).toList();
     if (pending.isEmpty) return;
     setState(() {
       _loading = true;
@@ -872,8 +911,8 @@ class _BooklistTabState extends State<_BooklistTab>
               margin: EdgeInsets.zero,
               clipBehavior: Clip.antiAlias,
               child: ListTile(
-                title: Text(e.title,
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                title:
+                    Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis),
                 subtitle: Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Column(

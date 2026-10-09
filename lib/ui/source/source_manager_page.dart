@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:novel_reader/data/format.dart';
 import 'package:novel_reader/legado/http_client.dart';
 import 'package:novel_reader/legado/models.dart';
+import 'package:novel_reader/legado/source_health.dart';
 import 'package:novel_reader/legado/source_store.dart';
 import 'package:novel_reader/platform/native_bridge.dart';
 import 'package:novel_reader/sources/legado_source.dart';
@@ -123,6 +124,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           icon: const Icon(Icons.ios_share),
           tooltip: '导出书源',
           onPressed: _export,
+        ),
+        IconButton(
+          icon: const Icon(Icons.fact_check_outlined),
+          tooltip: '检测书源可用性',
+          onPressed: _manualCheck,
         ),
         IconButton(
           icon: const Icon(Icons.add),
@@ -573,8 +579,106 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
-  void _report(SourceImportReport r) =>
-      _snack(r.hasAny ? r.summary : (r.error ?? r.summary));
+  void _report(SourceImportReport r) {
+    if (!r.hasAny) {
+      _snack(r.error ?? r.summary);
+      return;
+    }
+    _snack(r.summary);
+    // 刚导入的书源很可能是一堆失效的老收藏，导入后立刻批量验活：
+    // 搜不出东西的直接移除，并把「删了什么、为什么」告诉用户。
+    unawaited(_verifyAfterImport());
+  }
+
+  /// 导入后批量检测：删掉搜不出东西的书源，并给出可读的结论。
+  Future<void> _verifyAfterImport() async {
+    if (!mounted) return;
+    _snack('正在检测书源可用性…');
+    final report = await SourceHealthStore.I.run(
+      removeFailed: true,
+      onProgress: (done, total) {
+        if (mounted && (done == total || done % 5 == 0)) {
+          _snack('检测中…$done/$total');
+        }
+      },
+    );
+    if (!mounted) return;
+    if (!report.hasFailure) {
+      _snack(report.summary);
+      if (mounted) setState(() {});
+      return;
+    }
+    await _showRemovedDialog(report);
+    if (mounted) setState(() {});
+  }
+
+  /// 列出被移除的书源与原因。
+  Future<void> _showRemovedDialog(SourceCheckReport report) => showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('已移除 ${report.removed.length} 个不可用书源'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(report.summary),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final f in report.failed)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                f.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 13),
+                              ),
+                              Text(
+                                f.error ?? '不可用',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(ctx).colorScheme.error,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+
+  /// 手动体检：只标记不删除，用户可自行决定停用哪些。
+  Future<void> _manualCheck() async {
+    _snack('正在检测书源可用性…');
+    final report = await SourceHealthStore.I.run(
+      onProgress: (done, total) {
+        if (mounted && (done == total || done % 5 == 0)) {
+          _snack('检测中…$done/$total');
+        }
+      },
+    );
+    if (!mounted) return;
+    await _showRemovedDialog(report);
+    if (mounted) setState(() {});
+  }
 
   Future<String?> _prompt(
     String title,

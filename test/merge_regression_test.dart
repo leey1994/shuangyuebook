@@ -10,6 +10,7 @@ import 'package:novel_reader/data/shelf_sort.dart';
 import 'package:novel_reader/legado/analyze_rule.dart';
 import 'package:novel_reader/legado/models.dart';
 import 'package:novel_reader/legado/rule_analyzer.dart';
+import 'package:novel_reader/legado/source_health.dart';
 import 'package:novel_reader/local/txt_parser.dart';
 import 'package:novel_reader/models.dart';
 import 'package:novel_reader/sources/legado_source.dart';
@@ -100,7 +101,8 @@ void main() {
     });
 
     test('getRawList 迭代出元素后可在 ctx 上继续求值', () {
-      const html = '<ul><li><a href="/1">一</a></li><li><a href="/2">二</a></li></ul>';
+      const html =
+          '<ul><li><a href="/1">一</a></li><li><a href="/2">二</a></li></ul>';
       final e = AnalyzeRule(html);
       final items = e.getRawList('tag.li');
       expect(items.length, 2);
@@ -150,7 +152,8 @@ void main() {
     });
 
     test('带 BOM 的 UTF-8 不把 BOM 算进正文', () {
-      final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode('第一章\n正文')]);
+      final bytes =
+          Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode('第一章\n正文')]);
       final r = TxtParser.parseBytes(bytes);
       expect(r.text.startsWith('第'), isTrue);
     });
@@ -174,7 +177,8 @@ void main() {
     });
 
     test('正文里的「第N章」长句不误判为标题', () {
-      const long = '第${'一'}${'二'}${'三'}${'章'}${'讲'}${'述'}${'了'}${'一'}${'个'}${'很'}${'长'}${'的'}${'句'}${'子'}${'。'}';
+      const long =
+          '第${'一'}${'二'}${'三'}${'章'}${'讲'}${'述'}${'了'}${'一'}${'个'}${'很'}${'长'}${'的'}${'句'}${'子'}${'。'}';
       final r = TxtParser.parseText('$long\n第一章 真标题\n正文');
       expect(r.chapters.length, 2);
     });
@@ -182,7 +186,9 @@ void main() {
 
   group('本地书章节键', () {
     test('章节 url 唯一 —— 否则离线缓存会互相覆盖', () {
-      final urls = {for (var i = 0; i < 5; i++) LocalSource.chapterUrl('/a/b.txt', i)};
+      final urls = {
+        for (var i = 0; i < 5; i++) LocalSource.chapterUrl('/a/b.txt', i)
+      };
       expect(urls.length, 5);
     });
 
@@ -201,7 +207,11 @@ void main() {
     ShelfEntry e(String title, {String? author, int idx = 0, int total = 10}) =>
         ShelfEntry(
           book: Book(
-              sourceId: 'x', id: title, url: title, title: title, author: author),
+              sourceId: 'x',
+              id: title,
+              url: title,
+              title: title,
+              author: author),
           chapterIndex: idx,
           chapterCount: total,
         );
@@ -289,6 +299,68 @@ void main() {
       for (final s in builtinSources) {
         expect(all, contains(s.id));
       }
+    });
+  });
+
+  group('书源健康档案', () {
+    SourceHealth h(String name, {required bool ok, int daysAgo = 0}) =>
+        SourceHealth(
+          url: 'https://$name.tld',
+          name: name,
+          ok: ok,
+          books: ok ? 3 : 0,
+          ms: 120,
+          error: ok ? null : '搜索无结果',
+          checkedAt: DateTime.now().subtract(Duration(days: daysAgo)),
+        );
+
+    test('当天结果按「正常的在前、耗时升序」排列', () {
+      final store = SourceHealthStore();
+      store.seedForTest([
+        h('slow_ok', ok: true),
+        h('bad', ok: false),
+        h('fast_ok', ok: true),
+      ]);
+      final today = store.today;
+      expect(today.first.ok, isTrue);
+      expect(today.last.ok, isFalse);
+      expect(today.where((x) => !x.ok).length, 1);
+      expect(store.todayOk, 2);
+      expect(store.todayFailed, 1);
+    });
+
+    test('昨天的结果不计入「今日」', () {
+      final store = SourceHealthStore();
+      store.seedForTest([h('yesterday', ok: true, daysAgo: 1)]);
+      expect(store.today, isEmpty);
+      expect(store.checkedToday, isFalse);
+    });
+
+    test('今天检测过就不再重复', () {
+      final store = SourceHealthStore();
+      store.seedForTest([h('a', ok: true)]);
+      expect(store.checkedToday, isTrue);
+    });
+
+    test('结论摘要同时说清可用与移除数量', () {
+      final r = SourceCheckReport(
+        checked: 5,
+        passed: 3,
+        failed: [h('x', ok: false)],
+        removed: ['https://x.tld'],
+      );
+      expect(r.hasFailure, isTrue);
+      expect(r.summary, contains('5'));
+      expect(r.summary, contains('3'));
+      expect(r.summary, contains('已移除 1 个'));
+    });
+
+    test('JSON 往返不丢字段', () {
+      final src = h('a', ok: true);
+      final back = SourceHealth.fromJson(src.toJson());
+      expect(back.url, src.url);
+      expect(back.ok, isTrue);
+      expect(back.books, 3);
     });
   });
 }
