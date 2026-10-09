@@ -1,7 +1,7 @@
-// 书签与阅读统计：本地 JSON 持久化。
+// 阅读统计：本地 JSON 持久化（总时长 / 每日时长 / 读完书数 / 连续天数）。
 //
-// - 书签：书 + 章节序号 + 章内偏移 + 摘录（跳回原文定位）；
-// - 统计：总阅读时长、每日阅读时长、读完的书数（供记录页 / 统计页展示）。
+// 注：樱读的 BookmarkStore 在此被有意舍弃 —— 爽阅的 AppStore 早已用更完整的
+// Bookmark（带 page + paragraph 双锚点）承载书签，没必要再存一份平行数据。
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -10,192 +10,15 @@ import 'package:flutter/foundation.dart';
 
 import '../platform/native_bridge.dart';
 
-/// 一条书签。
-class Bookmark {
-  Bookmark({
-    required this.id,
-    required this.bookId,
-    required this.chapterIndex,
-    required this.charOffset,
-    this.chapterTitle = '',
-    this.excerpt = '',
-    int? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now().millisecondsSinceEpoch;
-
-  final String id;
-  final String bookId;
-
-  /// 章节序号（0 起）。
-  final int chapterIndex;
-
-  /// 章内字符偏移。
-  final int charOffset;
-  final String chapterTitle;
-
-  /// 摘录（书签位置附近的正文片段）。
-  final String excerpt;
-  final int createdAt;
-
-  static String newId() =>
-      DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-
-  factory Bookmark.fromJson(Map<String, dynamic> json) => Bookmark(
-    id: json['id'] as String? ?? newId(),
-    bookId: json['bookId'] as String? ?? '',
-    chapterIndex: (json['chapterIndex'] as num?)?.toInt() ?? 0,
-    charOffset: (json['charOffset'] as num?)?.toInt() ?? 0,
-    chapterTitle: json['chapterTitle'] as String? ?? '',
-    excerpt: json['excerpt'] as String? ?? '',
-    createdAt: (json['createdAt'] as num?)?.toInt(),
-  );
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'bookId': bookId,
-    'chapterIndex': chapterIndex,
-    'charOffset': charOffset,
-    'chapterTitle': chapterTitle,
-    'excerpt': excerpt,
-    'createdAt': createdAt,
-  };
-}
-
-/// 书签仓库（进程内共享实例 + JSON 持久化）。
-class BookmarkStore extends ChangeNotifier {
-  BookmarkStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
-
-  static BookmarkStore? shared;
-
-  final AppDirs? _dirsOverride;
-  final List<Bookmark> _items = [];
-  File? _file;
-  Timer? _saveTimer;
-
-  List<Bookmark> get items => List.unmodifiable(_items);
-
-  List<Bookmark> forBook(String bookId) =>
-      [
-        for (final b in _items)
-          if (b.bookId == bookId) b,
-      ]..sort((a, b) {
-        if (a.chapterIndex != b.chapterIndex) {
-          return a.chapterIndex.compareTo(b.chapterIndex);
-        }
-        return a.charOffset.compareTo(b.charOffset);
-      });
-
-  int get count => _items.length;
-
-  Future<void> load() async {
-    final dirs = _dirsOverride ?? await NativeBridge.appDirs();
-    _file = File('${dirs.files}/bookmarks.json');
-    try {
-      if (await _file!.exists()) {
-        final data = jsonDecode(await _file!.readAsString());
-        if (data is Map && data['items'] is List) {
-          for (final item in data['items'] as List) {
-            if (item is Map) {
-              try {
-                _items.add(Bookmark.fromJson(Map<String, dynamic>.from(item)));
-              } catch (_) {
-                // 跳过坏数据
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {
-      // 读取失败时以空列表启动
-    }
-    notifyListeners();
-  }
-
-  /// 附近是否已有书签（章节相同且偏移差 ≤12 视为同一位置）。
-  Bookmark? nearby(String bookId, int chapterIndex, int charOffset) {
-    for (final b in _items) {
-      if (b.bookId == bookId &&
-          b.chapterIndex == chapterIndex &&
-          (b.charOffset - charOffset).abs() <= 12) {
-        return b;
-      }
-    }
-    return null;
-  }
-
-  /// 添加书签；同一位置（章节 + 偏移 ±12 内）视为重复，返回已有书签。
-  Bookmark add(Bookmark bookmark) {
-    final existing = nearby(
-      bookmark.bookId,
-      bookmark.chapterIndex,
-      bookmark.charOffset,
-    );
-    if (existing != null) return existing;
-    _items.add(bookmark);
-    _saveSoon();
-    notifyListeners();
-    return bookmark;
-  }
-
-  void remove(String id) {
-    final before = _items.length;
-    _items.removeWhere((b) => b.id == id);
-    if (_items.length != before) {
-      _saveSoon();
-      notifyListeners();
-    }
-  }
-
-  /// 删除某本书的全部书签（书被移除时调用）。
-  void removeForBook(String bookId) {
-    final before = _items.length;
-    _items.removeWhere((b) => b.bookId == bookId);
-    if (_items.length != before) {
-      _saveSoon();
-      notifyListeners();
-    }
-  }
-
-  void _saveSoon() {
-    _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_save());
-    });
-  }
-
-  /// 仅供测试：立即落盘（跳过防抖，消除时序脆弱）。
-  @visibleForTesting
-  Future<void> debugFlush() => _save();
-
-  Future<void> _save() async {
-    final file = _file;
-    if (file == null) return;
-    try {
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode({
-          'version': 1,
-          'items': _items.map((b) => b.toJson()).toList(),
-        }),
-      );
-    } catch (_) {
-      // 忽略保存失败
-    }
-  }
-
-  @override
-  void dispose() {
-    _saveTimer?.cancel();
-    super.dispose();
-  }
-}
-
-// ---------- 阅读统计 ----------
-
 /// 阅读统计：总时长 / 每日时长 / 读完书数。
 class StatsStore extends ChangeNotifier {
   StatsStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
 
+  /// 进程内共享实例（阅读器计时 / 统计页共用）。
   static StatsStore? shared;
+
+  /// 便捷单例入口：未 load 过也能用（首次调用自动 load，失败则降级为不持久化）。
+  static StatsStore get I => shared ??= StatsStore()..load();
 
   /// 单次累计上限（秒）：防止"锁屏挂着"把时长刷爆。
   static const int maxChunkSeconds = 90;

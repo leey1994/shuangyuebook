@@ -7,11 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'announcement.dart';
+import 'data/stats_store.dart';
 import 'feed_cache.dart';
+import 'legado/source_store.dart';
+import 'legado/webview_engine.dart';
 import 'screens/discover_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shelf_screen.dart';
+import 'sources/registry.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
@@ -63,6 +67,19 @@ Future<void> main(List<String> args) async {
   }
   try {
     await FeedCache.init(); // 首页/排行/搜索磁盘缓存，二次打开免重新拉取
+  } catch (_) {}
+  try {
+    await StatsStore.I.load(); // 阅读统计（时长 / 连续天数 / 最近 7 天）
+  } catch (_) {}
+  try {
+    // 「阅读 3.0」书源：先补内置源，再把用户启用的源登记进 allSources。
+    // 失败不阻塞启动 —— 11 个固化书源照常可用。
+    final sources = SourceStore();
+    await sources.load();
+    await sources.ensureBuiltinSources();
+    SourceStore.shared = sources;
+    syncImportedSources(sources.enabled);
+    sources.addListener(() => syncImportedSources(sources.enabled));
   } catch (_) {}
   runApp(const NovelApp());
 }
@@ -172,6 +189,9 @@ class _NovelAppState extends State<NovelApp> {
         ),
       );
     }
+    // 隐藏 WebView 宿主（1×1，仅 Android 且引擎激活后才构建）：
+    // 放在最外层保证跨路由存活，Windows 上自动透传。
+    app = WebViewEngineHost(child: app);
     return MediaQuery(data: mq, child: app);
   }
 }

@@ -140,8 +140,12 @@ class OnlineBookService {
   ///
   /// 书源 `webView=true` 时走隐藏 WebView（可配 `gatewayPath` 网关重写）；
   /// 否则直接 HTTP 抓取 + ruleContent 解析（普通静态站点）。
+  ///
+  /// 隐藏 WebView 只在 Android 存在：Windows 端没有 webview_flutter 的
+  /// Windows 实现，这里直接降级为普通 HTTP 抓取（能拿到多少算多少），
+  /// 而不是抛「平台不支持」把整本书打不开。
   Future<String> fetchChapterText(BookSource source, String chapterUrl) async {
-    if (_flag(source.extra['webView'])) {
+    if (_flag(source.extra['webView']) && WebViewEngine.supported) {
       final target = webViewChapterUrl(source, chapterUrl);
       final text = await WebViewEngine.instance.fetchRenderedText(
         url: target,

@@ -24,7 +24,9 @@
 // - 单 WebView 实例，所有读取任务串行化。
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -38,6 +40,12 @@ class WebViewEngine {
   static const String desktopUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+  /// 本平台是否支持隐藏 WebView。
+  ///
+  /// webview_flutter 只提供 Android / iOS / macOS 实现，Windows 上调用会抛错。
+  /// 爽阅要保 Windows 桌面端，所以这里显式关掉，由调用方降级为 HTTP 抓取。
+  static bool get supported => !kIsWeb && Platform.isAndroid;
 
   /// 宿主挂载信号：为 true 时 [WebViewEngineHost] 构建 1×1 的 WebView。
   final ValueNotifier<bool> active = ValueNotifier<bool>(false);
@@ -268,6 +276,8 @@ class WebViewEngineHost extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 平台不支持（Windows）时直接透传子节点，不建任何 WebView
+    if (!WebViewEngine.supported) return child;
     return Stack(
       alignment: Alignment.topLeft,
       children: [
