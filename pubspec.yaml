@@ -1,7 +1,7 @@
 name: novel_reader
-description: 爽阅·多源小说阅读器（Android + Windows 双端 Flutter 应用）
+description: 爽阅·多源聚合小说阅读器（内置固化书源 + 阅读 3.0 书源引擎，Android + Windows 双端）
 publish_to: none
-version: 1.0.2
+version: 1.1.0
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -18,6 +18,10 @@ dependencies:
   flutter_tts: ^4.2.0
   crypto: ^3.0.3 # 在线音色合成签名（Sec-MS-GEC）
   audioplayers: ^6.1.0 # 在线音色本地 MP3 播放（Android + Windows）
+  archive: ^4.0.0 # EPUB(zip) 解包，纯 Dart 实现
+  xml: ^6.5.0 # EPUB OPF/NCX 解析
+  fast_gbk: ^1.0.0 # 书源站点 GBK/GB2312 正文解码
+  webview_flutter: ^4.14.1 # 隐藏浏览器引擎（仅 Android，用于 JS 令牌墙站点）
 
 dev_dependencies:
   flutter_test:

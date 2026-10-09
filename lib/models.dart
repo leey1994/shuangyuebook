@@ -129,6 +129,13 @@ class ShelfEntry {
   int page; // 章内页码（滚动模式恒为 0）
   int paragraph; // 滚动模式锚点段落
   DateTime updatedAt;
+
+  /// 加入书架的时间（「添加时间」排序用；老数据缺失时回落到 updatedAt）。
+  DateTime addedAt;
+
+  /// 已缓存正文的累计字数（「字数」排序用；随章节落盘累加）。
+  int charCount;
+
   bool finished;
 
   ShelfEntry({
@@ -139,8 +146,11 @@ class ShelfEntry {
     this.page = 0,
     this.paragraph = 0,
     DateTime? updatedAt,
+    DateTime? addedAt,
+    this.charCount = 0,
     this.finished = false,
-  }) : updatedAt = updatedAt ?? DateTime.now();
+  })  : updatedAt = updatedAt ?? DateTime.now(),
+        addedAt = addedAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
         'book': book.toJson(),
@@ -150,6 +160,8 @@ class ShelfEntry {
         'page': page,
         'paragraph': paragraph,
         'updatedAt': updatedAt.toIso8601String(),
+        'addedAt': addedAt.toIso8601String(),
+        'charCount': charCount,
         'finished': finished,
       };
 
@@ -162,6 +174,10 @@ class ShelfEntry {
         paragraph: j['paragraph'] as int? ?? 0,
         updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? '') ??
             DateTime.now(),
+        addedAt: DateTime.tryParse(j['addedAt'] as String? ?? '') ??
+            DateTime.tryParse(j['updatedAt'] as String? ?? '') ??
+            DateTime.now(),
+        charCount: j['charCount'] as int? ?? 0,
         finished: j['finished'] as bool? ?? false,
       );
 }
