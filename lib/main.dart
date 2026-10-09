@@ -19,6 +19,7 @@ import 'sources/registry.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
+import 'ui/storage_gate.dart';
 import 'update_check.dart';
 
 /// 宽/窄屏分界（逻辑像素）：<= 视为安卓尺寸（底部菜单 + 缩放生效），> 为宽屏（左侧菜单不缩放）。
@@ -138,7 +139,9 @@ class _NovelAppState extends State<NovelApp> {
       theme: AppThemes.material(AppThemes.white),
       darkTheme: AppThemes.material(AppThemes.black),
       themeMode: dark ? ThemeMode.dark : ThemeMode.light,
-      home: const HomeShell(),
+      // 存储权限门：Android 11+ 导入本地书需要「所有文件访问」。
+      // 非 Android 直接透传，不做任何检查。
+      home: const StorageGate(child: HomeShell()),
       builder: (context, child) => _wrap(context, child),
     );
     if (Platform.isWindows) app = ExcludeSemantics(child: app);

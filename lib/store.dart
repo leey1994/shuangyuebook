@@ -144,6 +144,7 @@ class AppStore extends ChangeNotifier {
       searchHistory = sp.getStringList('searchHistory') ?? [];
       _shelfSort = shelfSortModeFrom(sp.getString('shelfSort'));
       _shelfAscending = sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
+      _shelfView = shelfViewModeFrom(sp.getString('shelfView'));
       applyShelfSort();
     }
     try {
@@ -200,9 +201,23 @@ class AppStore extends ChangeNotifier {
 
   ShelfSortMode _shelfSort = ShelfSortMode.recentRead;
   bool _shelfAscending = false;
+  ShelfViewMode _shelfView = ShelfViewMode.list;
 
   ShelfSortMode get shelfSort => _shelfSort;
   bool get shelfAscending => _shelfAscending;
+  ShelfViewMode get shelfView => _shelfView;
+
+  void setShelfView(ShelfViewMode v) {
+    _shelfView = v;
+    _sp?.setString('shelfView', v.name);
+    notifyListeners();
+  }
+
+  /// 排序 / 视图切换的下一档（书架页右上角一键循环）。
+  void cycleShelfView() {
+    final i = ShelfViewMode.values.indexOf(_shelfView);
+    setShelfView(ShelfViewMode.values[(i + 1) % ShelfViewMode.values.length]);
+  }
 
   void setShelfSort(ShelfSortMode v) {
     _shelfSort = v;

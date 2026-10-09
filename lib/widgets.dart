@@ -10,6 +10,10 @@ import 'sources/registry.dart';
 import 'sources/source.dart';
 
 /// 封面图（磁盘缓存：首次下载落盘，二次启动直接读文件不走网络；失败回退占位）。
+///
+/// 同时支持两种来源：
+///  - **网络地址**（在线书封面）：下载后落盘缓存；
+///  - **本地路径**（EPUB 抽出的封面）：直接读文件，不走网络。
 class CoverImage extends StatefulWidget {
   final String? url;
   final double? width;
@@ -19,6 +23,10 @@ class CoverImage extends StatefulWidget {
   final Widget? placeholder;
   final BoxFit fit;
   final int? cacheWidth;
+
+  /// 无封面时用作占位的插画（null = 灰底书图标）。
+  final String? fallbackAsset;
+
   const CoverImage({
     super.key,
     this.url,
@@ -27,6 +35,7 @@ class CoverImage extends StatefulWidget {
     this.placeholder,
     this.fit = BoxFit.cover,
     this.cacheWidth,
+    this.fallbackAsset,
   });
 
   @override
@@ -42,14 +51,21 @@ class _CoverImageState extends State<CoverImage> {
   File? _file;
   bool _failed = false;
 
-  Widget get _fallback =>
-      widget.placeholder ??
-      Container(
-        width: widget.width,
-        height: widget.height,
-        color: const Color(0xFFE0E0E0),
-        child: const Icon(Icons.menu_book, size: 28),
-      );
+  Widget get _fallback {
+    final ph = widget.placeholder;
+    if (ph != null) return ph;
+    final asset = widget.fallbackAsset;
+    if (asset != null) {
+      return Image.asset(asset,
+          width: widget.width, height: widget.height, fit: widget.fit);
+    }
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      color: const Color(0xFFE0E0E0),
+      child: const Icon(Icons.menu_book, size: 28),
+    );
+  }
 
   @override
   void initState() {
@@ -74,6 +90,11 @@ class _CoverImageState extends State<CoverImage> {
 
   Future<File?> _fetch(String url) async {
     try {
+      // 本地路径（EPUB 抽出的封面）：直接读文件，不走网络也不复制
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        final local = File(url);
+        return await local.exists() ? local : null;
+      }
       _dir ??=
           Directory('${(await getApplicationSupportDirectory()).path}/covers');
       if (!await _dir!.exists()) await _dir!.create(recursive: true);
@@ -134,6 +155,17 @@ class _CoverImageState extends State<CoverImage> {
     );
     return img;
   }
+}
+
+/// 无封面时按书名稳定分配 6 张占位插画之一。
+///
+/// 用书名哈希而非随机：同一本书每次打开都拿到同一张图，滚动列表也不会闪。
+String coverFallbackAsset(String title) {
+  var h = 5381;
+  for (final u in title.codeUnits) {
+    h = ((h << 5) + h + u) & 0x7fffffff;
+  }
+  return 'assets/images/cover_${(h % 6) + 1}.jpg';
 }
 
 /// 描边小标签（状态/书源等，参考样式：圆角描边胶囊）。
@@ -242,7 +274,12 @@ class BookTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        leading: CoverImage(url: book.cover, width: 76, height: 104),
+        leading: CoverImage(
+          url: book.cover,
+          width: 76,
+          height: 104,
+          fallbackAsset: coverFallbackAsset(book.title),
+        ),
         title: Text(
           book.title,
           maxLines: 1,

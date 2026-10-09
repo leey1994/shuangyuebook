@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 
+import '../data/shelf_sort.dart';
 import '../models.dart';
 import '../store.dart';
 import '../widgets.dart';
+import 'local_import_page.dart';
 import 'reader_screen.dart';
 
 /// 书架 + 阅读历史。
 class ShelfScreen extends StatelessWidget {
   const ShelfScreen({super.key});
+
+  static const _viewIcons = {
+    ShelfViewMode.grid: Icons.grid_view,
+    ShelfViewMode.compact: Icons.view_agenda_outlined,
+    ShelfViewMode.list: Icons.view_list,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -16,6 +24,18 @@ class ShelfScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('书架'),
+          actions: [
+            IconButton(
+              tooltip: '切换视图（${AppStore.I.shelfView.label}）',
+              icon: Icon(_viewIcons[AppStore.I.shelfView]),
+              onPressed: AppStore.I.cycleShelfView,
+            ),
+            IconButton(
+              tooltip: '导入本地书',
+              icon: const Icon(Icons.folder_open_outlined),
+              onPressed: () => showLocalImport(context),
+            ),
+          ],
           bottom: const TabBar(tabs: [Tab(text: '书架'), Tab(text: '历史')]),
         ),
         body: ListenableBuilder(
@@ -144,6 +164,9 @@ class _EntryList extends StatelessWidget {
     this.headerAction,
   });
 
+  /// 网格 / 小图 / 列表（设置页可切）。
+  ShelfViewMode get _view => AppStore.I.shelfView;
+
   /// 长按 → 确认对话框 → 移出。
   Future<void> _confirmRemove(BuildContext context, ShelfEntry e) async {
     final ok = await showDialog<bool>(
@@ -172,34 +195,106 @@ class _EntryList extends StatelessWidget {
         child: Text(emptyHint, style: Theme.of(context).textTheme.bodyLarge),
       );
     }
-    return ListView.builder(
-      itemCount: entries.length + (headerAction != null ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (headerAction != null) {
-          if (i == 0) {
-            return Align(alignment: Alignment.centerRight, child: headerAction);
-          }
-          i -= 1;
-        }
-        final e = entries[i];
-        return Dismissible(
-          key: ValueKey(e.book.url),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            color: Colors.red.shade400,
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 16),
-            child: const Icon(Icons.delete, color: Colors.white),
+    final head = headerAction;
+    // 网格 / 小图两种视图没有「行内头部」，把清空按钮放到顶部一行
+    final body = _view == ShelfViewMode.list
+        ? ListView.builder(
+            padding: const EdgeInsets.only(bottom: 24),
+            itemCount: entries.length + (head != null ? 1 : 0),
+            itemBuilder: (context, i) {
+              if (head != null) {
+                if (i == 0) {
+                  return Align(alignment: Alignment.centerRight, child: head);
+                }
+                i -= 1;
+              }
+              return _row(context, entries[i]);
+            },
+          )
+        : _grid(context);
+    return body;
+  }
+
+  /// 列表行（左滑删除 + 长按确认）。
+  Widget _row(BuildContext context, ShelfEntry e) => Dismissible(
+        key: ValueKey(e.book.url),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          color: Colors.red.shade400,
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 16),
+          child: const Icon(Icons.delete, color: Colors.white),
+        ),
+        onDismissed: (_) => onRemove(e),
+        child: BookTile(
+          book: e.book,
+          extra: _progressLine(context, e),
+          onTap: () => onOpen(e),
+          onLongPress: () => _confirmRemove(context, e),
+        ),
+      );
+
+  /// 网格 / 小图：封面为主，标题与进度压在图下。
+  Widget _grid(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 560;
+    final tileW = _view == ShelfViewMode.grid ? 104.0 : 76.0;
+    final coverH = _view == ShelfViewMode.grid ? tileW * 1.42 : tileW * 1.3;
+    final cols = (MediaQuery.sizeOf(context).width / tileW).floor().clamp(2, 8);
+    final ratio = tileW / coverH;
+    final top = headerAction;
+    return CustomScrollView(
+      slivers: [
+        if (top != null)
+          SliverToBoxAdapter(
+            child: Align(alignment: Alignment.centerRight, child: top),
           ),
-          onDismissed: (_) => onRemove(e),
-          child: BookTile(
-            book: e.book,
-            extra: _progressLine(context, e),
-            onTap: () => onOpen(e),
-            onLongPress: () => _confirmRemove(context, e),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+          sliver: SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: wide ? cols + 2 : cols,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: ratio * 0.72,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) {
+                final e = entries[i];
+                return InkWell(
+                  onTap: () => onOpen(e),
+                  onLongPress: () => _confirmRemove(context, e),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: CoverImage(
+                            url: e.book.cover,
+                            width: tileW,
+                            height: coverH,
+                            cacheWidth: (tileW * 2.5).round(),
+                            fallbackAsset: coverFallbackAsset(e.book.title),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        e.book.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                    ],
+                  ),
+                );
+              },
+              childCount: entries.length,
+            ),
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }
