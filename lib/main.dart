@@ -24,6 +24,7 @@ import 'sources/registry.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
+import 'ui/pet_top_band.dart';
 import 'ui/storage_gate.dart';
 import 'ui/system_metrics.dart';
 import 'update_check.dart';
@@ -67,6 +68,13 @@ Future<void> main(List<String> args) async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
+  if (Platform.isAndroid) {
+    // 安卓全程 edge-to-edge：应用画到系统栏底下，顶部那条状态栏区域就是
+    // 桌宠的活动带（原来显示时间 / 信号强度的地方）。不开的话系统会另外
+    // 占掉一整条状态栏，我们的窄带就被挤到它下面，顶部等于两条叠加。
+    // 阅读器会临时切到 immersive 隐藏状态栏，退出时由 _applySystemUi 还原。
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
   try {
     await AppStore.I.init();
   } catch (_) {
@@ -143,10 +151,11 @@ class _NovelAppState extends State<NovelApp> {
   Widget build(BuildContext context) {
     final dark = _theme == AppThemes.black;
     if (Platform.isAndroid) {
-      // 状态栏/导航栏底色与主题背景一致（锦绣白/极光黑），图标随明暗反转
+      // 状态栏透明：edge-to-edge 之下由应用自己铺底色（见 _wrap 的 ColoredBox），
+      // 这样那条带子里除了系统图标还能放桌宠。图标明暗随主题反转。
       final bg = AppThemes.scaffold(_theme);
       SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-        statusBarColor: bg,
+        statusBarColor: Colors.transparent,
         statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
         statusBarBrightness: dark ? Brightness.dark : Brightness.light,
         systemNavigationBarColor: bg,
@@ -205,29 +214,17 @@ class _NovelAppState extends State<NovelApp> {
     }
 
     if (Platform.isAndroid) {
-      // 正常模式 padding 已带状态栏高度；edge-to-edge 时 padding=0、
-      // 高度落在 viewPadding，手动补上，保证顶部操作不被状态栏挡住。
-      // 顶缝先铺主题底色：状态栏区域（含 edge-to-edge 透传）与应用同色。
-      final top = mq.padding.top > 0 ? 0.0 : mq.viewPadding.top;
-      final band = PetBar.defaultHeight();
-      app = ColoredBox(
-        color: AppThemes.scaffold(_theme),
-        child: Padding(
-          padding: EdgeInsets.only(top: top),
-          // 桌宠的专属窄带：每个路由都在、位置恒定，也不会盖住任何按钮。
-          // 高度用启动时量好的 [SystemMetrics.topInset]，不读实时 MediaQuery ——
-          // 阅读器会隐藏状态栏，实时读数会塌成 0，整条带子跟着跳。
-          child: SafeArea(
-            top: mq.padding.top > 0,
-            bottom: false,
-            child: Column(
-              children: [
-                SizedBox(height: band, child: PetBar(height: band)),
-                Expanded(child: app),
-              ],
-            ),
-          ),
-        ),
+      // 安卓走 edge-to-edge（见 main 里的 setEnabledSystemUIMode）：应用画到
+      // 状态栏底下，所以桌宠窄带**就是**状态栏本身那一行 —— 原来显示时间 /
+      // 信号强度的地方，而不是状态栏下面再补一条。
+      // 不开 edge-to-edge 的话顶部会变成两条叠加（≈56px），看着像被顶下去了。
+      //
+      // 高度用启动时量好的 [SystemMetrics.topInset]（见 captureSystemInsets），
+      // 不读实时 MediaQuery —— 阅读器会隐藏状态栏，实时读数会塌成 0，整条带子跟着跳。
+      app = PetTopBand(
+        band: PetBar.defaultHeight(),
+        background: AppThemes.scaffold(_theme),
+        child: app,
       );
     }
     // 隐藏 WebView 宿主（1×1，仅 Android 且引擎激活后才构建）：

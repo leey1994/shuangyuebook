@@ -22,9 +22,13 @@ void captureSystemInsets(BuildContext context) {
   final mq = MediaQuery.maybeOf(context);
   if (mq == null) return;
   final p = mq.padding;
+  // 安卓开了 edge-to-edge，padding.top 恒为 0，高度只落在 viewPadding 上。
+  // 两个都取，谁有值用谁 —— 否则窄带会退化成 26px 的兜底值，和真机对不上。
+  final top = p.top > 0 ? p.top : mq.viewPadding.top;
+  final bottom = p.bottom > 0 ? p.bottom : mq.viewPadding.bottom;
   // 取多次最大值：冷启动首帧 padding 可能还没稳定
-  if (p.top > SystemMetrics.topInset) SystemMetrics.topInset = p.top;
-  if (p.bottom > SystemMetrics.bottomInset) {
-    SystemMetrics.bottomInset = p.bottom;
+  if (top > SystemMetrics.topInset) SystemMetrics.topInset = top;
+  if (bottom > SystemMetrics.bottomInset) {
+    SystemMetrics.bottomInset = bottom;
   }
 }

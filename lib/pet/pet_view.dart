@@ -62,6 +62,7 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
   Timer? _rebound;
   Timer? _wanderTimer;
   Timer? _playTimer;
+  Timer? _stageTimer;
 
   double _phase = 0;
   double _squash = 0;
@@ -97,7 +98,7 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
       ..start();
     _pet.addListener(_onPet);
     // 阶位主要由阅读时长推动，而这个值是现算的 —— 每秒比对一次即可
-    Timer.periodic(const Duration(seconds: 1), (_) {
+    _stageTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _pet.checkStage();
       final up = _pet.takeStageUp();
@@ -121,6 +122,7 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
     _rebound?.cancel();
     _wanderTimer?.cancel();
     _playTimer?.cancel();
+    _stageTimer?.cancel();
     super.dispose();
   }
 
