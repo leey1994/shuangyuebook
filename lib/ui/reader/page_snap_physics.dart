@@ -23,6 +23,16 @@ class PageSnapPhysics extends ScrollPhysics {
   @override
   bool get allowImplicitScrolling => false;
 
+  /// 不在边界吞掉用户的拖动。
+  ///
+  /// 默认物理在首/末页会把超出的位移直接吃掉，ScrollPosition 拿不到任何
+  /// 越界量，于是「看完本章继续往后滑」什么也不会发生 —— 这正是章末翻不到
+  /// 下一章的原因。这里原样返回 offset，让 ScrollPosition 自己 clamp，
+  /// 并把余量报成 overscroll，交给阅读器累计后换章。
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) =>
+      offset;
+
   @override
   Simulation? createBallisticSimulation(
     ScrollMetrics position,

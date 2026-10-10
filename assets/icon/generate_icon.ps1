@@ -1,4 +1,4 @@
-﻿# 爽看 app icon generator — draws the mark and emits all required sizes.
+﻿# 爽阅 app icon generator — draws the mark and emits all required sizes.
 # Run: powershell -File assets/icon/generate_icon.ps1
 # ponytail: System.Drawing one-shot script instead of an icon-design dependency.
 Add-Type -AssemblyName System.Drawing
@@ -7,19 +7,28 @@ $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $out = Join-Path $PSScriptRoot 'sizes'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-function New-IconBitmap([int]$size, [bool]$foregroundOnly) {
+function New-Gfx([int]$size) {
     $bmp = New-Object System.Drawing.Bitmap($size, $size)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = 'AntiAlias'
     $g.PixelOffsetMode = 'HighQuality'
-    $s = [float]$size
+    $g.InterpolationMode = 'HighQualityBicubic'
+    return @($bmp, $g)
+}
 
-    if (-not $foregroundOnly) {
-        # background: vertical gradient teal -> deep indigo, rounded square (legacy) / full (adaptive)
-        $rect = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
-        $c1 = [System.Drawing.Color]::FromArgb(255, 16, 150, 130)   # teal
-        $c2 = [System.Drawing.Color]::FromArgb(255, 30, 64, 175)    # indigo
-        $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $c1, $c2, 60.0)
+# 渐变底：teal -> indigo。
+#
+# $rounded 只用于传统方形图标。自适应图标的 background 层必须满幅（系统自己
+# 裁形状），不能切圆角，否则圆形 mask 下四角会露出透明缺口。
+function New-Gradient([int]$size, [bool]$rounded) {
+    $pair = New-Gfx $size
+    $bmp = $pair[0]; $g = $pair[1]
+    $s = [float]$size
+    $rect = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
+    $c1 = [System.Drawing.Color]::FromArgb(255, 16, 150, 130)   # teal
+    $c2 = [System.Drawing.Color]::FromArgb(255, 30, 64, 175)    # indigo
+    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $c1, $c2, 60.0)
+    if ($rounded) {
         $path = New-Object System.Drawing.Drawing2D.GraphicsPath
         $r = $s * 0.20
         $d = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
@@ -29,35 +38,63 @@ function New-IconBitmap([int]$size, [bool]$foregroundOnly) {
         $path.AddArc($d.X, $d.Bottom - $r * 2, $r * 2, $r * 2, 90, 90)
         $path.CloseFigure()
         $g.SetClip($path)
-        $g.FillRectangle($brush, $rect)
-    } else {
-        $g.Clear([System.Drawing.Color]::Transparent)
     }
-
-    # mark: 「爽阅」 brand characters (white bold, centered) + soft shadow + gold bar
-    $ff = New-Object System.Drawing.FontFamily('Microsoft YaHei')
-    $font = New-Object System.Drawing.Font($ff, [float]($s * 0.37), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $fmt = New-Object System.Drawing.StringFormat
-    $fmt.Alignment = [System.Drawing.StringAlignment]::Center
-    $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
-    $layout = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
-    $shadow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(90, 0, 0, 0))
-    $soff = [float]($s * 0.022)
-    $shadowRect = New-Object System.Drawing.RectangleF(0, $soff, $s, $s)
-    $g.DrawString([string]'爽阅', $font, $shadow, $shadowRect, $fmt)
-    $g.DrawString([string]'爽阅', $font, [System.Drawing.Brushes]::White, $layout, $fmt)
-    # gold underline accent (keeps the old spark color as brand thread)
-    $accent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 214, 90))
-    $barW = $s * 0.34; $barH = [float]($s * 0.028)
-    $g.FillRectangle($accent, ($s - $barW) / 2, $s * 0.725, $barW, $barH)
-    $font.Dispose(); $ff.Dispose()
-
+    $g.FillRectangle($brush, $rect)
     $g.Dispose()
     return $bmp
 }
 
+# 「爽阅」字标：白色粗体 + 柔和投影 + 金色下划线。透明底。
+function New-Mark([int]$size) {
+    $pair = New-Gfx $size
+    $bmp = $pair[0]; $g = $pair[1]
+    $s = [float]$size
+    $g.Clear([System.Drawing.Color]::Transparent)
+
+    # 必须显式 NoWrap：默认 StringFormat 会自动换行，字号稍大就把
+    # 「爽阅」拆成上下两行，黄色下划线正好压在第二个字上。
+    $fmt = New-Object System.Drawing.StringFormat
+    $fmt.Alignment = [System.Drawing.StringAlignment]::Center
+    $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $fmt.FormatFlags = [System.Drawing.StringFormatFlags]::NoWrap
+    $fmt.Trimming = [System.Drawing.StringTrimming]::None
+
+    # 按目标宽度反推字号，保证任何画布尺寸下都单行且撑满安全区
+    $targetW = $s * 0.80
+    $probe = New-Object System.Drawing.Font('Microsoft YaHei', 100.0, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $probeW = $g.MeasureString([string]'爽阅', $probe, [System.Drawing.PointF]::Empty, $fmt).Width
+    $probe.Dispose()
+    $fontSize = [float](100.0 * $targetW / $probeW)
+
+    $font = New-Object System.Drawing.Font('Microsoft YaHei', $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $layout = New-Object System.Drawing.RectangleF(0, 0, $s, $s * 0.86)
+    $shadow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(90, 0, 0, 0))
+    $shadowRect = New-Object System.Drawing.RectangleF(0, [float]($s * 0.026), $s, $s * 0.86)
+    $g.DrawString([string]'爽阅', $font, $shadow, $shadowRect, $fmt)
+    $g.DrawString([string]'爽阅', $font, [System.Drawing.Brushes]::White, $layout, $fmt)
+    $font.Dispose()
+
+    # 金色下划线（保留旧配色里的火花色作为品牌线索）
+    $accent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 214, 90))
+    $barW = $targetW
+    $barH = [float]([math]::Max(2, $s * 0.035))
+    $g.FillRectangle($accent, ($s - $barW) / 2, $s * 0.775, $barW, $barH)
+    $g.Dispose()
+    return $bmp
+}
+
+# 传统方形图标：圆角渐变 + 字标
+function New-IconBitmap([int]$size) {
+    $bg = New-Gradient $size $true
+    $mark = New-Mark $size
+    $g = [System.Drawing.Graphics]::FromImage($bg)
+    $g.DrawImage($mark, 0, 0, $size, $size)
+    $g.Dispose(); $mark.Dispose()
+    return $bg
+}
+
 function Save-Size([int]$size, [string]$name) {
-    $b = New-IconBitmap $size $false
+    $b = New-IconBitmap $size
     $b.Save((Join-Path $out "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
     $b.Dispose()
     Write-Host "  $name.png ($size)"
@@ -72,21 +109,28 @@ Save-Size 144 'mipmap-xxhdpi'
 Save-Size 96 'mipmap-xhdpi'
 Save-Size 72 'mipmap-hdpi'
 Save-Size 48 'mipmap-mdpi'
-# android adaptive icon: foreground 108dp canvas with mark inside inner 66%
-$fg = New-IconBitmap 432 $true
-# draw mark scaled into center 66% by compositing a scaled copy
-$inner = New-Object System.Drawing.Bitmap(432, 432)
-$g2 = [System.Drawing.Graphics]::FromImage($inner)
-$g2.Clear([System.Drawing.Color]::Transparent)
-$src = New-IconBitmap 285 $true
-$g2.DrawImage($src, 73, 73, 285, 285)
-$g2.Dispose(); $src.Dispose(); $fg.Dispose()
-$inner.Save((Join-Path $out 'mipmap-anydpi-v26-foreground.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$inner.Dispose()
-# adaptive background (solid/gradient square, no rounding — launcher masks it)
-$bg = New-IconBitmap 432 $false
+
+# ---------------------------------------------------------------- adaptive icon
+# 画布 108dp @4x = 432px。系统把中间 72dp(288px) 裁成实际形状，
+# 因此内容必须落在中心 66dp(264px) 的安全区内，否则圆形 mask 下会被切掉。
+#
+# background 层：满幅渐变，**绝不能带字标** —— 否则字标会和 foreground 层
+# 叠成两重错位重影，看上去就是一团糊、认不出字。
+$bg = New-Gradient 432 $false
 $bg.Save((Join-Path $out 'mipmap-anydpi-v26-background.png'), [System.Drawing.Imaging.ImageFormat]::Png)
 $bg.Dispose()
+
+# foreground 层：只放字标，居中于安全区
+$fgPair = New-Gfx 432
+$fg = $fgPair[0]; $fgG = $fgPair[1]
+$fgG.Clear([System.Drawing.Color]::Transparent)
+$safe = 264                                   # 66dp @4x
+$off = [int]((432 - $safe) / 2)               # 84
+$mark = New-Mark $safe
+$fgG.DrawImage($mark, $off, $off, $safe, $safe)
+$fgG.Dispose(); $mark.Dispose()
+$fg.Save((Join-Path $out 'mipmap-anydpi-v26-foreground.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$fg.Dispose()
 
 # windows .ico: PNG-compressed entries (Vista+)
 function New-Ico([string]$path, [int[]]$sizes) {
@@ -97,7 +141,7 @@ function New-Ico([string]$path, [int[]]$sizes) {
     $bw.Write([uint16]$sizes.Count)
     $blobs = @()
     foreach ($sz in $sizes) {
-        $b = New-IconBitmap $sz $false
+        $b = New-IconBitmap $sz
         $ms2 = New-Object System.IO.MemoryStream
         $b.Save($ms2, [System.Drawing.Imaging.ImageFormat]::Png)
         $b.Dispose()
@@ -132,6 +176,9 @@ if (Test-Path $res) {
         if (Test-Path $dir) {
             Copy-Item (Join-Path $out "$($map[$k]).png") (Join-Path $dir 'ic_launcher.png') -Force
             Copy-Item (Join-Path $out "$($map[$k]).png") (Join-Path $dir 'ic_launcher_round.png') -Force
+            # 自适应图标的前景层也要按密度给一份（系统按密度取，不是只看 anydpi）
+            Copy-Item (Join-Path $out 'mipmap-anydpi-v26-foreground.png') (Join-Path $dir 'ic_launcher_foreground.png') -Force
+            Copy-Item (Join-Path $out 'mipmap-anydpi-v26-background.png') (Join-Path $dir 'ic_launcher_background.png') -Force
         }
     }
     Write-Host "  android mipmaps updated"

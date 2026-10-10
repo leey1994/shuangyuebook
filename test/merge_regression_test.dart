@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_reader/data/shelf_sort.dart';
 import 'package:novel_reader/legado/analyze_rule.dart';
@@ -17,6 +18,17 @@ import 'package:novel_reader/sources/legado_source.dart';
 import 'package:novel_reader/sources/local_source.dart';
 import 'package:novel_reader/sources/registry.dart';
 import 'package:novel_reader/theme.dart';
+import 'package:novel_reader/ui/reader/page_snap_physics.dart';
+
+/// 框架自带的 FixedScrollMetrics，直接用，不必手写桩。
+final _metrics = FixedScrollMetrics(
+  minScrollExtent: 0,
+  maxScrollExtent: 1000,
+  pixels: 500,
+  viewportDimension: 400,
+  devicePixelRatio: 1,
+  axisDirection: AxisDirection.right,
+);
 
 void main() {
   group('规则串拆解', () {
@@ -299,6 +311,26 @@ void main() {
       for (final s in builtinSources) {
         expect(all, contains(s.id));
       }
+    });
+  });
+
+  group('翻页物理', () {
+    const physics = PageSnapPhysics();
+
+    test('边界处不再吞掉拖动 —— 章末才能累计出越界量', () {
+      // 这是「看完本章继续滑动翻不到下一章」的根因：
+      // 默认物理在末页把多出来的位移直接吃掉，ScrollPosition 收不到越界信号。
+      expect(physics.applyPhysicsToUserOffset(_metrics, 120), 120);
+      expect(physics.applyPhysicsToUserOffset(_metrics, -45), -45);
+    });
+
+    test('页吸附时长随距离收敛且不拖尾', () {
+      final near = PageSnapSimulation(from: 0, to: 10, pageExtent: 1000);
+      final far = PageSnapSimulation(from: 0, to: 1000, pageExtent: 1000);
+      expect(near.duration, lessThan(far.duration));
+      expect(near.duration, greaterThanOrEqualTo(0.11)); // 下限 110ms
+      expect(far.duration, closeTo(0.30, 0.001)); // 整页 ≈ 300ms
+      expect(near.isDone(near.duration), isTrue);
     });
   });
 

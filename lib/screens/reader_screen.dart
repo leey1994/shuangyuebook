@@ -6,6 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../edge_tts.dart';
@@ -19,6 +20,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../ui/reader/cover_turn.dart';
 import '../ui/reader/page_snap_physics.dart';
+import '../ui/system_metrics.dart';
 import '../widgets.dart';
 
 /// 阅读器：左右翻页 / 上下滚动双模式，
@@ -62,6 +64,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 分页模式的页面控制器（滑动 / 覆盖 / 淡入共用）。
   final _pageCtrl = PageController();
 
+  /// 章末/章首越界拖动的累计距离（像素）。
+  double _edgeDrag = 0;
+
+  /// 越界拖够这么多像素就换章。
+  static const double _kEdgeDragToChapter = 120;
+
   /// 阅读计时：前台活跃时累计，单次 ≤90s 防挂机（写入 StatsStore）。
   Timer? _clock;
   int _sinceTick = 0;
@@ -69,6 +77,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 页脚时钟与电量（每 30s 刷新一次即可，不必更密）。
   String _clockText = '';
   BatteryStatus? _battery;
+
+  /// 隐藏状态栏之前记下的顶部安全区高度。
+  ///
+  /// 隐藏系统状态栏后 MediaQuery 的 padding 会归零，直接用会让正文突然顶到
+  /// 屏幕上沿。这里用首页在状态栏可见时量好的值（[SystemMetrics.topInset]），
+  /// 既保持版面稳定，也把这块空间留空 —— 以后要加桌宠，正好落在这条预留带里。
+  double get _reservedTop => SystemMetrics.topInset;
 
   // 滚动模式跨章连载：已加载章节及其在合并内容中的起始像素
   // （首章起始 = 顶部内边距；后续章起始 = 旧 maxScrollExtent - 底部内边距）
@@ -130,6 +145,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     AppStore.I.addListener(_onPrefs);
     _startClock();
     unawaited(NativeBridge.setKeepScreenOn(true)); // 阅读时不熄屏
+    // 隐藏系统状态栏（时间 / 信号 / 电量），把那条空间让给阅读内容。
+    // 退出阅读器时在 dispose 里恢复成 edgeToEdge。
+    unawaited(
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky));
     _scrollCtrl.addListener(() {
       if (_paged) return;
       final pos = _scrollCtrl.position;
@@ -213,6 +232,29 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _applySystemUi();
+  }
+
+  /// 让状态栏配色跟随阅读背景。
+  ///
+  /// main.dart 每帧都会按**全局**主题（锦绣白 / 极光黑）重设状态栏，
+  /// 而阅读器有 6 种独立背景 —— 不接管的话，选米黄或夜间背景时
+  /// 顶部会留一条颜色对不上的窄条，非常割裂。
+  void _applySystemUi() {
+    final bg = readerBgOf(_prefs.bgIndex, _prefs.theme);
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: bg.isDark ? Brightness.light : Brightness.dark,
+      statusBarBrightness: bg.isDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: bg.bg,
+      systemNavigationBarIconBrightness:
+          bg.isDark ? Brightness.light : Brightness.dark,
+    ));
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 退到后台：停表并落盘这一段，离开阅读器不再计入时长
     if (state != AppLifecycleState.resumed) {
@@ -252,6 +294,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _clock?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
     unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
+    // 恢复状态栏，并把配色还给全局主题
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     if (_speaking) {
       _speaking = false;
       try {
@@ -280,27 +324,49 @@ class _ReaderScreenState extends State<ReaderScreen>
           ? _detail!.chapters[_chIdx].title
           : '';
 
+  /// 进入阅读器：**先读缓存立刻开卷，网络在后面悄悄补**。
+  ///
+  /// 原先同步 await 目录请求，网络差时要转圈十几秒才进去，进去还先弹一句
+  /// 「网络不可用」—— 用户根本没来得及看内容就先吃了个坏心情。
+  ///
+  /// 现在：
+  ///  1. 有缓存目录 → 立刻用缓存铺开并渲染，进度保留；
+  ///  2. 后台再拉一次网络目录，成功则无缝替换（已读的那本不受影响）；
+  ///  3. 缓存也没有时才转圈，并等网络结果；
+  ///  4. 「无网络」只在**既没缓存、网络也失败**时才提示 —— 缓存看完之前不打扰。
   Future<void> _loadDetail() async {
+    final cached = await _store.cachedDetail(_book);
+    if (!mounted) return;
+
+    if (cached != null && cached.chapters.isNotEmpty) {
+      _detail = cached;
+      _chIdx = _chIdx.clamp(0, cached.chapters.length - 1).toInt();
+      setState(() {
+        _loading = false;
+        _error = null;
+      });
+      await _loadChapter(_chIdx,
+          startPage: widget.page, startOffset: widget.paragraph);
+      if (!mounted) return;
+      // 缓存能看就不打断；有网再后台更新目录
+      unawaited(_refreshDetailInBackground());
+      return;
+    }
+
+    // 无缓存：只能等网络，但转圈时不再「先卡住再报错」
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final d = await _src.fetchDetail(_book);
-      _detail = d;
+      _detail = await _src.fetchDetail(_book);
     } catch (e) {
-      final cached = await _store.cachedDetail(_book);
-      if (cached == null) {
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _error = e;
-          });
-        }
-        return;
-      }
-      _detail = cached;
-      _snack('网络不可用，正在离线阅读');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e;
+      });
+      return;
     }
     if (!mounted) return;
     if (_detail == null || _detail!.chapters.isEmpty) {
@@ -313,6 +379,26 @@ class _ReaderScreenState extends State<ReaderScreen>
     _chIdx = _chIdx.clamp(0, _detail!.chapters.length - 1).toInt();
     await _loadChapter(_chIdx,
         startPage: widget.page, startOffset: widget.paragraph);
+  }
+
+  /// 后台刷新目录：拿到新目录就换掉，并尽量保住当前阅读位置。
+  ///
+  /// 失败一律静默 —— 缓存能看的时候没理由用错误打断阅读。
+  Future<void> _refreshDetailInBackground() async {
+    try {
+      final fresh = await _src.fetchDetail(_book);
+      if (!mounted || fresh.chapters.isEmpty) return;
+      final keepTitle = _chapterTitle;
+      setState(() => _detail = fresh);
+      // 章节被整体替换后，按标题把阅读位置挪到对应的那一章
+      final idx = keepTitle.isEmpty ? _chIdx : _matchChapter(fresh, keepTitle);
+      if (idx != _chIdx) {
+        _chIdx = idx;
+        await _loadChapter(idx);
+      }
+    } catch (_) {
+      // 无网也无所谓：缓存还在手上
+    }
   }
 
   Future<void> _loadChapter(
@@ -563,97 +649,108 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final c = _colors();
+    // 状态栏已隐藏，但把它的高度补回去：版面不跳，那条带子也空着，
+    // 以后放桌宠正好。
+    final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, box) {
-            // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
-            final w = box.maxWidth - _prefs.marginH * 2;
-            final h = box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
-            _lastW = w;
-            _lastH = h;
-            final ts = MediaQuery.textScalerOf(context);
-            _lastScaler = ts;
-            if (w > 0 && h > 0) {
-              final key = Object.hash(identityHashCode(_paras), w, h,
-                  _prefs.layoutSignature, ts.toString());
-              if (_pages == null) {
-                // 新章节首排：立即分页（避免白屏）
-                _pages = paginateParas(
-                  paras: _paras,
-                  width: w,
-                  height: h,
-                  style: _bodyStyle,
-                  paraSpacing: _prefs.fontSize * 0.6,
-                  textScaler: ts,
-                );
-                _pagesKey = key;
-                if (_startPage != 0) {
-                  _page = _startPage >= _pages!.length
-                      ? _pages!.length - 1
-                      : _startPage;
-                  _startPage = 0;
+      body: MediaQuery(
+        data: mq.copyWith(
+          padding: mq.padding.copyWith(top: _reservedTop),
+          viewPadding: mq.viewPadding.copyWith(top: _reservedTop),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, box) {
+              // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
+              final w = box.maxWidth - _prefs.marginH * 2;
+              final h =
+                  box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
+              _lastW = w;
+              _lastH = h;
+              final ts = MediaQuery.textScalerOf(context);
+              _lastScaler = ts;
+              if (w > 0 && h > 0) {
+                final key = Object.hash(identityHashCode(_paras), w, h,
+                    _prefs.layoutSignature, ts.toString());
+                if (_pages == null) {
+                  // 新章节首排：立即分页（避免白屏）
+                  _pages = paginateParas(
+                    paras: _paras,
+                    width: w,
+                    height: h,
+                    style: _bodyStyle,
+                    paraSpacing: _prefs.fontSize * 0.6,
+                    textScaler: ts,
+                  );
+                  _pagesKey = key;
+                  if (_startPage != 0) {
+                    _page = _startPage >= _pages!.length
+                        ? _pages!.length - 1
+                        : _startPage;
+                    _startPage = 0;
+                  }
+                } else if (_pagesKey != key) {
+                  // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
+                  _repagTimer?.cancel();
+                  _repagTimer =
+                      Timer(const Duration(milliseconds: 160), _repaginate);
                 }
-              } else if (_pagesKey != key) {
-                // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
-                _repagTimer?.cancel();
-                _repagTimer =
-                    Timer(const Duration(milliseconds: 160), _repaginate);
               }
-            }
-            if (_pages != null && _pages!.isNotEmpty) {
-              _page = _page.clamp(0, _pages!.length - 1).toInt();
-            }
+              if (_pages != null && _pages!.isNotEmpty) {
+                _page = _page.clamp(0, _pages!.length - 1).toInt();
+              }
 
-            return Stack(
-              children: [
-                Padding(
-                  padding: EdgeInsets.only(top: _headerH, bottom: _footerH),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapUp: (d) {
-                      if (_prefs.pageMode == PageMode.scroll) {
-                        setState(() => _menu = !_menu);
-                        return;
-                      }
-                      final third = box.maxWidth / 3;
-                      if (d.globalPosition.dx < third) {
-                        _goPrev();
-                      } else if (d.globalPosition.dx > third * 2) {
-                        _goNext();
-                      } else {
-                        setState(() => _menu = !_menu);
-                      }
-                    },
-                    child: _buildContent(),
-                  ),
-                ),
-                if (_prefs.showHeader)
-                  Positioned(top: 0, left: 0, right: 0, child: _buildHeader(c)),
-                if (_prefs.showFooter)
-                  Positioned(
-                      bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
-                if (_loading) _overlay(const CircularProgressIndicator()),
-                if (_error != null) _overlay(_errorView()),
-                // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
-                if ((_loading || _error != null) &&
-                    Navigator.of(context).canPop())
-                  Positioned(
-                    top: 4,
-                    left: 4,
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: _colors().fg),
-                      tooltip: '返回',
-                      onPressed: () => Navigator.of(context).maybePop(),
+              return Stack(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(top: _headerH, bottom: _footerH),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: (d) {
+                        if (_prefs.pageMode == PageMode.scroll) {
+                          setState(() => _menu = !_menu);
+                          return;
+                        }
+                        final third = box.maxWidth / 3;
+                        if (d.globalPosition.dx < third) {
+                          _goPrev();
+                        } else if (d.globalPosition.dx > third * 2) {
+                          _goNext();
+                        } else {
+                          setState(() => _menu = !_menu);
+                        }
+                      },
+                      child: _buildContent(),
                     ),
                   ),
-                if (_menu) _topBar(c),
-                if (_menu) _bottomPanel(c),
-                if (_speaking && !_menu) _ttsBar(c),
-              ],
-            );
-          },
+                  if (_prefs.showHeader)
+                    Positioned(
+                        top: 0, left: 0, right: 0, child: _buildHeader(c)),
+                  if (_prefs.showFooter)
+                    Positioned(
+                        bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
+                  if (_loading) _overlay(const CircularProgressIndicator()),
+                  if (_error != null) _overlay(_errorView()),
+                  // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
+                  if ((_loading || _error != null) &&
+                      Navigator.of(context).canPop())
+                    Positioned(
+                      top: 4,
+                      left: 4,
+                      child: IconButton(
+                        icon: Icon(Icons.arrow_back, color: _colors().fg),
+                        tooltip: '返回',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                      ),
+                    ),
+                  if (_menu) _topBar(c),
+                  if (_menu) _bottomPanel(c),
+                  if (_speaking && !_menu) _ttsBar(c),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -687,6 +784,24 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   Color _bg() => _colors().bg;
 
+  /// 把底层异常翻译成人话。
+  ///
+  /// 缓存看完之后再往后翻才会走到这里，此时用户真正需要知道的是
+  /// 「没网了」而不是一串 SocketException / Failed host。
+  String _errorText(Object e) {
+    final s = e.toString();
+    if (s.contains('SocketException') ||
+        s.contains('Failed host') ||
+        s.contains('Network is unreachable') ||
+        s.contains('Connection refused') ||
+        s.contains('请求超时') ||
+        s.contains('网络错误') ||
+        s.contains('Connection timed out')) {
+      return '网络不可用，这一章还没缓存。\n连上网后点「重试」即可继续。';
+    }
+    return '加载失败：$s';
+  }
+
   Widget _errorView() {
     return Center(
       child: Column(
@@ -694,7 +809,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('加载失败：$_error',
+            child: Text(_errorText(_error!),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _colors().dim)),
           ),
@@ -755,48 +870,106 @@ class _ReaderScreenState extends State<ReaderScreen>
         });
       }
     }
-    return PageView.builder(
-      controller: _pageCtrl,
-      physics: const PageSnapPhysics(),
-      itemCount: pages.length,
-      onPageChanged: (i) {
-        if (!mounted || i == _page) return;
-        setState(() => _page = i);
-        _saveProgress();
-      },
-      itemBuilder: (ctx, i) {
-        final child = _pageBody(pages[i]);
-        if (!cover) return child;
-        final cur = _pageCtrl.hasClients && _pageCtrl.page != null
-            ? _pageCtrl.page!
-            : _page.toDouble();
-        return CoverTurnItem(
-          delta: i - cur,
-          width: MediaQuery.sizeOf(ctx).width,
-          shadowWidth: 14,
-          child: child,
-        );
-      },
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onPagedScroll,
+      child: PageView.builder(
+        controller: _pageCtrl,
+        physics: const PageSnapPhysics(),
+        itemCount: pages.length,
+        onPageChanged: (i) {
+          if (!mounted || i == _page) return;
+          setState(() => _page = i);
+          _saveProgress();
+        },
+        itemBuilder: (ctx, i) {
+          final child = _pageBody(pages[i]);
+          if (!cover) return child;
+          final cur = _pageCtrl.hasClients && _pageCtrl.page != null
+              ? _pageCtrl.page!
+              : _page.toDouble();
+          return CoverTurnItem(
+            delta: i - cur,
+            width: MediaQuery.sizeOf(ctx).width,
+            shadowWidth: 14,
+            child: child,
+          );
+        },
+      ),
     );
   }
 
+  /// 章末 / 章首继续拖动 → 换章。
+  ///
+  /// 分页模式原先只有「点右侧翻页」这一条路能进下一章，手势一直滑到底
+  /// 什么也不发生。这里把越界拖动累计起来：到了末页还往后拖，攒够
+  /// [_kEdgeDragToChapter]（约 0.3 屏宽）就翻下一章；章首往前拖同理回上一章。
+  ///
+  /// 只在越界方向上计数 —— 页内正常滑动会把计数清零，所以不会误翻。
+  bool _onPagedScroll(ScrollNotification n) {
+    if (n is ScrollUpdateNotification) {
+      if (n.dragDetails == null) {
+        _edgeDrag = 0;
+      } else {
+        final m = n.metrics;
+        final d = n.scrollDelta ?? 0;
+        if (m.pixels >= m.maxScrollExtent && d < 0) {
+          _edgeDrag += -d; // 章末继续往后拖
+        } else if (m.pixels <= m.minScrollExtent && d > 0) {
+          _edgeDrag += d; // 章首继续往前拖
+        } else {
+          _edgeDrag = 0;
+        }
+      }
+      if (_edgeDrag >= _kEdgeDragToChapter) {
+        _edgeDrag = 0;
+        if (_page >= _currentPages.length - 1) {
+          _goNext();
+        } else if (_page <= 0) {
+          _goPrev();
+        }
+      }
+    } else if (n is ScrollEndNotification) {
+      _edgeDrag = 0;
+    }
+    return false;
+  }
+
   /// 淡入淡出翻页：不跟手，整页交叉淡变（夜里翻页不刺眼）。
+  ///
+  /// 因为没有 PageView，滑动换章要自己识别：横向拖过 [_kFadeSwipePx]
+  /// 且抬手时判定为一次翻页手势，才推进/后退。章末继续滑会跨到下一章。
   Widget _buildFadeBody() {
     final pages = _currentPages;
     if (pages.isEmpty) {
       return Center(child: CircularProgressIndicator(color: _colors().fg));
     }
     final idx = _page.clamp(0, pages.length - 1).toInt();
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      child: KeyedSubtree(
-        key: ValueKey(idx),
-        child: _pageBody(pages[idx]),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (d) {
+        final v = d.primaryVelocity ?? 0;
+        // DragEndDetails 没有累计位移，只有结束速度；用速度阈值判定方向。
+        // 慢速轻扫不触发，避免误翻。
+        if (v < -_kFadeSwipePx) {
+          _goNext();
+        } else if (v > _kFadeSwipePx) {
+          _goPrev();
+        }
+      },
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child: KeyedSubtree(
+          key: ValueKey(idx),
+          child: _pageBody(pages[idx]),
+        ),
       ),
     );
   }
+
+  /// 淡入模式下判定为一次翻页手势所需的最小结束速度（px/s）。
+  static const double _kFadeSwipePx = 350;
 
   /// 上下滚动模式：跨章连载，靠底部临近自动续下一章。
   Widget _buildScrollBody() {

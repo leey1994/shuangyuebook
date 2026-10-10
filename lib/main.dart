@@ -22,6 +22,7 @@ import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
 import 'ui/storage_gate.dart';
+import 'ui/system_metrics.dart';
 import 'update_check.dart';
 
 /// 宽/窄屏分界（逻辑像素）：<= 视为安卓尺寸（底部菜单 + 缩放生效），> 为宽屏（左侧菜单不缩放）。
@@ -226,6 +227,11 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    // 趁状态栏还看得见，把它的高度量下来。阅读器会隐藏状态栏并手动补回
+    // 这段留白 —— 到时候 MediaQuery 已经是 0 了，只能现在记。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) captureSystemInsets(context);
+    });
     // 「用爽阅打开」文件关联：txt/epub 导入并进阅读器，json 导入为书源
     installOpenFileHandler(context);
     // 启动 2 秒后先查实时公告（GitHub 托管 JSON，新 id 全屏弹出并等关闭），
