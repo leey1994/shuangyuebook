@@ -18,11 +18,17 @@ class Announcement {
   final String title;
   final String body;
   final String image;
+
+  /// 这条公告对应的版本号。语义是「**装到这个版本就不再显示**」——
+  /// 公告是写给还没更新的人看的，见 [shouldShowFor]。
+  final String version;
+
   const Announcement({
     required this.id,
     required this.title,
     required this.body,
     this.image = '',
+    this.version = '',
   });
 
   factory Announcement.fromJson(Map<String, dynamic> j) => Announcement(
@@ -30,7 +36,19 @@ class Announcement {
         title: (j['title'] as String? ?? '').trim(),
         body: (j['body'] as String? ?? '').trim(),
         image: (j['image'] as String? ?? '').trim(),
+        version: (j['min_version'] as String? ?? '').trim(),
       );
+
+  /// 当前安装的版本是否需要看这条公告。
+  ///
+  /// 注意方向：以前写成了「app 版本 ≥ min_version 才显示」，等于**只有已经
+  /// 更新的人**才看得到发版公告 —— 刚发布时正好全被挡掉，公告一次都不弹。
+  /// 正确的语义是反过来：还在旧版本、没吃到这些改动的人应该看到；升到对应
+  /// 版本之后自动不再显示，免得用户对着已经有的功能看更新说明。
+  bool shouldShowFor(String appVersion) {
+    if (version.isEmpty) return true;
+    return compareVersion(appVersion, version) < 0;
+  }
 }
 
 /// 拉取公告 → 与本地已读 id 比对 → 不同则全屏弹出（关闭后记录）。
@@ -88,11 +106,10 @@ class NoticeChecker {
         final j = jsonDecode(utf8.decode(r.bodyBytes));
         if (j is! Map<String, dynamic>) continue;
         if (j['enabled'] == false) return null;
-        final minV = (j['min_version'] as String? ?? '').trim();
-        if (minV.isNotEmpty && compareVersion(kAppVersion, minV) < 0) {
-          return null;
-        }
-        return Announcement.fromJson(j);
+        final n = Announcement.fromJson(j);
+        // 版本门槛：已经升到这条公告对应版本的用户不用再看
+        if (!n.shouldShowFor(kAppVersion)) return null;
+        return n;
       } catch (_) {
         continue; // 该地址不可达 → 换下一个
       }

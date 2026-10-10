@@ -11,6 +11,12 @@ import 'package:flutter/material.dart';
 
 import '../pet/pet_view.dart';
 
+/// 顶部窄带的底色覆盖。阅读器把它设成当前阅读背景色，离开时置回 null。
+///
+/// 为什么需要：窄带在 MaterialApp 的 builder 里，包住所有路由，阅读器自己改不了
+/// 它的底色。选米黄或夜间背景时，顶部那条仍是主题底色，看着就是一条割裂的色带。
+final ValueNotifier<Color?> petBandBackground = ValueNotifier<Color?>(null);
+
 /// 顶部窄带（桌宠活动区）+ 下方内容。
 ///
 /// [band] 应等于系统状态栏高度，由启动时量到的 `SystemMetrics.topInset` 提供。
@@ -28,8 +34,9 @@ class PetTopBand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: background,
+    return ValueListenableBuilder<Color?>(
+      valueListenable: petBandBackground,
+      // child 走缓存：换底色只重画 ColoredBox，桌宠的状态与动画不受影响
       child: Column(
         children: [
           // 桌宠就画在这条带子里：它同时是状态栏区域，所以系统图标和它并存，
@@ -37,6 +44,10 @@ class PetTopBand extends StatelessWidget {
           SizedBox(height: band, child: PetBar(height: band)),
           Expanded(child: child),
         ],
+      ),
+      builder: (context, override, band_) => ColoredBox(
+        color: override ?? background,
+        child: band_,
       ),
     );
   }

@@ -21,6 +21,7 @@ import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../ui/pet_top_band.dart';
 import '../ui/reader/cover_turn.dart';
 import '../ui/reader/page_snap_physics.dart';
 import '../widgets.dart';
@@ -248,6 +249,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 顶部会留一条颜色对不上的窄条，非常割裂。
   void _applySystemUi() {
     final bg = readerBgOf(_prefs.bgIndex, _prefs.theme);
+    // 顶部桌宠窄带跟着阅读背景走，否则选米黄/夜间背景时顶部会留一条异色带
+    petBandBackground.value = bg.bg;
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: bg.isDark ? Brightness.light : Brightness.dark,
@@ -299,6 +302,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _settleReading(); // 离场前把这一段时长落盘
     PetStore.I.emit(PetAction.exitBook);
     unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
+    // 顶部窄带底色还给全局主题
+    petBandBackground.value = null;
     // 恢复状态栏，并把配色还给全局主题
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     if (_speaking) {

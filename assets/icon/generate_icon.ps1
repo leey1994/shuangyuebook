@@ -111,26 +111,103 @@ Save-Size 72 'mipmap-hdpi'
 Save-Size 48 'mipmap-mdpi'
 
 # ---------------------------------------------------------------- adaptive icon
-# 画布 108dp @4x = 432px。系统把中间 72dp(288px) 裁成实际形状，
-# 因此内容必须落在中心 66dp(264px) 的安全区内，否则圆形 mask 下会被切掉。
+# 画布 108dp。系统把中间 72dp 裁成实际形状，字标必须落在中心 66dp 的安全区内，
+# 否则圆形 mask 下会被切掉。
 #
-# background 层：满幅渐变，**绝不能带字标** —— 否则字标会和 foreground 层
-# 叠成两重错位重影，看上去就是一团糊、认不出字。
-$bg = New-Gradient 432 $false
-$bg.Save((Join-Path $out 'mipmap-anydpi-v26-background.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$bg.Dispose()
+# 关键：各密度要**各自尺寸**的图层。之前所有密度都塞同一张 432px，
+# 小屏机会被放大到糊。
+# background 层满幅渐变，**绝不能带字标** —— 否则和 foreground 叠成两重错位重影。
+function New-AdaptiveBackground([int]$size) {
+    return (New-Gradient $size $false)
+}
 
-# foreground 层：只放字标，居中于安全区
-$fgPair = New-Gfx 432
-$fg = $fgPair[0]; $fgG = $fgPair[1]
-$fgG.Clear([System.Drawing.Color]::Transparent)
-$safe = 264                                   # 66dp @4x
-$off = [int]((432 - $safe) / 2)               # 84
-$mark = New-Mark $safe
-$fgG.DrawImage($mark, $off, $off, $safe, $safe)
-$fgG.Dispose(); $mark.Dispose()
-$fg.Save((Join-Path $out 'mipmap-anydpi-v26-foreground.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$fg.Dispose()
+function New-AdaptiveForeground([int]$size) {
+    $pair = New-Gfx $size
+    $bmp = $pair[0]; $g = $pair[1]
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $s = [float]$size
+    $safe = [int]($s * 66.0 / 108.0)           # 中心 66dp 安全区
+    $off = [int](($s - $safe) / 2)
+    $mark = New-Mark $safe
+    $g.DrawImage($mark, $off, $off, $safe, $safe)
+    $g.Dispose(); $mark.Dispose()
+    return $bmp
+}
+
+# Android 13+ 主题图标（themed icon）只认这一层，必须是单色剪影。
+# 缺了它，部分启动器会把自适应图标退化成只剩背景层 —— 也就是用户看到的
+# 「一个蓝色方块」。
+function New-AdaptiveMonochrome([int]$size) {
+    $pair = New-Gfx $size
+    $bmp = $pair[0]; $g = $pair[1]
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $s = [float]$size
+    $safe = [int]($s * 66.0 / 108.0)
+    $off = [int](($s - $safe) / 2)
+    $mark = New-Mark $safe
+    # 把字标整体染成纯黑（系统会按主题重新上色）
+    $tint = New-Object System.Drawing.Imaging.ColorMatrix
+    $imgAttr = New-Object System.Drawing.Imaging.ImageAttributes
+    $imgAttr.SetColorMatrix($tint)
+    $cm = New-Object System.Drawing.Imaging.ColorMatrix
+    $cm.Matrix00 = 0; $cm.Matrix11 = 0; $cm.Matrix22 = 0
+    $cm.Matrix33 = 1; $cm.Matrix44 = 1
+    $cm.Matrix40 = 0; $cm.Matrix41 = 0; $cm.Matrix42 = 0; $cm.Matrix44 = 1
+    $imgAttr.SetColorMatrix($cm)
+    $dst = New-Object System.Drawing.Rectangle($off, $off, $safe, $safe)
+    $g.DrawImage($mark, $dst, 0, 0, $mark.Width, $mark.Height,
+        [System.Drawing.GraphicsUnit]::Pixel, $imgAttr)
+    $g.Dispose(); $mark.Dispose(); $imgAttr.Dispose()
+    return $bmp
+}
+
+function Save-Adaptive([int]$size, [string]$name) {
+    (New-AdaptiveBackground $size).Save((Join-Path $out "$name-bg.png"),
+        [System.Drawing.Imaging.ImageFormat]::Png)
+    (New-AdaptiveForeground $size).Save((Join-Path $out "$name-fg.png"),
+        [System.Drawing.Imaging.ImageFormat]::Png)
+    (New-AdaptiveMonochrome $size).Save((Join-Path $out "$name-mono.png"),
+        [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "  $name ($size)"
+}
+
+# 108dp @ 各密度
+Save-Adaptive 108 'adaptive-mdpi'
+Save-Adaptive 162 'adaptive-hdpi'
+Save-Adaptive 216 'adaptive-xhdpi'
+Save-Adaptive 324 'adaptive-xxhdpi'
+Save-Adaptive 432 'adaptive-xxxhdpi'
+
+# 预览：按启动器的方式合成（背景 + 前景，再只取中心 66dp 的圆形 mask），
+# 用来肉眼确认「用户到底会看到什么」，而不是只看分层文件。
+$prev = 432
+$safe = [int]($prev * 66.0 / 108.0)      # 启动器实际显示的直径
+$off = [int](($prev - $safe) / 2)
+$full = New-Object System.Drawing.Bitmap($prev, $prev)
+$fg1 = [System.Drawing.Graphics]::FromImage($full)
+$bgImg = New-AdaptiveBackground $prev
+$fg1.DrawImage($bgImg, 0, 0, $prev, $prev)
+$bgImg.Dispose()
+$fgImg = New-AdaptiveForeground $prev
+$fg1.DrawImage($fgImg, 0, 0, $prev, $prev)
+$fgImg.Dispose()
+$fg1.Dispose()
+
+# 圆形 mask：先铺透明，再从 full 里取中心 safe×safe
+$disc = New-Object System.Drawing.Bitmap($safe, $safe)
+$gd = [System.Drawing.Graphics]::FromImage($disc)
+$gd.Clear([System.Drawing.Color]::Transparent)
+$clip = New-Object System.Drawing.Drawing2D.GraphicsPath
+$clip.AddEllipse(0, 0, $safe, $safe)
+$gd.SetClip($clip)
+$gd.DrawImage($full, (New-Object System.Drawing.Rectangle(0, 0, $safe, $safe)),
+    (New-Object System.Drawing.Rectangle($off, $off, $safe, $safe)),
+    [System.Drawing.GraphicsUnit]::Pixel)
+$gd.ResetClip()
+$gd.Dispose(); $clip.Dispose(); $full.Dispose()
+$disc.Save((Join-Path $out 'preview-launcher.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$disc.Dispose()
+Write-Host "  preview-launcher.png"
 
 # windows .ico: PNG-compressed entries (Vista+)
 function New-Ico([string]$path, [int[]]$sizes) {
@@ -170,25 +247,52 @@ New-Ico (Join-Path $out 'app_icon.ico') @(256, 128, 64, 48, 32, 16)
 # install into android res (replace flutter default)
 $res = Join-Path $root 'android\app\src\main\res'
 if (Test-Path $res) {
-    $map = @{ 'mdpi' = 'mipmap-mdpi'; 'hdpi' = 'mipmap-hdpi'; 'xhdpi' = 'mipmap-xhdpi'; 'xxhdpi' = 'mipmap-xxhdpi'; 'xxxhdpi' = 'mipmap-xxxhdpi' }
-    foreach ($k in $map.Keys) {
-        $dir = Join-Path $res $map[$k]
-        if (Test-Path $dir) {
-            Copy-Item (Join-Path $out "$($map[$k]).png") (Join-Path $dir 'ic_launcher.png') -Force
-            Copy-Item (Join-Path $out "$($map[$k]).png") (Join-Path $dir 'ic_launcher_round.png') -Force
-            # 自适应图标的前景层也要按密度给一份（系统按密度取，不是只看 anydpi）
-            Copy-Item (Join-Path $out 'mipmap-anydpi-v26-foreground.png') (Join-Path $dir 'ic_launcher_foreground.png') -Force
-            Copy-Item (Join-Path $out 'mipmap-anydpi-v26-background.png') (Join-Path $dir 'ic_launcher_background.png') -Force
-        }
+    $map = [ordered]@{
+        'mipmap-mdpi'    = 48
+        'mipmap-hdpi'    = 72
+        'mipmap-xhdpi'   = 96
+        'mipmap-xxhdpi'  = 144
+        'mipmap-xxxhdpi' = 192
     }
-    Write-Host "  android mipmaps updated"
-}
-# adaptive icon xml
-$anydpi = Join-Path $res 'mipmap-anydpi-v26'
-if (Test-Path $res) {
+    $adaptive = [ordered]@{
+        'mipmap-mdpi'    = 'adaptive-mdpi'
+        'mipmap-hdpi'    = 'adaptive-hdpi'
+        'mipmap-xhdpi'   = 'adaptive-xhdpi'
+        'mipmap-xxhdpi'  = 'adaptive-xxhdpi'
+        'mipmap-xxxhdpi' = 'adaptive-xxxhdpi'
+    }
+    foreach ($k in $map.Keys) {
+        $dir = Join-Path $res $k
+        if (-not (Test-Path $dir)) { continue }
+        # 传统方形图标
+        Copy-Item (Join-Path $out "$k.png") (Join-Path $dir 'ic_launcher.png') -Force
+        Copy-Item (Join-Path $out "$k.png") (Join-Path $dir 'ic_launcher_round.png') -Force
+        # 自适应图标三层，各密度各自尺寸
+        $a = $adaptive[$k]
+        Copy-Item (Join-Path $out "$a-fg.png")   (Join-Path $dir 'ic_launcher_foreground.png') -Force
+        Copy-Item (Join-Path $out "$a-bg.png")   (Join-Path $dir 'ic_launcher_background.png') -Force
+        Copy-Item (Join-Path $out "$a-mono.png") (Join-Path $dir 'ic_launcher_monochrome.png') -Force
+    }
+
+    # anydpi-v26 这一层**只放 XML**：放 PNG 会被当作「任意密度不缩放」，
+    # 在小屏机上把 432px 硬塞进 108dp，图标会糊掉。
+    $anydpi = Join-Path $res 'mipmap-anydpi-v26'
     New-Item -ItemType Directory -Force -Path $anydpi | Out-Null
-    Copy-Item (Join-Path $out 'mipmap-anydpi-v26-foreground.png') (Join-Path $anydpi 'ic_launcher_foreground.png') -Force
-    Copy-Item (Join-Path $out 'mipmap-anydpi-v26-background.png') (Join-Path $anydpi 'ic_launcher_background.png') -Force
+    Get-ChildItem $anydpi -Filter '*.png' -ErrorAction SilentlyContinue | Remove-Item -Force
+
+    $xml = @(
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">',
+        '    <background android:drawable="@mipmap/ic_launcher_background"/>',
+        '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>',
+        '    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>',
+        '</adaptive-icon>'
+    )
+    foreach ($n in @('ic_launcher.xml', 'ic_launcher_round.xml')) {
+        [System.IO.File]::WriteAllLines((Join-Path $anydpi $n), $xml,
+            (New-Object System.Text.UTF8Encoding $false))
+    }
+    Write-Host "  android mipmaps + adaptive xml updated"
 }
 # windows runner icon
 $winIco = Join-Path $root 'windows\runner\resources\app_icon.ico'

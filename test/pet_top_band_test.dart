@@ -47,9 +47,11 @@ Widget harness({
   );
 }
 
-Widget band(double h, {Key? bodyKey}) => PetTopBand(
+Widget band(double h,
+        {Key? bodyKey, Color background = const Color(0xFFFFFFFF)}) =>
+    PetTopBand(
       band: h,
-      background: const Color(0xFFFFFFFF),
+      background: background,
       child: SizedBox.expand(key: bodyKey ?? const Key('body')),
     );
 
@@ -188,6 +190,53 @@ void main() {
       SystemMetrics.topInset = 0;
       expect(PetBar.defaultHeight(), PetBar.fallbackHeight);
       SystemMetrics.topInset = 0;
+    });
+  });
+
+  group('窄带底色跟随阅读背景', () {
+    tearDown(() => petBandBackground.value = null);
+
+    testWidgets('默认用主题底色', (tester) async {
+      useSurface(tester);
+      await tester.pumpWidget(harness(
+          child: band(kStatusBar, background: const Color(0xFFF6F7F9))));
+      await tester.pump();
+      final box = tester.widget<ColoredBox>(find.descendant(
+          of: find.byType(PetTopBand), matching: find.byType(ColoredBox)));
+      expect(box.color, const Color(0xFFF6F7F9));
+      await disposeTree(tester);
+    });
+
+    testWidgets('阅读器可覆盖成阅读背景色（否则顶部一条割裂色带）', (tester) async {
+      useSurface(tester);
+      await tester.pumpWidget(harness(
+          child: band(kStatusBar, background: const Color(0xFFF6F7F9))));
+      await tester.pump();
+
+      const readingBg = Color(0xFFF3E9D2); // 米黄阅读背景
+      petBandBackground.value = readingBg;
+      await tester.pump();
+
+      final box = tester.widget<ColoredBox>(find.descendant(
+          of: find.byType(PetTopBand), matching: find.byType(ColoredBox)));
+      expect(box.color, readingBg);
+      await disposeTree(tester);
+    });
+
+    testWidgets('离开阅读器后（置回 null）恢复主题底色', (tester) async {
+      useSurface(tester);
+      await tester.pumpWidget(harness(
+          child: band(kStatusBar, background: const Color(0xFFF6F7F9))));
+      await tester.pump();
+      petBandBackground.value = const Color(0xFF1A1A1A);
+      await tester.pump();
+      petBandBackground.value = null;
+      await tester.pump();
+
+      final box = tester.widget<ColoredBox>(find.descendant(
+          of: find.byType(PetTopBand), matching: find.byType(ColoredBox)));
+      expect(box.color, const Color(0xFFF6F7F9));
+      await disposeTree(tester);
     });
   });
 }
