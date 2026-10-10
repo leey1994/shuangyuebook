@@ -154,11 +154,15 @@ class _EntryList extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, box) {
         final avail = box.maxWidth - edge * 2;
-        // 正方形卡片想放多大；长卡片一列占满整行
-        final ideal =
-            square ? (avail / 3.2).clamp(96.0, 168.0) : double.infinity;
+        // 正方形卡片想放多大
+        final ideal = (avail / 3.2).clamp(96.0, 168.0);
         // 反推行数：卡片数 + 缝隙数 = 列数 + 1（两侧各一条）
-        final cols = square ? (avail / (ideal + gap)).floor().clamp(1, 6) : 1;
+        //
+        // 长卡片也要分列：宽屏下一列铺满 1100px，进度条会被拉成一条横贯卡片
+        // 的分隔线，看着像误画的横杠。按每列 320px 折算，窄屏自然退化成 1 列。
+        final cols = square
+            ? (avail / (ideal + gap)).floor().clamp(1, 6)
+            : (avail / 320).floor().clamp(1, 4);
         // 把富余/不足均摊到每张卡片，保证边距与间距完全相等
         final tileW = cols == 1 ? avail : (avail - gap * (cols - 1)) / cols;
         final tileH = square ? tileW * 1.34 : 96.0;

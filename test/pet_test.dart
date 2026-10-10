@@ -199,6 +199,80 @@ void main() {
   });
 
   group('台词', () {
+    // 收集所有「按场景」的台词：时段问候全档、久别全档、连续天数全档、
+    // 护眼、摸鱼、升阶全档。
+    List<PetScene> allScenes() => [
+          for (var h = 0; h < 24; h++) greetingScene(DateTime(2026, 1, 1, h)),
+          absenceScene(1),
+          absenceScene(3),
+          absenceScene(9),
+          absenceScene(60),
+          streakScene(1),
+          streakScene(3),
+          streakScene(7),
+          streakScene(30),
+          streakScene(100),
+          restScene,
+          idleScene,
+          for (final s in PetStage.values) stageUpScene(s),
+        ];
+
+    // 收集所有「按动作」的台词（摸一下按形态分四套）。
+    //
+    // [petToggle] 被有意排除：关掉桌宠的那一刻它没法说话，气泡也没有意义。
+    // 这不是漏写，是「哑动作」，下面单独有一条测试守着它别扩散。
+    List<PetScene> allActionScenes() => [
+          for (final a in PetAction.values)
+            if (a != PetAction.petTap && a != PetAction.petToggle)
+              PetScene(a.name, reactionFor(a, PetStage.drop).lines),
+          for (final s in PetStage.values)
+            PetScene('${s.name}Tap', reactionFor(PetAction.petTap, s).lines),
+        ];
+
+    test('每个场景至少 5 条随机文案', () {
+      for (final s in [...allScenes(), ...allActionScenes()]) {
+        expect(s.lines.length, greaterThanOrEqualTo(5),
+            reason: '场景 ${s.id} 只有 ${s.lines.length} 条，会反复撞同一句');
+      }
+    });
+
+    test('全部场景合计不少于 60 条', () {
+      var total = 0;
+      for (final s in [...allScenes(), ...allActionScenes()]) {
+        total += s.lines.length;
+      }
+      expect(total, greaterThanOrEqualTo(60));
+    });
+
+    test('只有「开关桌宠」是哑动作，别再新增不说话的动作', () {
+      final silent = PetAction.values
+          .where((a) => reactionFor(a, PetStage.drop).lines.isEmpty)
+          .toList();
+      expect(silent, [PetAction.petToggle]);
+    });
+
+    test('同一场景内没有重复句子（重复的等于白写）', () {
+      for (final s in [...allScenes(), ...allActionScenes()]) {
+        expect(s.lines.toSet().length, s.lines.length,
+            reason: '场景 ${s.id} 里有重复台词');
+      }
+    });
+
+    test('每条台词都短到一行放得下（气泡不换行）', () {
+      // 气泡最宽 236px、左右内边距 24px，字号 12.5 —— 中文约 12.5px/字，
+      // 留一点余量取 16 字。超了就单行截断，看起来像坏掉。
+      const limit = 16;
+      final tooLong = <String>[];
+      for (final s in [...allScenes(), ...allActionScenes()]) {
+        for (final line in s.lines) {
+          if (line.length > limit) {
+            tooLong.add('${s.id}: $line (${line.length} 字)');
+          }
+        }
+      }
+      expect(tooLong, isEmpty, reason: '以下台词太长会被截断：\n${tooLong.join('\n')}');
+    });
+
     test('每个时段都有话说', () {
       for (var h = 0; h < 24; h++) {
         final s = greetingScene(DateTime(2026, 1, 1, h));
