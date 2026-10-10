@@ -133,6 +133,7 @@ ReaderBg readerBgOf(int index, int theme) {
 /// 背景是否属于夜间档（决定默认文字色是否需要反转）。
 bool readerBgIsDark(int index, int theme) => readerBgOf(index, theme).isDark;
 
-/// 内置正文字体：0 系统字体、1 霞鹜文楷（随包内置，离线可用）。
-const List<String> kReaderFonts = ['系统字体', '霞鹜文楷'];
-const String kLxgwFamily = 'LXGWWenKai';
+/// 正文字体选项：[0] 系统字体、[1] 霞鹜文楷（在线下载，不随包分发）。
+///
+/// 字体族名由 [kOnlineFontFamily] 决定 —— 只有在线下载并注册成功后才可用。
+const List<String> kReaderFonts = ['系统字体', '霞鹜文楷（在线）'];

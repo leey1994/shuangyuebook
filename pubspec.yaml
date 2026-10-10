@@ -40,10 +40,6 @@ flutter:
     - assets/images/ # 无封面时按书名稳定分配的占位插画
     - assets/sources/ # 内置「阅读 3.0」JSON 书源
 
-  fonts:
-    # 正文字体：霞鹜文楷 Lite（OFL-1.1，见 assets/fonts/OFL.txt）
-    # 体积提示：该字重约 13.5MB，是 APK 的大头；不想要可在
-    # lib/theme.dart 把 kReaderFonts 收成只有「系统字体」并删掉本段。
-    - family: LXGWWenKai
-      fonts:
-        - asset: assets/fonts/LXGWWenKai-Regular.ttf
+  # 注：正文字体「霞鹜文楷」已改为**在线按需下载**（见 lib/data/online_font.dart），
+  # 不再随包分发 —— 一个字重就有 13.5MB，APK 体积几乎翻倍。
+  # 用户在阅读器「外观 → 正文字体」里点它时会先询问，同意后才下载。

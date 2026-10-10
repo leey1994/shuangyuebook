@@ -12,9 +12,8 @@ class ShelfScreen extends StatelessWidget {
   const ShelfScreen({super.key});
 
   static const _viewIcons = {
-    ShelfViewMode.grid: Icons.grid_view,
-    ShelfViewMode.compact: Icons.view_agenda_outlined,
-    ShelfViewMode.list: Icons.view_list,
+    ShelfViewMode.wide: Icons.view_agenda_outlined,
+    ShelfViewMode.square: Icons.grid_on_outlined,
   };
 
   @override
@@ -85,68 +84,6 @@ class ShelfScreen extends StatelessWidget {
   }
 }
 
-/// 阅读进度行：进度条 + 已读/总章数（总章数未知时只显示已读章）。
-Widget _progressLine(BuildContext context, ShelfEntry e) {
-  final theme = Theme.of(context);
-  final read = e.chapterIndex + 1;
-  if (e.finished) {
-    return Text('已读完 · 共 $read 章',
-        style: theme.textTheme.labelMedium
-            ?.copyWith(color: theme.colorScheme.primary));
-  }
-  final total = e.chapterCount;
-  final unread = e.chapterTitle.isEmpty && e.chapterIndex == 0;
-  if (total <= 0) {
-    if (unread) {
-      return Text('未开始阅读',
-          style: theme.textTheme.labelMedium?.copyWith(color: theme.hintColor));
-    }
-    final t = e.chapterTitle.isEmpty ? '' : ' · ${e.chapterTitle}';
-    return Text('已读第 $read 章$t',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.labelMedium);
-  }
-  if (unread) {
-    // 未开始：空进度条 + 总章数，不误显示「已读第 1 章」。
-    return Row(
-      children: [
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: 0,
-              minHeight: 6,
-              backgroundColor: theme.hintColor.withValues(alpha: 0.18),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text('共 $total 章 · 未开始', style: theme.textTheme.labelMedium),
-      ],
-    );
-  }
-  final pct = (read / total).clamp(0.0, 1.0);
-  return Row(
-    children: [
-      Expanded(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: LinearProgressIndicator(
-            value: pct,
-            minHeight: 6,
-            backgroundColor: theme.hintColor.withValues(alpha: 0.18),
-          ),
-        ),
-      ),
-      const SizedBox(width: 8),
-      Text('$read/$total 章 · ${(pct * 100).toStringAsFixed(0)}%',
-          style: theme.textTheme.labelMedium
-              ?.copyWith(color: theme.colorScheme.primary)),
-    ],
-  );
-}
-
 class _EntryList extends StatelessWidget {
   final List<ShelfEntry> entries;
   final String emptyHint;
@@ -195,106 +132,200 @@ class _EntryList extends StatelessWidget {
         child: Text(emptyHint, style: Theme.of(context).textTheme.bodyLarge),
       );
     }
-    final head = headerAction;
-    // 网格 / 小图两种视图没有「行内头部」，把清空按钮放到顶部一行
-    final body = _view == ShelfViewMode.list
-        ? ListView.builder(
-            padding: const EdgeInsets.only(bottom: 24),
-            itemCount: entries.length + (head != null ? 1 : 0),
-            itemBuilder: (context, i) {
-              if (head != null) {
-                if (i == 0) {
-                  return Align(alignment: Alignment.centerRight, child: head);
-                }
-                i -= 1;
-              }
-              return _row(context, entries[i]);
-            },
-          )
-        : _grid(context);
-    return body;
+    // 「清空」之类的头部操作，两种卡片样式都放在顶部右对齐
+    return _grid(context, headerAction);
   }
 
-  /// 列表行（左滑删除 + 长按确认）。
-  Widget _row(BuildContext context, ShelfEntry e) => Dismissible(
-        key: ValueKey(e.book.url),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          color: Colors.red.shade400,
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 16),
-          child: const Icon(Icons.delete, color: Colors.white),
-        ),
-        onDismissed: (_) => onRemove(e),
-        child: BookTile(
-          book: e.book,
-          extra: _progressLine(context, e),
-          onTap: () => onOpen(e),
-          onLongPress: () => _confirmRemove(context, e),
-        ),
-      );
+  /// 卡片网格：长卡片 / 正方形卡片。
+  ///
+  /// 列宽与间距是**算出来**的，不是写死的：先按理想卡宽定列数，再把
+  /// 剩余宽度均摊回卡片，保证「卡片间距 = 两侧留白」，横向永远正好铺满，
+  /// 不会出现右边多一截空白或卡片被挤扁。
+  Widget _grid(BuildContext context, Widget? top) {
+    const gap = 10.0;
+    const edge = 12.0;
+    final square = _view == ShelfViewMode.square;
 
-  /// 网格 / 小图：封面为主，标题与进度压在图下。
-  Widget _grid(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 560;
-    final tileW = _view == ShelfViewMode.grid ? 104.0 : 76.0;
-    final coverH = _view == ShelfViewMode.grid ? tileW * 1.42 : tileW * 1.3;
-    final cols = (MediaQuery.sizeOf(context).width / tileW).floor().clamp(2, 8);
-    final ratio = tileW / coverH;
-    final top = headerAction;
-    return CustomScrollView(
-      slivers: [
-        if (top != null)
-          SliverToBoxAdapter(
-            child: Align(alignment: Alignment.centerRight, child: top),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final avail = box.maxWidth - edge * 2;
+        // 正方形卡片想放多大；长卡片一列占满整行
+        final ideal =
+            square ? (avail / 3.2).clamp(96.0, 168.0) : double.infinity;
+        // 反推行数：卡片数 + 缝隙数 = 列数 + 1（两侧各一条）
+        final cols = square ? (avail / (ideal + gap)).floor().clamp(1, 6) : 1;
+        // 把富余/不足均摊到每张卡片，保证边距与间距完全相等
+        final tileW = cols == 1 ? avail : (avail - gap * (cols - 1)) / cols;
+        final tileH = square ? tileW * 1.34 : 96.0;
+
+        return CustomScrollView(
+          slivers: [
+            if (top != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Align(alignment: Alignment.centerRight, child: top),
+                ),
+              ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(edge, 4, edge, 28),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  mainAxisSpacing: gap,
+                  crossAxisSpacing: gap,
+                  mainAxisExtent: tileH,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) => _card(context, entries[i], tileW, square),
+                  childCount: entries.length,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 单张卡片。两种样式共用一套外壳，差别只在内部排布。
+  Widget _card(BuildContext context, ShelfEntry e, double w, bool square) {
+    final coverW = square ? w : 58.0;
+    final coverH = square ? w * 1.16 : 78.0;
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: () => onOpen(e),
+      onLongPress: () => _confirmRemove(context, e),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: square ? scheme.surface : scheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border:
+              Border.all(color: scheme.outlineVariant.withValues(alpha: .5)),
+        ),
+        // 内边距随卡宽缩放，保证进度条两端始终离卡片边缘有余量，
+        // 不会顶到边或溢出圆角
+        padding: EdgeInsets.all(square ? 8 : 8),
+        child: square
+            ? _squareCard(context, e, coverW, coverH)
+            : _wideCard(context, e, coverW, coverH),
+      ),
+    );
+  }
+
+  /// 正方形卡片：封面上、书名下、进度条压底。
+  Widget _squareCard(BuildContext context, ShelfEntry e, double w, double h) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: CoverImage(
+              url: e.book.cover,
+              width: w,
+              height: h,
+              cacheWidth: (w * 2).round(),
+              fallbackAsset: coverFallbackAsset(e.book.title),
+            ),
           ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-          sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: wide ? cols + 2 : cols,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: ratio * 0.72,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) {
-                final e = entries[i];
-                return InkWell(
-                  onTap: () => onOpen(e),
-                  onLongPress: () => _confirmRemove(context, e),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: CoverImage(
-                            url: e.book.cover,
-                            width: tileW,
-                            height: coverH,
-                            cacheWidth: (tileW * 2.5).round(),
-                            fallbackAsset: coverFallbackAsset(e.book.title),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        e.book.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
-                    ],
-                  ),
-                );
-              },
-              childCount: entries.length,
-            ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          e.book.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        const SizedBox(height: 3),
+        _bar(context, e),
+      ],
+    );
+  }
+
+  /// 长卡片：左封面右信息，封面与正文两栏各自不透明，进度条只在右栏内。
+  Widget _wideCard(BuildContext context, ShelfEntry e, double cw, double ch) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: CoverImage(
+            url: e.book.cover,
+            width: cw,
+            height: ch,
+            cacheWidth: (cw * 2.5).round(),
+            fallbackAsset: coverFallbackAsset(e.book.title),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                e.book.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              if ((e.book.author ?? '').isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  e.book.author!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+              const SizedBox(height: 6),
+              // 进度条放在 Expanded 里，右边界由卡片 padding 兜住
+              _bar(context, e),
+              const SizedBox(height: 3),
+              Text(
+                _progressLabel(e),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
           ),
         ),
       ],
     );
+  }
+
+  /// 进度条：宽度受父级约束，末端再留 1px 视觉余量，避免贴死卡片边框。
+  Widget _bar(BuildContext context, ShelfEntry e) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, box) {
+        final w = (box.maxWidth - 1).clamp(0.0, box.maxWidth);
+        return SizedBox(
+          width: w,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: shelfProgressOf(e),
+              minHeight: 4,
+              backgroundColor: scheme.outlineVariant.withValues(alpha: .45),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _progressLabel(ShelfEntry e) {
+    if (e.finished) return '已读完';
+    if (e.chapterCount <= 0) {
+      return e.chapterIndex > 0 ? '已读第 ${e.chapterIndex + 1} 章' : '未开始';
+    }
+    final pct = (shelfProgressOf(e) * 100).round();
+    return '${e.chapterIndex + 1}/${e.chapterCount} 章 · $pct%';
   }
 }

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../edge_tts.dart';
+import '../data/online_font.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
@@ -634,7 +635,9 @@ class _ReaderScreenState extends State<ReaderScreen>
         fontSize: _prefs.fontSize,
         height: _prefs.lineHeight,
         letterSpacing: _prefs.letterSpacing,
-        fontFamily: _prefs.fontIndex == 1 ? kLxgwFamily : null,
+        fontFamily: _prefs.fontIndex == 1 && OnlineFont.instance.available
+            ? kOnlineFontFamily
+            : null,
         color: _colors().fg,
       );
 
@@ -783,6 +786,76 @@ class _ReaderScreenState extends State<ReaderScreen>
       );
 
   Color _bg() => _colors().bg;
+
+  /// 选择正文字体。
+  ///
+  /// 霞鹜文楷不在安装包里（13.5MB，占了 APK 四成体积），所以首次选择时
+  /// 先问一句再下载，下载完成后当场注册并生效。已经下过就直接切换。
+  Future<void> _pickFont(int index) async {
+    if (index == 0) {
+      _store.setFontIndex(0);
+      setState(() {});
+      return;
+    }
+    final font = OnlineFont.instance;
+    if (!font.available) {
+      if (!await _confirmDownloadFont()) return;
+      if (!mounted) return;
+      _snack('正在下载霞鹜文楷…');
+      final ok = await font.download();
+      if (!mounted) return;
+      if (!ok) {
+        _snack(font.error ?? '字体下载失败，继续使用系统字体');
+        return;
+      }
+      _snack('霞鹜文楷已就绪');
+    }
+    _store.setFontIndex(1);
+    setState(() {});
+  }
+
+  /// 「是否下载在线字体」的询问弹层。
+  Future<bool> _confirmDownloadFont() async {
+    // 先取 NavigatorState 再 await，避免跨异步间隙持有 BuildContext
+    final nav = Navigator.of(context);
+    final mb = await _fontSizeMb();
+    if (!nav.mounted) return false;
+    final ok = await showDialog<bool>(
+      context: nav.context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要下载字体'),
+        content: Text('「霞鹜文楷」没有内置在安装包里（那样 APK 会大一半）。\n\n'
+            '首次使用需要联网下载约 $mb MB，下载一次后会一直保留，'
+            '之后离线也能用。\n\n是否现在下载？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('不用了')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('下载')),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// 从远程 HEAD 拿体积，拿不到就报个约数。
+  Future<String> _fontSizeMb() async {
+    for (final url in kOnlineFontUrls) {
+      try {
+        final client = HttpClient();
+        final req = await client.headUrl(Uri.parse(url));
+        final r = await req.close().timeout(const Duration(seconds: 10));
+        final n = r.contentLength;
+        client.close(force: true);
+        if (n > 0) return (n / 1024 / 1024).ceil().toString();
+      } catch (_) {
+        // 换下一条线路
+      }
+    }
+    return '13';
+  }
 
   /// 把底层异常翻译成人话。
   ///
@@ -1364,6 +1437,12 @@ class _ReaderScreenState extends State<ReaderScreen>
           ),
           const SizedBox(height: 14),
           Text('正文字体', style: TextStyle(color: c.dim, fontSize: 12)),
+          const SizedBox(height: 2),
+          Text(
+              OnlineFont.instance.available
+                  ? '霞鹜文楷已就绪'
+                  : '霞鹜文楷为在线字体（约 13MB），点击后会先询问是否下载',
+              style: TextStyle(color: c.dim, fontSize: 11)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
@@ -1373,10 +1452,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   label: Text(kReaderFonts[i],
                       style: const TextStyle(fontSize: 12)),
                   selected: _prefs.fontIndex == i,
-                  onSelected: (_) {
-                    _store.setFontIndex(i);
-                    setState(() {});
-                  },
+                  onSelected: (_) => _pickFont(i),
                 ),
             ],
           ),

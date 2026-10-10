@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'announcement.dart';
+import 'data/online_font.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
 import 'legado/source_health.dart';
@@ -94,6 +95,10 @@ Future<void> main(List<String> args) async {
         debugPrint('[书源体检] ${r.summary}');
       }
     }));
+  } catch (_) {}
+  try {
+    // 在线正文字体：磁盘上已有就直接注册，冷启动不必重新下载
+    await OnlineFont.instance.restore();
   } catch (_) {}
   runApp(const NovelApp());
 }

@@ -203,7 +203,7 @@ class AppStore extends ChangeNotifier {
 
   ShelfSortMode _shelfSort = ShelfSortMode.recentRead;
   bool _shelfAscending = false;
-  ShelfViewMode _shelfView = ShelfViewMode.list;
+  ShelfViewMode _shelfView = ShelfViewMode.wide;
 
   ShelfSortMode get shelfSort => _shelfSort;
   bool get shelfAscending => _shelfAscending;

@@ -33,11 +33,10 @@ enum ShelfSortMode {
       };
 }
 
-/// 书架显示方式。
+/// 书架卡片样式：长卡片 / 正方形卡片。
 enum ShelfViewMode {
-  grid('网格'),
-  compact('小图'),
-  list('列表');
+  wide('长卡片'),
+  square('正方形卡片');
 
   const ShelfViewMode(this.label);
 
@@ -54,11 +53,10 @@ ShelfSortMode shelfSortModeFrom(String? value) => switch (value) {
       _ => ShelfSortMode.recentRead,
     };
 
-/// 存储字符串 → 显示方式（未知 / 空回退「网格」）。
+/// 存储字符串 → 显示方式（未知 / 空回退「长卡片」）。
 ShelfViewMode shelfViewModeFrom(String? value) => switch (value) {
-      'compact' => ShelfViewMode.compact,
-      'list' => ShelfViewMode.list,
-      _ => ShelfViewMode.grid,
+      'square' => ShelfViewMode.square,
+      _ => ShelfViewMode.wide,
     };
 
 /// 进度比例（0~1）。总章数未知时按已读章数封顶，至少给一点进度。
