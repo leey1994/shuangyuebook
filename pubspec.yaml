@@ -1,7 +1,7 @@
-name: novel_reader
+﻿name: novel_reader
 description: 爽阅·多源聚合小说阅读器（内置固化书源 + 阅读 3.0 书源引擎，Android + Windows 双端）
 publish_to: none
-version: 1.1.0
+version: 1.2.0
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
