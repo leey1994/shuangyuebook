@@ -1,7 +1,7 @@
 ﻿name: novel_reader
 description: 爽阅·多源聚合小说阅读器（内置固化书源 + 阅读 3.0 书源引擎，Android + Windows 双端）
 publish_to: none
-version: 1.2.0
+version: 1.2.1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,3 +43,4 @@ flutter:
   # 注：正文字体「霞鹜文楷」已改为**在线按需下载**（见 lib/data/online_font.dart），
   # 不再随包分发 —— 一个字重就有 13.5MB，APK 体积几乎翻倍。
   # 用户在阅读器「外观 → 正文字体」里点它时会先询问，同意后才下载。
+
