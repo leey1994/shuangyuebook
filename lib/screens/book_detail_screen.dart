@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../pet/pet_store.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
@@ -116,6 +117,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   void _openReader(int chapterIndex) {
     final d = _detail;
     if (d == null) return;
+    // 搜索/发现找书 → 真的点开了一本：桌宠按「帮上忙了」给一次成长值
+    PetStore.I.searchOpened();
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ReaderScreen(book: d.book, chapterIndex: chapterIndex),
     ));

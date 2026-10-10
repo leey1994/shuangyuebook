@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/shelf_sort.dart';
+import '../pet/pet_painter.dart';
+import '../pet/pet_store.dart';
 import '../sources/registry.dart';
 import '../store.dart';
 import '../theme.dart';
@@ -237,6 +239,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     builder: (_) => const BookmarksPage())),
               ),
               const Divider(),
+              const _SectionHeader('桌宠'),
+              const _PetTile(),
+              const Divider(),
               const _SectionHeader('离线缓存'),
               ListTile(
                 title: const Text('自动缓存后续章节'),
@@ -329,6 +334,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+/// 桌宠开关 + 当前形态。成长值是现算的，所以这里跟着阅读时长实时变。
+class _PetTile extends StatefulWidget {
+  const _PetTile();
+
+  @override
+  State<_PetTile> createState() => _PetTileState();
+}
+
+class _PetTileState extends State<_PetTile> {
+  @override
+  void initState() {
+    super.initState();
+    PetStore.I.addListener(_onPet);
+  }
+
+  @override
+  void dispose() {
+    PetStore.I.removeListener(_onPet);
+    super.dispose();
+  }
+
+  void _onPet() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pet = PetStore.I;
+    final left = pet.toNextStage;
+    return SwitchListTile(
+      value: pet.enabled,
+      onChanged: pet.setEnabled,
+      title: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            height: 34,
+            child: CustomPaint(
+              painter: PetPainter(
+                stage: pet.stage,
+                mood: PetMood.calm,
+                phase: 0.6,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Text('小墨 · ${pet.stage.label}'),
+        ],
+      ),
+      subtitle: Text(left == 0
+          ? '已长成书灵，会一直陪着你'
+          : '再读 ${(left * kSecondsPerExp ~/ 60) + 1} 分钟升到下一形态'),
     );
   }
 }

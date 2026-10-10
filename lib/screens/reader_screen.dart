@@ -11,6 +11,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../edge_tts.dart';
 import '../data/online_font.dart';
+import '../pet/pet_view.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
@@ -83,8 +84,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   ///
   /// 隐藏系统状态栏后 MediaQuery 的 padding 会归零，直接用会让正文突然顶到
   /// 屏幕上沿。这里用首页在状态栏可见时量好的值（[SystemMetrics.topInset]），
-  /// 既保持版面稳定，也把这块空间留空 —— 以后要加桌宠，正好落在这条预留带里。
-  double get _reservedTop => SystemMetrics.topInset;
+  /// 既保持版面稳定，也把这块空间留空 —— 桌宠正落在这条预留带里。
+  ///
+  /// 桌面端没有状态栏，但仍要留出同样高度的一条带子给宠物，否则它会压在正文上。
+  double get _reservedTop => PetBar.defaultHeight();
 
   // 滚动模式跨章连载：已加载章节及其在合并内容中的起始像素
   // （首章起始 = 顶部内边距；后续章起始 = 旧 maxScrollExtent - 底部内边距）
@@ -652,109 +655,118 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final c = _colors();
-    // 状态栏已隐藏，但把它的高度补回去：版面不跳，那条带子也空着，
-    // 以后放桌宠正好。
+    // 状态栏已隐藏，但把它的高度补回去：版面不跳，那条带子正好留给桌宠。
     final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      body: MediaQuery(
-        data: mq.copyWith(
-          padding: mq.padding.copyWith(top: _reservedTop),
-          viewPadding: mq.viewPadding.copyWith(top: _reservedTop),
-        ),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, box) {
-              // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
-              final w = box.maxWidth - _prefs.marginH * 2;
-              final h =
-                  box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
-              _lastW = w;
-              _lastH = h;
-              final ts = MediaQuery.textScalerOf(context);
-              _lastScaler = ts;
-              if (w > 0 && h > 0) {
-                final key = Object.hash(identityHashCode(_paras), w, h,
-                    _prefs.layoutSignature, ts.toString());
-                if (_pages == null) {
-                  // 新章节首排：立即分页（避免白屏）
-                  _pages = paginateParas(
-                    paras: _paras,
-                    width: w,
-                    height: h,
-                    style: _bodyStyle,
-                    paraSpacing: _prefs.fontSize * 0.6,
-                    textScaler: ts,
-                  );
-                  _pagesKey = key;
-                  if (_startPage != 0) {
-                    _page = _startPage >= _pages!.length
-                        ? _pages!.length - 1
-                        : _startPage;
-                    _startPage = 0;
+      body: Stack(
+        children: [
+          MediaQuery(
+            data: mq.copyWith(
+              padding: mq.padding.copyWith(top: _reservedTop),
+              viewPadding: mq.viewPadding.copyWith(top: _reservedTop),
+            ),
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
+                  final w = box.maxWidth - _prefs.marginH * 2;
+                  final h =
+                      box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
+                  _lastW = w;
+                  _lastH = h;
+                  final ts = MediaQuery.textScalerOf(context);
+                  _lastScaler = ts;
+                  if (w > 0 && h > 0) {
+                    final key = Object.hash(identityHashCode(_paras), w, h,
+                        _prefs.layoutSignature, ts.toString());
+                    if (_pages == null) {
+                      // 新章节首排：立即分页（避免白屏）
+                      _pages = paginateParas(
+                        paras: _paras,
+                        width: w,
+                        height: h,
+                        style: _bodyStyle,
+                        paraSpacing: _prefs.fontSize * 0.6,
+                        textScaler: ts,
+                      );
+                      _pagesKey = key;
+                      if (_startPage != 0) {
+                        _page = _startPage >= _pages!.length
+                            ? _pages!.length - 1
+                            : _startPage;
+                        _startPage = 0;
+                      }
+                    } else if (_pagesKey != key) {
+                      // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
+                      _repagTimer?.cancel();
+                      _repagTimer =
+                          Timer(const Duration(milliseconds: 160), _repaginate);
+                    }
                   }
-                } else if (_pagesKey != key) {
-                  // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
-                  _repagTimer?.cancel();
-                  _repagTimer =
-                      Timer(const Duration(milliseconds: 160), _repaginate);
-                }
-              }
-              if (_pages != null && _pages!.isNotEmpty) {
-                _page = _page.clamp(0, _pages!.length - 1).toInt();
-              }
+                  if (_pages != null && _pages!.isNotEmpty) {
+                    _page = _page.clamp(0, _pages!.length - 1).toInt();
+                  }
 
-              return Stack(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.only(top: _headerH, bottom: _footerH),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: (d) {
-                        if (_prefs.pageMode == PageMode.scroll) {
-                          setState(() => _menu = !_menu);
-                          return;
-                        }
-                        final third = box.maxWidth / 3;
-                        if (d.globalPosition.dx < third) {
-                          _goPrev();
-                        } else if (d.globalPosition.dx > third * 2) {
-                          _goNext();
-                        } else {
-                          setState(() => _menu = !_menu);
-                        }
-                      },
-                      child: _buildContent(),
-                    ),
-                  ),
-                  if (_prefs.showHeader)
-                    Positioned(
-                        top: 0, left: 0, right: 0, child: _buildHeader(c)),
-                  if (_prefs.showFooter)
-                    Positioned(
-                        bottom: 0, left: 0, right: 0, child: _buildFooter(c)),
-                  if (_loading) _overlay(const CircularProgressIndicator()),
-                  if (_error != null) _overlay(_errorView()),
-                  // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
-                  if ((_loading || _error != null) &&
-                      Navigator.of(context).canPop())
-                    Positioned(
-                      top: 4,
-                      left: 4,
-                      child: IconButton(
-                        icon: Icon(Icons.arrow_back, color: _colors().fg),
-                        tooltip: '返回',
-                        onPressed: () => Navigator.of(context).maybePop(),
+                  return Stack(
+                    children: [
+                      Padding(
+                        padding:
+                            EdgeInsets.only(top: _headerH, bottom: _footerH),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: (d) {
+                            if (_prefs.pageMode == PageMode.scroll) {
+                              setState(() => _menu = !_menu);
+                              return;
+                            }
+                            final third = box.maxWidth / 3;
+                            if (d.globalPosition.dx < third) {
+                              _goPrev();
+                            } else if (d.globalPosition.dx > third * 2) {
+                              _goNext();
+                            } else {
+                              setState(() => _menu = !_menu);
+                            }
+                          },
+                          child: _buildContent(),
+                        ),
                       ),
-                    ),
-                  if (_menu) _topBar(c),
-                  if (_menu) _bottomPanel(c),
-                  if (_speaking && !_menu) _ttsBar(c),
-                ],
-              );
-            },
+                      if (_prefs.showHeader)
+                        Positioned(
+                            top: 0, left: 0, right: 0, child: _buildHeader(c)),
+                      if (_prefs.showFooter)
+                        Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: _buildFooter(c)),
+                      if (_loading) _overlay(const CircularProgressIndicator()),
+                      if (_error != null) _overlay(_errorView()),
+                      // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
+                      if ((_loading || _error != null) &&
+                          Navigator.of(context).canPop())
+                        Positioned(
+                          top: 4,
+                          left: 4,
+                          child: IconButton(
+                            icon: Icon(Icons.arrow_back, color: _colors().fg),
+                            tooltip: '返回',
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                        ),
+                      if (_menu) _topBar(c),
+                      if (_menu) _bottomPanel(c),
+                      if (_speaking && !_menu) _ttsBar(c),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
+          // 桌宠：贴在顶部那条预留留白里（放最后一个子节点，气泡才能盖在正文上）
+          const Positioned(top: 0, left: 0, right: 0, child: PetBar()),
+        ],
       ),
     );
   }

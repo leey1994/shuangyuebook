@@ -85,6 +85,11 @@ class AppStore extends ChangeNotifier {
   static final AppStore I = AppStore._();
 
   SharedPreferences? _sp;
+
+  /// 共享偏好句柄。新模块（桌宠等）直接复用这里的持久化，不必再开一套文件；
+  /// 为空说明持久化不可用，调用方照常降级为内存态。
+  SharedPreferences? get sp => _sp;
+
   final ReaderPrefs prefs = ReaderPrefs();
 
   List<ShelfEntry> shelf = [];
