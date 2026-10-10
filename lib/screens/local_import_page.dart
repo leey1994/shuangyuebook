@@ -8,6 +8,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../local/file_scan.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../store.dart';
 import '../theme.dart';
 
@@ -130,6 +132,9 @@ class _LocalImportPageState extends State<LocalImportPage> {
     }
     if (!mounted) return;
     setState(() => _busy = false);
+    // 本地书走 store 时已经逐本 emit 过 importLocal；这里是「一次导入多本」
+    // 的整体反馈，避免书架为空时一条气泡都不冒。
+    if (ok > 0) PetStore.I.emit(PetAction.importLocal);
     _snack(fail == 0 ? '已导入 $ok 本' : '导入 $ok 本，$fail 本失败或已在书架');
     if (ok > 0) Navigator.of(context).maybePop();
   }

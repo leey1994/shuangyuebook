@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../feed_cache.dart';
 import '../models.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../widgets.dart';
@@ -644,8 +646,11 @@ class _PagedListState extends State<_PagedList>
           book: b,
           showSource: true,
           trailingText: widget.ranked ? '${i + 1}' : null,
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => BookDetailScreen(book: b))),
+          onTap: () {
+            PetStore.I.emit(PetAction.discoverOpen);
+            Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => BookDetailScreen(book: b)));
+          },
         );
       },
     );

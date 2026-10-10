@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../feed_cache.dart';
 import '../models.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
@@ -52,6 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (q.isEmpty) return;
     FocusScope.of(context).unfocus();
     AppStore.I.pushSearch(q);
+    PetStore.I.emit(PetAction.search);
     final targets = allSources;
     final gen = ++_gen;
     setState(() {
@@ -99,6 +102,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void _clear() {
     _gen++; // 让在途搜索的回调作废，避免清空后又冒出新结果
     _controller.clear();
+    PetStore.I.emit(PetAction.searchClear);
     setState(() {
       _results = [];
       _loading = false;

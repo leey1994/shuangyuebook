@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_reader/pet/pet_event.dart';
 import 'package:novel_reader/pet/pet_lines.dart';
 import 'package:novel_reader/pet/pet_painter.dart';
 import 'package:novel_reader/pet/pet_store.dart';
@@ -55,7 +56,7 @@ void main() {
 
     test('搜索开书比摸一下给得多', () {
       final p = PetStore(readingSeconds: () => 0);
-      p.searchOpened();
+      p.emit(PetAction.searchOpen);
       expect(p.exp, 15);
     });
 
@@ -75,6 +76,86 @@ void main() {
       expect(p.greet(), isNotNull);
       expect(p.greet(), isNull);
       expect(p.greet(), isNull);
+    });
+  });
+
+  group('全局联动', () {
+    test('每个动作都配了反应，没有漏网的', () {
+      for (final a in PetAction.values) {
+        final r = reactionFor(a, PetStage.drop);
+        expect(r, isNotNull, reason: '${a.label} 没配反应');
+        expect(r.lines.length + (r.exp == 0 ? 0 : 1) + (r.mood == null ? 0 : 1),
+            greaterThan(0),
+            reason: '${a.label} 的反应是空的，等于没联动');
+      }
+    });
+
+    test('emit 会给经验、换情绪、冒台词', () {
+      final p = PetStore(readingSeconds: () => 0);
+      p.emit(PetAction.downloadBook);
+      expect(p.exp, 12);
+      expect(p.mood, PetMood.cheer);
+      expect(p.bubble, isNotNull);
+      expect(p.bubble, isNotEmpty);
+    });
+
+    test('正关桌宠时那次开关不说话（没气泡可言），但仍走联动', () {
+      final p = PetStore(readingSeconds: () => 0);
+      p.emit(PetAction.petToggle);
+      expect(p.bubble, isNull);
+    });
+
+    test('同一动作连点时限流：涨经验但不刷屏', () {
+      final p = PetStore(readingSeconds: () => 0);
+      p.emit(PetAction.addBookmark); // +1
+      final first = p.bubble;
+      final seq = p.bubbleSeq;
+      p.emit(PetAction.addBookmark); // 冷却内：不再说话
+      expect(p.exp, 2, reason: '经验照给');
+      expect(p.bubble, first);
+      expect(p.bubbleSeq, seq);
+    });
+
+    test('不同动作之间不互相限流', () {
+      final p = PetStore(readingSeconds: () => 0);
+      p.emit(PetAction.nextChapter);
+      final seq = p.bubbleSeq;
+      p.emit(PetAction.prevChapter);
+      expect(p.bubbleSeq, greaterThan(seq));
+    });
+
+    test('摸一下会记次数，冷却内不重复记', () {
+      final p = PetStore(readingSeconds: () => 0);
+      expect(p.pet(), isTrue);
+      expect(p.petCount, 1);
+      expect(p.pet(), isFalse);
+      expect(p.petCount, 1);
+    });
+
+    test('清掉气泡后能再次显示（换个动作，同动作还在冷却里）', () {
+      final p = PetStore(readingSeconds: () => 0);
+      p.emit(PetAction.settingChange);
+      expect(p.bubble, isNotNull);
+      p.clearBubble();
+      expect(p.bubble, isNull);
+      // 同动作还在冷却内 —— 这正是限流该有的样子
+      p.emit(PetAction.settingChange);
+      expect(p.bubble, isNull);
+      p.emit(PetAction.exportData);
+      expect(p.bubble, isNotNull);
+    });
+
+    test('摸它的台词随形态变，但仍是同一只（同一个动作枚举）', () {
+      final seen = <PetStage, String>{};
+      for (final s in PetStage.values) {
+        final p = PetStore(readingSeconds: () => 0);
+        p.debugSetBonus(kPetStageExp[s.index]);
+        p.emit(PetAction.petTap);
+        seen[s] = p.bubble ?? '';
+        expect(p.bubble, isNotNull, reason: '${s.label} 该有话说');
+      }
+      expect(seen.values.toSet().length, PetStage.values.length,
+          reason: '四个形态的摸鱼台词应当各不相同');
     });
   });
 

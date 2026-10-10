@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../data/shelf_sort.dart';
 import '../models.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../store.dart';
 import '../widgets.dart';
 import 'local_import_page.dart';
@@ -60,7 +62,10 @@ class ShelfScreen extends StatelessWidget {
                   headerAction: AppStore.I.history.isEmpty
                       ? null
                       : TextButton(
-                          onPressed: () => AppStore.I.clearHistory(),
+                          onPressed: () {
+                            AppStore.I.clearHistory();
+                            PetStore.I.emit(PetAction.shelfClear);
+                          },
                           child: const Text('清空'),
                         ),
                 ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/shelf_sort.dart';
+import '../pet/pet_event.dart';
 import '../pet/pet_painter.dart';
 import '../pet/pet_store.dart';
 import '../sources/registry.dart';
@@ -287,6 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                         if (ok == true) {
                           await store.clearCache();
+                          PetStore.I.emit(PetAction.clearCache);
                           _refreshCache();
                         }
                       },
@@ -369,7 +371,10 @@ class _PetTileState extends State<_PetTile> {
     final left = pet.toNextStage;
     return SwitchListTile(
       value: pet.enabled,
-      onChanged: pet.setEnabled,
+      onChanged: (v) {
+        pet.setEnabled(v);
+        pet.emit(PetAction.petToggle);
+      },
       title: Row(
         children: [
           SizedBox(

@@ -1,5 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
+
+import 'pet/pet_view.dart';
 
 /// 桌面端自绘标题栏：可拖动移动窗口、双击最大化、右侧最小化/最大化/关闭。
 /// 固定 36 高、文字图标不参与全局缩放，保证观感稳定。
@@ -10,8 +12,7 @@ class DesktopTitleBar extends StatefulWidget {
   State<DesktopTitleBar> createState() => _DesktopTitleBarState();
 }
 
-class _DesktopTitleBarState extends State<DesktopTitleBar>
-    with WindowListener {
+class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
   bool _max = false;
 
   @override
@@ -61,8 +62,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar>
                   child: Row(
                     children: [
                       const SizedBox(width: 12),
-                      Icon(Icons.menu_book,
-                          size: 16, color: scheme.onSurface),
+                      Icon(Icons.menu_book, size: 16, color: scheme.onSurface),
                       const SizedBox(width: 8),
                       Text(
                         '爽阅',
@@ -78,9 +78,12 @@ class _DesktopTitleBarState extends State<DesktopTitleBar>
               ),
             ),
           ),
+          // 桌宠：桌面端的「顶部预留带」就是这条标题栏，放在窗口按钮左边，
+          // 不拖动窗口、也不挡任何控件；气泡向下浮出去盖在内容上。
+          const PetBar(height: 30),
           _btn(Icons.remove, '最小化', scheme, () => windowManager.minimize()),
-          _btn(_max ? Icons.filter_none : Icons.crop_square, '最大化',
-              scheme, _toggleMax),
+          _btn(_max ? Icons.filter_none : Icons.crop_square, '最大化', scheme,
+              _toggleMax),
           _btn(Icons.close, '关闭', scheme, () => windowManager.close(),
               close: true),
         ],
@@ -94,7 +97,8 @@ class _DesktopTitleBarState extends State<DesktopTitleBar>
       message: tip,
       child: InkWell(
         onTap: onTap,
-        hoverColor: close ? Colors.red : scheme.onSurface.withValues(alpha: 0.1),
+        hoverColor:
+            close ? Colors.red : scheme.onSurface.withValues(alpha: 0.1),
         child: SizedBox(
           width: 44,
           height: 36,

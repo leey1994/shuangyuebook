@@ -13,6 +13,8 @@ import 'feed_cache.dart';
 import 'legado/source_health.dart';
 import 'legado/source_store.dart';
 import 'legado/webview_engine.dart';
+import 'pet/pet_store.dart';
+import 'pet/pet_view.dart';
 import 'platform/open_file_dispatch.dart';
 import 'screens/discover_screen.dart';
 import 'screens/search_screen.dart';
@@ -95,6 +97,11 @@ Future<void> main(List<String> args) async {
         debugPrint('[书源体检] ${r.summary}');
       }
     }));
+  } catch (_) {}
+  try {
+    // 桌宠的偏好句柄接在 AppStore 上（反过来 import 会和 store 循环引用）
+    PetStore.prefsProvider = () => AppStore.I.sp;
+    PetStore.I.load();
   } catch (_) {}
   try {
     // 在线正文字体：磁盘上已有就直接注册，冷启动不必重新下载
@@ -202,11 +209,24 @@ class _NovelAppState extends State<NovelApp> {
       // 高度落在 viewPadding，手动补上，保证顶部操作不被状态栏挡住。
       // 顶缝先铺主题底色：状态栏区域（含 edge-to-edge 透传）与应用同色。
       final top = mq.padding.top > 0 ? 0.0 : mq.viewPadding.top;
+      final band = PetBar.defaultHeight();
       app = ColoredBox(
         color: AppThemes.scaffold(_theme),
         child: Padding(
           padding: EdgeInsets.only(top: top),
-          child: SafeArea(top: true, bottom: false, child: app),
+          // 桌宠的专属窄带：每个路由都在、位置恒定，也不会盖住任何按钮。
+          // 高度用启动时量好的 [SystemMetrics.topInset]，不读实时 MediaQuery ——
+          // 阅读器会隐藏状态栏，实时读数会塌成 0，整条带子跟着跳。
+          child: SafeArea(
+            top: mq.padding.top > 0,
+            bottom: false,
+            child: Column(
+              children: [
+                SizedBox(height: band, child: PetBar(height: band)),
+                Expanded(child: app),
+              ],
+            ),
+          ),
         ),
       );
     }

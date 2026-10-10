@@ -58,6 +58,7 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
       if (mounted) setState(() {});
     })
       ..start();
+    _pet.addListener(_onPet);
     // 阶位主要由阅读时长推动，而这个值是现算的 —— 每秒比对一次即可
     Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -74,11 +75,20 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
   @override
   void dispose() {
     _ticker.dispose();
+    _pet.removeListener(_onPet);
     _hideLine?.cancel();
     _restTimer?.cancel();
     _idleTimer?.cancel();
     _rebound?.cancel();
     super.dispose();
+  }
+
+  /// 全局动作总线推来了一句新台词。
+  void _onPet() {
+    if (!mounted) return;
+    final line = _pet.bubble;
+    if (line == null || line == _line) return;
+    _show(line);
   }
 
   double get _h => widget.height ?? PetBar.defaultHeight();
@@ -91,12 +101,17 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
   }
 
   /// 冒一句话。自动消失，同一场景再次触发会换一句。
-  void _say(PetScene scene) {
+  void _say(PetScene scene) => _show(petLine(scene, turn: _turn++));
+
+  /// 把一句话挂到气泡上，并在超时后收回。
+  void _show(String text) {
     if (!mounted) return;
     _hideLine?.cancel();
-    setState(() => _line = petLine(scene, turn: _turn++));
+    setState(() => _line = text);
     _hideLine = Timer(const Duration(milliseconds: 4200), () {
-      if (mounted) setState(() => _line = null);
+      if (!mounted) return;
+      setState(() => _line = null);
+      _pet.clearBubble();
     });
     _armIdle();
   }
@@ -143,9 +158,10 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
         clipBehavior: Clip.none,
         children: [
           if (_line != null)
+            // 从宠物下方往下浮（不是往上 —— 往上是屏幕边缘/窗口标题栏）
             Positioned(
               right: 6 + h * 1.35,
-              bottom: 0,
+              top: h - 2,
               child: _bubble(_line!, scheme),
             ),
           Positioned(

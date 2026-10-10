@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'data/shelf_sort.dart';
 import 'local/file_scan.dart';
 import 'models.dart';
+import 'pet/pet_event.dart';
+import 'pet/pet_store.dart';
 import 'sources/local_source.dart';
 import 'sources/registry.dart';
 import 'sources/source.dart';
@@ -218,6 +220,7 @@ class AppStore extends ChangeNotifier {
     _shelfView = v;
     _sp?.setString('shelfView', v.name);
     notifyListeners();
+    _pet(PetAction.shelfView);
   }
 
   /// 排序 / 视图切换的下一档（书架页右上角一键循环）。
@@ -233,6 +236,7 @@ class AppStore extends ChangeNotifier {
     _sp?.setString('shelfSort', v.name);
     _sp?.setBool('shelfAscending', _shelfAscending);
     notifyListeners();
+    _pet(PetAction.shelfSort);
   }
 
   void setShelfAscending(bool v) {
@@ -267,6 +271,7 @@ class AppStore extends ChangeNotifier {
         intro: data.intro.isEmpty ? null : data.intro,
       );
       addToShelf(book, chapterCount: data.chapters.length);
+      _pet(PetAction.importLocal);
       return true;
     } catch (_) {
       return false;
@@ -278,10 +283,14 @@ class AppStore extends ChangeNotifier {
 
   // ---------- 阅读偏好 ----------
 
+  /// 通知桌宠「用户改了 X」。所有偏好都走这里，所以联动只写一次。
+  void _pet(PetAction a) => PetStore.I.emit(a);
+
   void setFontSize(double v) {
     prefs.fontSize = v.clamp(12, 32).toDouble();
     _sp?.setDouble('fontSize', prefs.fontSize);
     notifyListeners();
+    _pet(PetAction.fontSizeChange);
   }
 
   void setLineHeight(double v) {
@@ -294,6 +303,7 @@ class AppStore extends ChangeNotifier {
     prefs.theme = v == 1 ? 1 : 0;
     _sp?.setInt('theme', prefs.theme);
     notifyListeners();
+    _pet(PetAction.themeChange);
   }
 
   void setPageMode(PageMode v) {
@@ -302,6 +312,7 @@ class AppStore extends ChangeNotifier {
     // 旧字段同步写入，老版本回滚时仍能读懂
     _sp?.setBool('paginate', v != PageMode.scroll);
     notifyListeners();
+    _pet(PetAction.pageModeChange);
   }
 
   /// 兼容旧调用点（设置页 / 阅读器面板的「翻页 ⇄ 滚动」开关）。
@@ -335,30 +346,35 @@ class AppStore extends ChangeNotifier {
     prefs.fontIndex = v == 1 ? 1 : 0;
     _sp?.setInt('fontIndex', prefs.fontIndex);
     notifyListeners();
+    _pet(PetAction.fontChange);
   }
 
   void setShowHeader(bool v) {
     prefs.showHeader = v;
     _sp?.setBool('showHeader', v);
     notifyListeners();
+    _pet(PetAction.settingChange);
   }
 
   void setShowFooter(bool v) {
     prefs.showFooter = v;
     _sp?.setBool('showFooter', v);
     notifyListeners();
+    _pet(PetAction.settingChange);
   }
 
   void setBgIndex(int v) {
     prefs.bgIndex = v;
     _sp?.setInt('bgIndex', v);
     notifyListeners();
+    _pet(PetAction.backgroundChange);
   }
 
   void setAutoCache(int v) {
     prefs.autoCache = v;
     _sp?.setInt('autoCache', v);
     notifyListeners();
+    _pet(PetAction.settingChange);
   }
 
   void setTtsRate(double v) {
@@ -382,6 +398,7 @@ class AppStore extends ChangeNotifier {
   void setEdgeNotice(bool v) {
     prefs.edgeNotice = v;
     _sp?.setBool('edgeNotice', v);
+    _pet(PetAction.settingChange);
   }
 
   /// 听书在线合成音频缓存目录（<缓存>/tts）。
@@ -420,6 +437,7 @@ class AppStore extends ChangeNotifier {
   void removeFromShelf(String bookUrl) {
     shelf.removeWhere((e) => e.book.url == bookUrl);
     _save(history: false, bookmarks: false);
+    _pet(PetAction.shelfRemove);
   }
 
   /// 记录已知总章节数（打开详情/目录翻页后调用，只增不减，防分页目录写入半截值）。
@@ -520,11 +538,13 @@ class AppStore extends ChangeNotifier {
     final list = bookmarks.putIfAbsent(bookUrl, () => []);
     list.insert(0, b);
     _save(shelf: false, history: false);
+    _pet(PetAction.addBookmark);
   }
 
   void removeBookmark(String bookUrl, int index) {
     bookmarks[bookUrl]?.removeAt(index);
     _save(shelf: false, history: false);
+    _pet(PetAction.removeBookmark);
   }
 
   // ---------- 章节离线缓存 ----------

@@ -10,6 +10,8 @@ import 'package:novel_reader/legado/http_client.dart';
 import 'package:novel_reader/legado/models.dart';
 import 'package:novel_reader/legado/source_health.dart';
 import 'package:novel_reader/legado/source_store.dart';
+import 'package:novel_reader/pet/pet_event.dart';
+import 'package:novel_reader/pet/pet_store.dart';
 import 'package:novel_reader/platform/native_bridge.dart';
 import 'package:novel_reader/sources/legado_source.dart';
 import 'package:novel_reader/sources/registry.dart';
@@ -352,6 +354,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final ok = await _confirm('批量删除', '确定删除已选的 $count 个书源吗？删除后无法恢复。');
     if (ok != true || !mounted) return;
     final n = _store.removeMany(_selected);
+    PetStore.I.emit(PetAction.sourceRemove);
     setState(() {
       _selected.clear();
       if (_store.sources.isEmpty) _bulkMode = false;
@@ -495,6 +498,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   Future<void> _confirmDelete(String url, String name) async {
     if (await _confirm('删除书源', '确定删除「$name」吗？')) {
       _store.remove(url);
+      PetStore.I.emit(PetAction.sourceRemove);
     }
   }
 
@@ -511,6 +515,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     try {
       await Clipboard.setData(ClipboardData(text: json));
       _snack('已复制全部书源 JSON（$size）到剪贴板');
+      PetStore.I.emit(PetAction.exportData);
     } catch (_) {
       if (!mounted) return;
       // ponytail: 内容过大时剪贴板会失败，这里只弹窗兜底；需要自动落盘再说
@@ -585,6 +590,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       return;
     }
     _snack(r.summary);
+    PetStore.I.emit(PetAction.sourceImport);
     // 刚导入的书源很可能是一堆失效的老收藏，导入后立刻批量验活：
     // 搜不出东西的直接移除，并把「删了什么、为什么」告诉用户。
     unawaited(_verifyAfterImport());
@@ -605,9 +611,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     if (!mounted) return;
     if (!report.hasFailure) {
       _snack(report.summary);
+      PetStore.I.emit(PetAction.sourceHealthy);
       if (mounted) setState(() {});
       return;
     }
+    PetStore.I.emit(PetAction.sourceFailed);
     await _showRemovedDialog(report);
     if (mounted) setState(() {});
   }

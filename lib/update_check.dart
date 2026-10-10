@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'pet/pet_event.dart';
+import 'pet/pet_store.dart';
 import 'platform/native_bridge.dart';
 
 /// 应用版本：构建时由 --dart-define=APP_VERSION 注入（取自 pubspec.yaml 的 version）。
@@ -60,6 +62,7 @@ class UpdateChecker {
   UpdateChecker._();
 
   static Future<void> check(BuildContext context, {bool manual = false}) async {
+    if (manual) PetStore.I.emit(PetAction.checkUpdate);
     try {
       final r = await http.get(
         Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
@@ -81,6 +84,7 @@ class UpdateChecker {
         return;
       }
       if (!context.mounted) return;
+      PetStore.I.emit(PetAction.foundUpdate);
 
       final notes = (j['body'] as String? ?? '').trim();
       final htmlUrl = j['html_url'] as String? ??

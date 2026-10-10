@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'pet/pet_event.dart';
+import 'pet/pet_store.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'update_check.dart' show compareVersion, kAppVersion;
@@ -56,6 +58,7 @@ class NoticeChecker {
       final sp = await SharedPreferences.getInstance();
       if (sp.getString(_kSeen) == n.id) return false;
       if (!context.mounted) return false;
+      PetStore.I.emit(PetAction.notice);
       await Navigator.of(context).push(MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => NoticePage(notice: n),
@@ -74,15 +77,13 @@ class NoticeChecker {
     for (final u in _urls) {
       try {
         final sep = u.contains('?') ? '&' : '?';
-        final r = await http
-            .get(
-              Uri.parse('$u${sep}t=${DateTime.now().millisecondsSinceEpoch}'),
-              headers: {
-                'User-Agent': 'shuangyuebook-notice',
-                'Accept': 'application/vnd.github.raw',
-              },
-            )
-            .timeout(const Duration(seconds: 6));
+        final r = await http.get(
+          Uri.parse('$u${sep}t=${DateTime.now().millisecondsSinceEpoch}'),
+          headers: {
+            'User-Agent': 'shuangyuebook-notice',
+            'Accept': 'application/vnd.github.raw',
+          },
+        ).timeout(const Duration(seconds: 6));
         if (r.statusCode != 200) continue;
         final j = jsonDecode(utf8.decode(r.bodyBytes));
         if (j is! Map<String, dynamic>) continue;
@@ -139,8 +140,7 @@ class NoticePage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                         child: Image.network(
                           notice.image,
-                          errorBuilder: (_, __, ___) =>
-                              const SizedBox.shrink(),
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                         ),
                       ),
                     ],

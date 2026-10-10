@@ -9,6 +9,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../legado/source_store.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../screens/reader_screen.dart';
 import '../store.dart';
 import 'open_file_service.dart';
@@ -36,6 +38,7 @@ Future<void> _dispatch(NavigatorState navigator, String path) async {
     case 'epub':
       final ok = await AppStore.I.importLocalBook(path);
       if (!navigator.mounted) return;
+      PetStore.I.emit(PetAction.openExternal);
       ScaffoldMessenger.of(navigator.context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(ok ? '已导入书架' : '已在书架，或无法解析')));
@@ -55,6 +58,7 @@ Future<void> _dispatch(NavigatorState navigator, String path) async {
         return;
       }
       final report = await store.importFromFile(path);
+      if (report.hasAny) PetStore.I.emit(PetAction.sourceImport);
       _snack(navigator, '书源导入：${report.summary}');
 
     default:

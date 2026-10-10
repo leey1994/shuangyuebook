@@ -11,7 +11,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../edge_tts.dart';
 import '../data/online_font.dart';
-import '../pet/pet_view.dart';
+import '../pet/pet_event.dart';
+import '../pet/pet_store.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
@@ -22,7 +23,6 @@ import '../store.dart';
 import '../theme.dart';
 import '../ui/reader/cover_turn.dart';
 import '../ui/reader/page_snap_physics.dart';
-import '../ui/system_metrics.dart';
 import '../widgets.dart';
 
 /// 阅读器：左右翻页 / 上下滚动双模式，
@@ -74,20 +74,19 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// 阅读计时：前台活跃时累计，单次 ≤90s 防挂机（写入 StatsStore）。
   Timer? _clock;
+
+  /// 本次进入是否已记过「读完一本」，避免在末尾反复计入。
+  bool _finished = false;
   int _sinceTick = 0;
 
   /// 页脚时钟与电量（每 30s 刷新一次即可，不必更密）。
   String _clockText = '';
   BatteryStatus? _battery;
 
-  /// 隐藏状态栏之前记下的顶部安全区高度。
-  ///
-  /// 隐藏系统状态栏后 MediaQuery 的 padding 会归零，直接用会让正文突然顶到
-  /// 屏幕上沿。这里用首页在状态栏可见时量好的值（[SystemMetrics.topInset]），
-  /// 既保持版面稳定，也把这块空间留空 —— 桌宠正落在这条预留带里。
-  ///
-  /// 桌面端没有状态栏，但仍要留出同样高度的一条带子给宠物，否则它会压在正文上。
-  double get _reservedTop => PetBar.defaultHeight();
+  /// 顶部的预留留白现在由全局那条窄带承担（安卓在状态栏下方、桌面在自绘标题栏
+  /// 里），桌宠就住在那儿。所以阅读器自己不再额外留边距 ——
+  /// 否则会把同一条状态栏高度算两遍。
+  double get _reservedTop => 0;
 
   // 滚动模式跨章连载：已加载章节及其在合并内容中的起始像素
   // （首章起始 = 顶部内边距；后续章起始 = 旧 maxScrollExtent - 底部内边距）
@@ -147,6 +146,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final p = _prefs;
     _pLayout = p.layoutSignature;
     AppStore.I.addListener(_onPrefs);
+    PetStore.I.emit(PetAction.openBook);
     _startClock();
     unawaited(NativeBridge.setKeepScreenOn(true)); // 阅读时不熄屏
     // 隐藏系统状态栏（时间 / 信号 / 电量），把那条空间让给阅读内容。
@@ -297,6 +297,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
+    PetStore.I.emit(PetAction.exitBook);
     unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
     // 恢复状态栏，并把配色还给全局主题
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
@@ -597,10 +598,21 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     if (_chIdx < _detail!.chapters.length - 1) {
       _loadChapter(_chIdx + 1);
+      PetStore.I.emit(PetAction.nextChapter);
     } else {
+      _markFinished();
       _snack('已经是最后一章了');
       setState(() {});
     }
+  }
+
+  /// 读到最后一章的末尾：记一次「读完一本」。每本书每次进入只记一次 ——
+  /// 末尾可以反复点，不该反复计数。
+  void _markFinished() {
+    if (_finished || _detail == null) return;
+    _finished = true;
+    StatsStore.I.addFinishedBook();
+    PetStore.I.emit(PetAction.finishBook);
   }
 
   void _goPrev() {
@@ -611,6 +623,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     if (_chIdx > 0) {
       _loadChapter(_chIdx - 1, toEnd: true);
+      PetStore.I.emit(PetAction.prevChapter);
     } else {
       _snack('已经是第一章了');
     }
@@ -655,7 +668,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final c = _colors();
-    // 状态栏已隐藏，但把它的高度补回去：版面不跳，那条带子正好留给桌宠。
+    // 顶部那条预留带（桌宠住的地方）由全局提供，这里不再重复留边距。
     final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: c.bg,
@@ -764,8 +777,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
           ),
-          // 桌宠：贴在顶部那条预留留白里（放最后一个子节点，气泡才能盖在正文上）
-          const Positioned(top: 0, left: 0, right: 0, child: PetBar()),
         ],
       ),
     );
@@ -1744,6 +1755,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _ttsIdx = _ttsStartIndex();
     _ttsCur = -1;
     setState(() {});
+    PetStore.I.emit(PetAction.ttsPlay);
     unawaited(_ttsLoop());
   }
 
@@ -1758,6 +1770,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       await _edgePlayer.stop();
     } catch (_) {}
     if (mounted) setState(() => _ttsCur = -1);
+    PetStore.I.emit(PetAction.ttsStop);
   }
 
   void _togglePause() {

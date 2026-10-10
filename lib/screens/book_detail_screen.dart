@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
@@ -51,8 +52,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
       if (!mounted) return;
       if (cached != null) {
         setState(() => _detail = cached);
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('网络不可用，已显示离线目录')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('网络不可用，已显示离线目录')));
       } else {
         setState(() => _error = e);
       }
@@ -64,8 +65,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     if (d == null || d.nextChaptersUrl == null || _loadingMore) return;
     setState(() => _loadingMore = true);
     try {
-      final more = await _src.fetchDetail(widget.book,
-          nextUrl: d.nextChaptersUrl);
+      final more =
+          await _src.fetchDetail(widget.book, nextUrl: d.nextChaptersUrl);
       final seen = d.chapters.map((c) => c.url).toSet();
       final merged = [...d.chapters];
       for (final c in more.chapters) {
@@ -108,17 +109,17 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     );
     if (!mounted) return;
     setState(() => _downloading = false);
+    if (ok) PetStore.I.emit(PetAction.downloadBook);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
-            ? '下载完成，共 $_dlTotal 章'
-            : '已取消下载（完成 $_dlDone/$_dlTotal）')));
+        content:
+            Text(ok ? '下载完成，共 $_dlTotal 章' : '已取消下载（完成 $_dlDone/$_dlTotal）')));
   }
 
   void _openReader(int chapterIndex) {
     final d = _detail;
     if (d == null) return;
     // 搜索/发现找书 → 真的点开了一本：桌宠按「帮上忙了」给一次成长值
-    PetStore.I.searchOpened();
+    PetStore.I.emit(PetAction.searchOpen);
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ReaderScreen(book: d.book, chapterIndex: chapterIndex),
     ));
@@ -156,7 +157,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.all(12),
-                        child: Text('加载失败：$_error', textAlign: TextAlign.center),
+                        child:
+                            Text('加载失败：$_error', textAlign: TextAlign.center),
                       ),
                       OutlinedButton(onPressed: _load, child: const Text('重试')),
                     ],
@@ -171,13 +173,15 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          CoverImage(url: d.book.cover, width: 100, height: 140),
+                          CoverImage(
+                              url: d.book.cover, width: 100, height: 140),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(d.book.title, style: theme.textTheme.titleLarge),
+                                Text(d.book.title,
+                                    style: theme.textTheme.titleLarge),
                                 const SizedBox(height: 6),
                                 Wrap(
                                   spacing: 8,
@@ -247,8 +251,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                         Text('简介', style: theme.textTheme.titleSmall),
                         const SizedBox(height: 4),
                         Text(d.book.intro!,
-                            style:
-                                theme.textTheme.bodyMedium?.copyWith(height: 1.6)),
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(height: 1.6)),
                         const SizedBox(height: 12),
                       ],
                       const Divider(),
@@ -260,7 +264,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                             const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2)),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2)),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -275,8 +280,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     itemBuilder: (context, i) => Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (i > 0)
-                          const Divider(indent: 4, endIndent: 4),
+                        if (i > 0) const Divider(indent: 4, endIndent: 4),
                         InkWell(
                           onTap: () => _openReader(i),
                           child: Padding(
