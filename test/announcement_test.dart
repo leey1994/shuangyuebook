@@ -17,10 +17,10 @@ void main() {
         'id': '20261011-1',
         'title': 't',
         'body': 'b',
-        'min_version': '1.2.2',
+        'min_version': '0.0.2',
       };
       final n = Announcement.fromJson(raw);
-      expect(n.version, '1.2.2', reason: '字段仍需解析出来，便于排查线上配置');
+      expect(n.version, '0.0.2', reason: '字段仍需解析出来，便于排查线上配置');
       // 关键：解析出来的公告不该再被任何版本逻辑过滤掉
       expect(n.id, isNotEmpty);
       expect(n.title, isNotEmpty);

@@ -35,6 +35,8 @@ h1{font-size:clamp(34px,6vw,52px); line-height:1.2; margin:0 0 12px; letter-spac
 .slogan{font-size:clamp(18px,3vw,22px); color:var(--dim); margin:0 0 28px}
 p{margin:0 0 16px}
 .mark{width:56px; height:56px; border-radius:14px; vertical-align:-14px; margin-right:14px}
+/* 宣传图：手机上是全宽横幅，窄屏会被 900px 的容器裁到刚好 */
+.hero{display:block; width:100%; height:auto; border-radius:14px; margin:0 0 28px}
 h2{font-size:20px; margin:56px 0 16px; letter-spacing:-.01em}
 h3{font-size:15px; margin:0 0 6px; font-weight:600}
 .row{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 8px}
@@ -70,12 +72,15 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
     <p class="tag" id="verline">爽阅</p>
     <h1><img class="mark" src="assets/favicon.png" alt="">爽阅</h1>
     <p class="slogan">爽快阅读，想看就看。</p>
+    <img class="hero" src="assets/slogan.png" width="1600" height="640"
+         alt="爽阅 —— 爽快阅读，想看就看">
     <div class="row">
       <a class="btn primary" id="dl-android" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Android 版</a>
       <a class="btn" id="dl-windows" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Windows 版</a>
+      <a class="btn" href="splash.html">开屏页</a>
       <a class="btn" href="https://github.com/leey1994/shuangyuebook">源码</a>
     </div>
-    <p class="muted" id="dl-note">免费开源 · 无广告 · Android / Windows 双端</p>
+    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端</p>
   </div>
 </header>
 
@@ -127,7 +132,17 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
     <p class="muted">第三方站点经常改版或关闭。失效的源会在「书源管理」里被体检标出，可随时停用或删除；也可以导入自己的书源来接替。</p>
     <table>
       <thead><tr><th>书源</th><th>搜索</th><th>发现 / 排行</th></tr></thead>
-      <tbody id="sources"></tbody>
+      <tbody>
+      <tr><td>顶点小说</td><td>✔</td><td>✔</td></tr>
+      <tr><td>速读谷</td><td>✔</td><td>✔</td></tr>
+      <tr><td>黄金屋</td><td>✔</td><td>✔</td></tr>
+      <tr><td>52书库</td><td>✔</td><td>✔</td></tr>
+      <tr><td>神文小说</td><td>✔</td><td>✔</td></tr>
+      <tr><td>素书卷</td><td>✔</td><td>✔</td></tr>
+      <tr><td>篱笆好文学</td><td>✔</td><td>✔</td></tr>
+      <tr><td>小原文学</td><td>✔</td><td>✔</td></tr>
+      <tr><td>全本小说网</td><td>✔</td><td>✔</td></tr>
+    </tbody>
     </table>
   </div>
 </section>
@@ -135,7 +150,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 <section>
   <div class="wrap">
     <h2>从源码构建</h2>
-    <p class="muted">需要 Flutter 3.47 或更高。</p>
+    <p class="muted">需要 Flutter 3.47 或更高。发版请带 <code>--dart-define=APP_VERSION=&lt;版本号&gt;</code>，自动更新靠它判断新旧。</p>
     <p><code>git clone https://github.com/leey1994/shuangyuebook</code></p>
     <p><code>flutter pub get &amp;&amp; flutter run</code></p>
   </div>
@@ -143,7 +158,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 
 <footer>
   <div class="wrap">
-    <p class="muted">GPL-3.0 · <span id="foot-ver">版本加载中…</span></p>
+    <p class="muted">个人学习与技术研究用途 · 不捆绑任何受版权保护的内容 · <span id="foot-ver">版本加载中…</span></p>
   </div>
 </footer>
 
@@ -187,24 +202,6 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
     var ann = JSON.parse(xhr('announcement.json'));
     apply(clean(ann.version));
   } catch (e) { /* 没有公告文件 */ }
-
-  var src = [
-    ['顶点小说', 'https://m.yewa.cc'],
-    ['速读谷', 'https://www.suduguu.com'],
-    ['黄金屋', 'https://www.huangjinwu.org'],
-    ['52书库', 'https://www.52shuku.net'],
-    ['神文小说', 'https://www.shenwen.org'],
-    ['素书卷', 'https://www.sushujuan.cc'],
-    ['篱笆好文学', 'https://m.libahao2.com'],
-    ['小原文学', 'https://www.min-yuan.com'],
-    ['全本小说网', 'https://quanben.io']
-  ];
-  var tb = document.getElementById('sources');
-  if (tb) {
-    tb.innerHTML = src.map(function (s) {
-      return '<tr><td>' + s[0] + '</td><td>✔</td><td>✔</td></tr>';
-    }).join('');
-  }
 })();
 </script>
 </body>

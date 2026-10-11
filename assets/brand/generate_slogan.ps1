@@ -204,11 +204,33 @@ $web.Save((Join-Path $webOut 'slogan.png'), [System.Drawing.Imaging.ImageFormat]
 $web.Dispose()
 Write-Host "  docs/assets/slogan.png (1600x640)"
 
-# open-screen background for splash.html - the slogan there is real HTML so it
-# stays selectable and reachable by screen readers.
-$bg = New-Slogan 1080 1920
-$bg.Save((Join-Path $webOut 'splash-bg.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$bg.Dispose()
-Write-Host "  docs/assets/splash-bg.png (1080x1920)"
+# Backdrop for splash.html - gradient + mark ONLY, no baked-in text.
+#
+# Why no text: the page puts the slogan in real HTML (selectable, screen-reader
+# reachable, and it reflows). Baking it into a 1080x1920 portrait image meant a
+# landscape viewport got it `cover`-cropped, and the buttons landed on top of it.
+# One decoration-only backdrop works at every aspect ratio.
+function New-Backdrop([int]$w, [int]$h) {
+    $pair = New-Gfx $w $h
+    $bmp = $pair[0]; $g = $pair[1]
+    Fill-Bg $g $w $h
+    $min = [math]::Min([float]$w, [float]$h)
+    Draw-Mark $g ([float]($w / 2)) ([float]($h * 0.24)) ([float]($min * 0.10))
+    $g.Dispose()
+    return $bmp
+}
+
+$bp = New-Backdrop 1080 1920
+$bp.Save((Join-Path $webOut 'bg-portrait.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$bp.Dispose()
+Write-Host "  docs/assets/bg-portrait.png (1080x1920)"
+
+$bl = New-Backdrop 1600 900
+$bl.Save((Join-Path $webOut 'bg-landscape.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$bl.Dispose()
+Write-Host "  docs/assets/bg-landscape.png (1600x900)"
+
+$oldBg = Join-Path $webOut 'splash-bg.png'
+if (Test-Path $oldBg) { Remove-Item $oldBg -Force }
 
 Write-Host "done"

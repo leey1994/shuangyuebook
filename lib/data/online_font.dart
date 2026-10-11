@@ -16,18 +16,20 @@ import '../platform/native_bridge.dart';
 
 /// 在线字体下载地址，按顺序回退。
 ///
-/// 1. 本项目自己的 Release 资产 —— 想完全自控就往这个 tag 挂一个同名文件；
-/// 2. jsDelivr 的 GitHub 镜像 —— 开箱即用，不依赖自己有没有挂资产；
-/// 3. GitHub raw —— 兜底。
+/// 1. jsDelivr 的 GitHub 镜像 —— 开箱即用，不依赖自己有没有挂资产；
+/// 2. GitHub raw —— 兜底；
+/// 3. 本项目自己的 Release 资产 —— 想完全自控就往 `fonts` tag 挂一个同名
+///    文件。放最后是因为那个 tag 不是每次发版都有的：仓库刚重建时它不存在，
+///    放第一个会让每次启动都先吃一个 404 再回退。
 ///
 /// 换字体只需改这个列表。
 const List<String> kOnlineFontUrls = [
-  'https://github.com/leey1994/shuangyuebook/releases/download/fonts/'
-      'LXGWWenKai-Lite-Regular.ttf',
   'https://cdn.jsdelivr.net/gh/akira399/sakura-read@main/assets/fonts/'
       'LXGWWenKai-Regular.ttf',
   'https://raw.githubusercontent.com/akira399/sakura-read/main/assets/fonts/'
       'LXGWWenKai-Regular.ttf',
+  'https://github.com/leey1994/shuangyuebook/releases/download/fonts/'
+      'LXGWWenKai-Lite-Regular.ttf',
 ];
 
 /// 下载后注册给 Flutter 使用的字体族名（不能和系统族重名）。
