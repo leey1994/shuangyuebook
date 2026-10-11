@@ -124,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File assets\\\\icon\\\\generate\\\_icon.ps1
 
 ## 说明
 
-仅用于个人学习与技术研究。应用不捆绑、不分发、不存储任何受版权保护的书籍内容；内置的第三方书源仅提供索引与阅读工具，内容版权归各站点与作者所有，请支持正版阅读。
+[MIT](LICENSE) 协议。应用不捆绑、不分发、不存储任何受版权保护的书籍内容；内置的第三方书源仅提供索引与阅读工具，内容版权归各站点与作者所有，请支持正版阅读。仅用于个人学习与技术研究。
 
 正文字体「霞鹜文楷 Lite Regular」不随安装包分发，在线获取，版权归 [LXGW](https://github.com/lxgw/LxgwWenKai) 所有，以 SIL Open Font License 1.1 授权。
 
