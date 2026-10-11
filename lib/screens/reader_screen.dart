@@ -13,6 +13,7 @@ import '../edge_tts.dart';
 import '../data/online_font.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
+import '../pet/pet_view.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
@@ -148,6 +149,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _pLayout = p.layoutSignature;
     AppStore.I.addListener(_onPrefs);
     PetStore.I.emit(PetAction.openBook);
+    // 阅读时把桌宠钉在顶部窄带：正文要专注，它也不能挡住任何控件
+    petPinned.value = true;
     _startClock();
     unawaited(NativeBridge.setKeepScreenOn(true)); // 阅读时不熄屏
     // 隐藏系统状态栏（时间 / 信号 / 电量），把那条空间让给阅读内容。
@@ -304,6 +307,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
     // 顶部窄带底色还给全局主题
     petBandBackground.value = null;
+    // 离开阅读器，桌宠恢复整屏溜达
+    petPinned.value = false;
     // 恢复状态栏，并把配色还给全局主题
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     if (_speaking) {
@@ -962,10 +967,16 @@ class _ReaderScreenState extends State<ReaderScreen>
       return Center(child: CircularProgressIndicator(color: _colors().fg));
     }
     final cover = _prefs.pageMode == PageMode.cover;
-    // 控制器页码与 _page 对齐（模式切换 / 章节切换后重建）
+    // 控制器页码与 _page 对齐（模式切换 / 章节切换后重建）。
+    //
+    // 只在**控制器静止时**才对齐。翻页动画（animateToPage / 用户拖拽）期间
+    // 控制器正在动，这时 jumpToPage 会把动画打断 —— 表现就是「下一页只显示
+    // 一半，过很久才整体显示出来」。静止判定必须放在最前面：动画刚启动的那
+    // 一帧 page 还是旧值，光比页码根本区分不出来（那个旧值恰好差整一页）。
     if (_pageCtrl.hasClients && _pageCtrl.page != null) {
-      final cur = _pageCtrl.page!.round();
-      if (cur != _page) {
+      final pos = _pageCtrl.position;
+      if (!pos.isScrollingNotifier.value &&
+          (_pageCtrl.page! - _page).abs() >= 0.5) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(_page);
         });

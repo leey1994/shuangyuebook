@@ -273,6 +273,8 @@ void main() {
         reason: '内置源里不应再出现「智能书库」',
       );
       expect(builtinSources.any((s) => s.id == 'zzbook'), isFalse);
+      // 搬山人（www.banshanren.com）内容不合规，已下线
+      expect(builtinSources.any((s) => s.id == 'banshanren'), isFalse);
     });
 
     test('其余固化源齐全（删除一个不能误伤）', () {
@@ -282,7 +284,6 @@ void main() {
         '速读谷',
         '黄金屋',
         '52书库',
-        '搬山人',
         '神文小说',
         '素书卷',
         '篱笆好文学',

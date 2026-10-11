@@ -242,6 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Divider(),
               const _SectionHeader('桌宠'),
               const _PetTile(),
+              const _PunchHoleTile(),
               const Divider(),
               const _SectionHeader('离线缓存'),
               ListTile(
@@ -394,7 +395,52 @@ class _PetTileState extends State<_PetTile> {
       ),
       subtitle: Text(left == 0
           ? '已长成书灵，会一直陪着你'
-          : '再读 ${(left * kSecondsPerExp ~/ 60) + 1} 分钟升到下一形态'),
+          : '再读 ${(left * kSecondsPerExp ~/ 60) ~/ 60} 小时 ${(left * kSecondsPerExp ~/ 60) % 60} 分钟升到下一形态'),
+    );
+  }
+}
+
+/// 挖孔（前置摄像头）位置。桌宠据此规划路线绕开摄像头。
+class _PunchHoleTile extends StatefulWidget {
+  const _PunchHoleTile();
+
+  @override
+  State<_PunchHoleTile> createState() => _PunchHoleTileState();
+}
+
+class _PunchHoleTileState extends State<_PunchHoleTile> {
+  @override
+  void initState() {
+    super.initState();
+    AppStore.I.addListener(_onStore);
+  }
+
+  @override
+  void dispose() {
+    AppStore.I.removeListener(_onStore);
+    super.dispose();
+  }
+
+  void _onStore() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppStore.I;
+    return ListTile(
+      leading: const Icon(Icons.videocam_outlined),
+      title: const Text('屏幕挖孔位置'),
+      subtitle: const Text('桌宠会绕开摄像头；凑到附近时会探头看一眼'),
+      trailing: DropdownButton<PunchHole>(
+        value: store.punchHole,
+        underline: const SizedBox.shrink(),
+        items: [
+          for (final h in PunchHole.values)
+            DropdownMenuItem(value: h, child: Text(h.label)),
+        ],
+        onChanged: (v) => store.setPunchHole(v ?? PunchHole.none),
+      ),
     );
   }
 }

@@ -36,18 +36,30 @@ class PetTopBand extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<Color?>(
       valueListenable: petBandBackground,
-      // child 走缓存：换底色只重画 ColoredBox，桌宠的状态与动画不受影响
-      child: Column(
+      // child 走缓存：换底色只重画底色层，桌宠子树与页面内容都不重建
+      child: Stack(
+        // 必须 expand：Column 里有 Expanded，loose 约束下它会直接塌掉
+        fit: StackFit.expand,
+        // 气泡在窄带里也要能画到边缘之外一点
+        clipBehavior: Clip.none,
         children: [
-          // 桌宠就画在这条带子里：它同时是状态栏区域，所以系统图标和它并存，
-          // 不会多占一整条。
-          SizedBox(height: band, child: PetBar(height: band)),
-          Expanded(child: child),
+          // 内容让出顶部那条窄带；窄带本身同时就是状态栏区域
+          Column(
+            children: [
+              SizedBox(height: band),
+              Expanded(child: child),
+            ],
+          ),
+          // 桌宠覆盖整块区域：阅读器里钉在窄带内，其余界面在整屏溜达。
+          // Stack 只对子级做命中测试，透明处不会吃掉页面的点击。
+          Positioned.fill(
+            child: PetBar(height: band),
+          ),
         ],
       ),
-      builder: (context, override, band_) => ColoredBox(
+      builder: (context, override, body) => ColoredBox(
         color: override ?? background,
-        child: band_,
+        child: body,
       ),
     );
   }

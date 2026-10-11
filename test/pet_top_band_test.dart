@@ -92,12 +92,9 @@ void main() {
       await tester.pumpWidget(harness(child: band(kStatusBar)));
       await tester.pump();
 
-      // 窄带顶到屏幕最上沿
+      // 桌宠覆盖层从屏幕最上沿开始
       expect(tester.getTopLeft(find.byType(PetBar)).dy, 0.0,
           reason: '窄带必须从 y=0 开始，紧贴屏幕顶部');
-
-      // 窄带高度正好等于状态栏高度
-      expect(tester.getSize(find.byType(PetBar)).height, kStatusBar);
 
       // 内容从「一个 inset」开始 —— 不是两条叠加
       expect(tester.getTopLeft(find.byKey(const Key('body'))).dy, kStatusBar,
@@ -106,15 +103,26 @@ void main() {
       await disposeTree(tester);
     });
 
+    testWidgets('桌宠覆盖层铺满整块区域（非阅读界面才能整屏溜达）', (tester) async {
+      useSurface(tester);
+      await tester.pumpWidget(harness(child: band(kStatusBar)));
+      await tester.pump();
+
+      final pet = tester.getRect(find.byType(PetBar));
+      expect(pet.top, 0.0);
+      expect(pet.height, 800, reason: '自由溜达需要整块高度；若只有窄带高就只能在缝里挪');
+      await disposeTree(tester);
+    });
+
     testWidgets('窄带与内容首尾相接，中间没有空隙', (tester) async {
       useSurface(tester);
       await tester.pumpWidget(harness(child: band(kStatusBar)));
       await tester.pump();
 
-      final b = tester.getRect(find.byType(PetBar));
+      final pet = tester.getRect(find.byType(PetBar));
       final body = tester.getRect(find.byKey(const Key('body')));
-      expect(b.bottom, body.top);
-      expect(b.height + body.height, 800);
+      expect(pet.top, body.top - kStatusBar);
+      expect(pet.bottom, 800);
       await disposeTree(tester);
     });
 
@@ -123,7 +131,6 @@ void main() {
         useSurface(tester);
         await tester.pumpWidget(harness(child: band(h)));
         await tester.pump();
-        expect(tester.getSize(find.byType(PetBar)).height, h);
         expect(tester.getTopLeft(find.byKey(const Key('body'))).dy, h);
         await disposeTree(tester);
       }

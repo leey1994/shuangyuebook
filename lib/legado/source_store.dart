@@ -221,25 +221,46 @@ class SourceStore extends ChangeNotifier {
   /// 立即落盘（测试与退出前调用；平时是防抖保存）。
   Future<void> flush() => _save();
 
-  /// 导入 / 更新内置书源（App 启动时调用）。
+  /// 同步内置书源资产（App 启动时调用）。
   ///
-  /// - 首次启动（书源为空）：全量导入；
-  /// - 已有书源：同地址的源以版本内置内容为准更新（保留用户启停状态），
-  ///   并补齐版本升级新增的内置源；
-  /// - 版本升级时，可清理「历史内置、现已下线」的源（见内置资产的
-  ///   `legacyBuiltinUrls` 元数据；当前资产未登记任何地址）。
-  Future<int> ensureBuiltinSources() async {
+  /// 现在**不预置任何导入书源** —— 内置 9 个固化 Dart 适配器已经够用，导入区
+  /// 留给用户自己填。资产文件保留下来只当「清理清单」用：
+  ///
+  /// - `sources`：预置清单，当前为空；
+  /// - `legacyBuiltinUrls`：历史版本预置过的地址。这些从旧版本升级上来的用户
+  ///   本地已经有它们，启动时按地址删掉，导入区才能真正回到「默认为空」。
+  ///   只删地址完全一致的条目，用户自己导入的同名站点不受影响。
+  Future<int> syncBuiltinSources() async {
     try {
       final text = await rootBundle.loadString(
         'assets/sources/builtin_sources.json',
       );
       final removed = _dropLegacyBuiltinSources(text);
-      final report = importFromText(text);
-      await flush();
-      return report.added + report.updated + removed;
+      var added = 0;
+      final seeded = _seededFrom(text);
+      if (seeded.isNotEmpty) {
+        final report = importFromText(seeded);
+        added = report.added + report.updated;
+      }
+      if (removed > 0 || added > 0) await flush();
+      return added + removed;
     } catch (_) {
       return 0;
     }
+  }
+
+  /// 从资产里取出预置书源数组（`sources` 字段；兼容旧的纯数组格式）。
+  String _seededFrom(String builtinJson) {
+    try {
+      final decoded = jsonDecode(builtinJson);
+      if (decoded is List) return jsonEncode(decoded);
+      if (decoded is Map && decoded['sources'] is List) {
+        return jsonEncode(decoded['sources']);
+      }
+    } catch (_) {
+      return '';
+    }
+    return '';
   }
 
   /// 按内置资产里的 `legacyBuiltinUrls` 清单移除历史内置源。
@@ -247,17 +268,19 @@ class SourceStore extends ChangeNotifier {
   /// 只删「书源地址完全一致」的条目：用户自己导入的同名站点不受影响。
   int _dropLegacyBuiltinSources(String builtinJson) {
     final legacy = <String>{};
-    try {
-      final decoded = jsonDecode(builtinJson);
-      if (decoded is List) {
+    void collect(dynamic decoded) {
+      if (decoded is Map) {
+        final urls = decoded['legacyBuiltinUrls'];
+        if (urls is List) legacy.addAll(urls.map((u) => u.toString().trim()));
+      } else if (decoded is List) {
         for (final item in decoded) {
-          if (item is! Map) continue;
-          final urls = item['legacyBuiltinUrls'];
-          if (urls is List) {
-            legacy.addAll(urls.map((u) => u.toString().trim()));
-          }
+          if (item is Map) collect(item);
         }
       }
+    }
+
+    try {
+      collect(jsonDecode(builtinJson));
     } catch (_) {
       return 0;
     }

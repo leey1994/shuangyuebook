@@ -91,7 +91,7 @@ Future<void> main(List<String> args) async {
     // 失败不阻塞启动 —— 11 个固化书源照常可用。
     final sources = SourceStore();
     await sources.load();
-    await sources.ensureBuiltinSources();
+    await sources.syncBuiltinSources();
     SourceStore.shared = sources;
     syncImportedSources(sources.enabled);
     sources.addListener(() => syncImportedSources(sources.enabled));

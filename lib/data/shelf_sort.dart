@@ -43,6 +43,36 @@ enum ShelfViewMode {
   final String label;
 }
 
+/// 屏幕挖孔（前置摄像头）的位置。桌宠规划路线时会绕开它。
+///
+/// `none` = 无挖孔（多数平板 / 旧机型）。
+enum PunchHole {
+  none('无挖孔'),
+  topCenter('顶部居中'),
+  topLeft('左上角'),
+  topRight('右上角');
+
+  const PunchHole(this.label);
+
+  final String label;
+
+  /// 归一化的挖孔中心横坐标（0=左，1=右）。
+  double get anchorX => switch (this) {
+        PunchHole.none => double.nan,
+        PunchHole.topCenter => 0.5,
+        PunchHole.topLeft => 0.14,
+        PunchHole.topRight => 0.86,
+      };
+
+  /// 归一化的避让半宽（左右各让这么多，避免挡住刘海图标与时间）。
+  double get keepOut => 0.12;
+}
+
+PunchHole punchHoleFrom(String? value) => PunchHole.values.firstWhere(
+      (v) => v.name == value,
+      orElse: () => PunchHole.none,
+    );
+
 /// 存储字符串 → 排序方式（未知 / 空回退「最近阅读」）。
 ShelfSortMode shelfSortModeFrom(String? value) => switch (value) {
       'addedTime' => ShelfSortMode.addedTime,

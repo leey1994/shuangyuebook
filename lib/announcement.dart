@@ -9,7 +9,6 @@ import 'pet/pet_event.dart';
 import 'pet/pet_store.dart';
 import 'store.dart';
 import 'theme.dart';
-import 'update_check.dart' show compareVersion, kAppVersion;
 
 /// 公告数据（源文件：仓库 docs/announcement.json，GitHub Pages / raw 分发）。
 /// 发布流程 = 修改该文件并 push；客户端启动 + 周期轮询自动拉取。
@@ -19,8 +18,12 @@ class Announcement {
   final String body;
   final String image;
 
-  /// 这条公告对应的版本号。语义是「**装到这个版本就不再显示**」——
-  /// 公告是写给还没更新的人看的，见 [shouldShowFor]。
+  /// 这条公告声明的版本号，**仅作记录，不参与显示判断**。
+  ///
+  /// 曾经拿它做门槛，方向先写反过一次（只有已更新的用户才看得到），改过来后
+  /// 又发现：装最新版的人恰恰看不到自己这一版的发布说明 —— 两种方向各漏一半人。
+  /// 正确做法就是不做版本门槛，靠 `noticeId` 判重：发出去谁没读谁弹，读过不再弹。
+  /// 字段保留只为兼容发布脚本与历史文件。
   final String version;
 
   const Announcement({
@@ -38,17 +41,6 @@ class Announcement {
         image: (j['image'] as String? ?? '').trim(),
         version: (j['min_version'] as String? ?? '').trim(),
       );
-
-  /// 当前安装的版本是否需要看这条公告。
-  ///
-  /// 注意方向：以前写成了「app 版本 ≥ min_version 才显示」，等于**只有已经
-  /// 更新的人**才看得到发版公告 —— 刚发布时正好全被挡掉，公告一次都不弹。
-  /// 正确的语义是反过来：还在旧版本、没吃到这些改动的人应该看到；升到对应
-  /// 版本之后自动不再显示，免得用户对着已经有的功能看更新说明。
-  bool shouldShowFor(String appVersion) {
-    if (version.isEmpty) return true;
-    return compareVersion(appVersion, version) < 0;
-  }
 }
 
 /// 拉取公告 → 与本地已读 id 比对 → 不同则全屏弹出（关闭后记录）。
@@ -106,10 +98,9 @@ class NoticeChecker {
         final j = jsonDecode(utf8.decode(r.bodyBytes));
         if (j is! Map<String, dynamic>) continue;
         if (j['enabled'] == false) return null;
-        final n = Announcement.fromJson(j);
-        // 版本门槛：已经升到这条公告对应版本的用户不用再看
-        if (!n.shouldShowFor(kAppVersion)) return null;
-        return n;
+        // 不做版本门槛：靠 noticeId 判重即可。版本门槛两种方向都会漏人，
+        // 详见 Announcement.version 的说明。
+        return Announcement.fromJson(j);
       } catch (_) {
         continue; // 该地址不可达 → 换下一个
       }

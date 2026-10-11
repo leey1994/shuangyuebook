@@ -1,5 +1,4 @@
 import '../legado/models.dart';
-import 'banshanren.dart';
 import 'huangjinwu.dart';
 import 'legado_source.dart';
 import 'libahao.dart';
@@ -21,7 +20,6 @@ final List<NovelSource> builtinSources = <NovelSource>[
   SuduGuuSource(),
   HuangJinWuSource(),
   Shuku52Source(),
-  BanshanrenSource(),
   ShenwenSource(),
   SushujuanSource(),
   LibahaoSource(),

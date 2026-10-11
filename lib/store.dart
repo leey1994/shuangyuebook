@@ -153,6 +153,7 @@ class AppStore extends ChangeNotifier {
       _shelfAscending =
           sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
       _shelfView = shelfViewModeFrom(sp.getString('shelfView'));
+      _punchHole = punchHoleFrom(sp.getString('punchHole'));
       applyShelfSort();
     }
     try {
@@ -212,9 +213,19 @@ class AppStore extends ChangeNotifier {
   bool _shelfAscending = false;
   ShelfViewMode _shelfView = ShelfViewMode.wide;
 
+  /// 屏幕挖孔位置，桌宠据此绕开摄像头。
+  PunchHole _punchHole = PunchHole.none;
+
   ShelfSortMode get shelfSort => _shelfSort;
   bool get shelfAscending => _shelfAscending;
   ShelfViewMode get shelfView => _shelfView;
+  PunchHole get punchHole => _punchHole;
+
+  void setPunchHole(PunchHole v) {
+    _punchHole = v;
+    _sp?.setString('punchHole', v.name);
+    notifyListeners();
+  }
 
   void setShelfView(ShelfViewMode v) {
     _shelfView = v;

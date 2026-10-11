@@ -11,7 +11,10 @@ import 'pet_event.dart';
 import 'pet_painter.dart';
 
 /// 升阶阈值，下标即阶段。改这里就能整体调难度。
-const List<int> kPetStageExp = [0, 150, 600, 1800];
+///
+/// 按「每天读一小时」≈ 120 点估算，当前值对应约 2 周 / 2 个月 / 5 个半月，
+/// 是一段真正需要陪伴的养成，而不是几天就毕业。
+const List<int> kPetStageExp = [0, 1500, 6000, 20000];
 
 /// 每 30 秒阅读折算的成长值。
 const int kSecondsPerExp = 30;
