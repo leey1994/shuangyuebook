@@ -1,21 +1,22 @@
 # 爽阅
 
-> **爽快阅读，想看就看。**
+> \*\*爽快阅读，想看就看。\*\*
 
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
 当前版本：**v0.0.1**
 
-静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/) · 开屏页：[splash.html](https://leey1994.github.io/shuangyuebook/splash.html)
+静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/) 
 
-![爽阅 · 爽快阅读，想看就看](docs/assets/slogan.png)
+!\[爽阅 · 爽快阅读，想看就看](docs/assets/slogan.png)
 
 ## 功能
 
 ### 开屏与宣传
 
-* App 冷启动先亮出**开屏页**（900ms），App 内与官网用同一张宣传图
-* 宣传语「**爽快阅读，想看就看**」只存在 `assets/brand/slogan.txt` 一个文件里；改完重跑 `assets/brand/generate_slogan.ps1`，App 开屏图、官网横幅、官网开屏页背景三处一起重新出
+* App 冷启动先亮出**开屏页**（900ms），**铺满整个窗口**（桌面端连自绘标题栏一起盖住，不留缝）
+* 宣传语「**爽快阅读，想看就看**」贯穿 App 开屏、官网首页与官网开屏页
+* 桌面端固定横版开屏，移动端按屏幕方向自动切换横竖版
 * 官网是极简单页，**版本号自动获取**（读 GitHub 最新 Release），发一次版不用再手动改网页
 
 ### 桌宠「小墨」
@@ -106,20 +107,13 @@ flutter build windows --release
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tool\\shot.ps1 -Out build\\shot.png -WaitMs 9000 -Dismiss
+powershell -ExecutionPolicy Bypass -File tool\\\\shot.ps1 -Out build\\\\shot.png -WaitMs 9000 -Dismiss
 ```
 
 重新生成应用图标（各密度自适应图层 + 传统图标 + Windows ico）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File assets\\icon\\generate\_icon.ps1
-```
-
-宣传语与开屏图：改 `assets/brand/slogan.txt` 里的三行文案，然后重跑生成器，
-App 开屏图、官网横幅和开屏页背景会一起重新出（不需要重画）：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File assets\\brand\\generate\_slogan.ps1
+powershell -ExecutionPolicy Bypass -File assets\\\\icon\\\\generate\\\_icon.ps1
 ```
 
 ## 说明

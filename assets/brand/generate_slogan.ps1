@@ -184,11 +184,19 @@ function New-Slogan([int]$w, [int]$h) {
     return $bmp
 }
 
-# app splash (portrait) - shipped inside the APK
-$app = New-Slogan 900 1600
-$app.Save((Join-Path $brand 'splash.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$app.Dispose()
-Write-Host "  assets/brand/splash.png (900x1600)"
+# app splash - shipped inside the APK, one file per orientation
+$p = New-Slogan 900 1600
+$p.Save((Join-Path $brand 'splash-portrait.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$p.Dispose()
+Write-Host "  assets/brand/splash-portrait.png (900x1600)"
+
+$l = New-Slogan 1600 640
+$l.Save((Join-Path $brand 'splash-landscape.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$l.Dispose()
+Write-Host "  assets/brand/splash-landscape.png (1600x640)"
+
+$old = Join-Path $brand 'splash.png'
+if (Test-Path $old) { Remove-Item $old -Force }
 
 # website hero (landscape) - shipped on docs/assets
 $web = New-Slogan 1600 640

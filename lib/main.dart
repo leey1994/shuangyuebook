@@ -25,7 +25,7 @@ import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
 import 'ui/pet_top_band.dart';
-import 'ui/splash_screen.dart';
+import 'ui/splash_gate.dart';
 import 'ui/storage_gate.dart';
 import 'ui/system_metrics.dart';
 import 'update_check.dart';
@@ -176,11 +176,12 @@ class _NovelAppState extends State<NovelApp> {
       themeMode: dark ? ThemeMode.dark : ThemeMode.light,
       // 存储权限门：Android 11+ 导入本地书需要「所有文件访问」。
       // 非 Android 直接透传，不做任何检查。
-      home: const SplashScreen(
-        next: StorageGate(child: HomeShell()),
-      ),
+      home: const StorageGate(child: HomeShell()),
       builder: (context, child) => _wrap(context, child),
     );
+    // 开屏挂在 MaterialApp **外面**：里面的 builder 会再套一层桌面标题栏，
+    // 放进路由的话开屏只盖 Navigator，窗口顶部会漏出标题栏。
+    app = SplashGate(child: app);
     if (Platform.isWindows) app = ExcludeSemantics(child: app);
     return app;
   }
