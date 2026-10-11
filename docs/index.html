@@ -79,7 +79,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
       <a class="btn" id="dl-windows" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Windows 版</a>
       <a class="btn" href="https://github.com/leey1994/shuangyuebook">源码</a>
     </div>
-    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端</p>
+    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端 · 约 22 MB</p>
   </div>
 </header>
 
@@ -183,6 +183,13 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
   // 同步 XHR：这段脚本在 <body> 末尾执行，元素已存在，且要保证
   // 页面上任何 <span> 拿到版本号时已经是最终值 —— 用 fetch 会出现
   // 首屏先闪一下「版本加载中」。
+  // JSON.parse 遇到 BOM 会直接抛 "Unexpected token"（Dart 的 jsonDecode
+// 反而能容忍），而 announcement.json 在 Windows 上被记事本存过就很容易
+// 带上 BOM —— 一次抛异常就把整条 fallback 链断了。先剥再解析。
+function parseJson(text) {
+    return JSON.parse(String(text).replace(/^﻿/, ''));
+  }
+
   function xhr(url) {
     try {
       var x = new XMLHttpRequest();
@@ -194,12 +201,10 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 
   apply(FALLBACK);
   try {
-    var rel = JSON.parse(xhr('https://api.github.com/repos/' + REPO + '/releases/latest'));
-    apply(clean(rel.tag_name));
+    apply(clean(parseJson(xhr('https://api.github.com/repos/' + REPO + '/releases/latest')).tag_name));
   } catch (e) { /* 离线或限流：用公告里的版本 */ }
   try {
-    var ann = JSON.parse(xhr('announcement.json'));
-    apply(clean(ann.version));
+    apply(clean(parseJson(xhr('announcement.json')).version));
   } catch (e) { /* 没有公告文件 */ }
 })();
 </script>

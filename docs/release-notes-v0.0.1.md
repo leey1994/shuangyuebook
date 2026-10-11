@@ -33,6 +33,11 @@
 
 ### 下载
 
-[Releases](https://github.com/leey1994/shuangyuebook/releases/latest) 提供 Android APK 与 Windows x64 绿色版。
+到 [Releases](https://github.com/leey1994/shuangyuebook/releases/latest) 页面下载：
+
+| 平台 | 文件 |
+| --- | --- |
+| Android | `novel_reader_android.apk`（约 22 MB） |
+| Windows | `novel_reader_windows_x64.zip` —— 解压即用，无需安装 |
 
 正文字体「霞鹜文楷」不随安装包分发。在阅读器「外观 → 正文字体」里点它会先询问是否下载，确认后从网络获取并长期缓存。

@@ -18,7 +18,7 @@ class Announcement {
   final String body;
   final String image;
 
-  /// 这条公告声明的版本号，**仅作记录，不参与显示判断**。
+  /// 这条公告对应的版本号，**仅作记录，不参与显示判断**。
   ///
   /// 曾经拿它做门槛，方向先写反过一次（只有已更新的用户才看得到），改过来后
   /// 又发现：装最新版的人恰恰看不到自己这一版的发布说明 —— 两种方向各漏一半人。
@@ -34,12 +34,29 @@ class Announcement {
     this.version = '',
   });
 
+  /// [fromJson] 之后拿到的公告，其中 image 可能仍是相对路径。
+  Announcement withResolvedImage(Uri base) {
+    if (image.isEmpty) return this;
+    final uri = Uri.parse(image);
+    if (uri.hasScheme) return this;
+    return Announcement(
+      id: id,
+      title: title,
+      body: body,
+      image: base.resolve(image).toString(),
+      version: version,
+    );
+  }
+
   factory Announcement.fromJson(Map<String, dynamic> j) => Announcement(
         id: (j['id'] as String? ?? '').trim(),
         title: (j['title'] as String? ?? '').trim(),
         body: (j['body'] as String? ?? '').trim(),
         image: (j['image'] as String? ?? '').trim(),
-        version: (j['min_version'] as String? ?? '').trim(),
+        // 官网脚本读 `version`，历史文件写的是 `min_version` —— 两个都认，
+        // 否则改文件名时 App 端和网页端会各自拿到一半。
+        version: (j['version'] as String? ?? j['min_version'] as String? ?? '')
+            .trim(),
       );
 }
 
@@ -95,12 +112,21 @@ class NoticeChecker {
           },
         ).timeout(const Duration(seconds: 6));
         if (r.statusCode != 200) continue;
+        // 注：Dart 的 jsonDecode 能容忍 UTF-8 BOM（实测过），这里不用剥。
+        // 会被 BOM 打挂的是网页端的 JSON.parse —— 那边才有必要剥。
         final j = jsonDecode(utf8.decode(r.bodyBytes));
         if (j is! Map<String, dynamic>) continue;
         if (j['enabled'] == false) return null;
         // 不做版本门槛：靠 noticeId 判重即可。版本门槛两种方向都会漏人，
         // 详见 Announcement.version 的说明。
-        return Announcement.fromJson(j);
+        //
+        // image 常常在 json 里写成 "assets/xxx.png" 这种相对路径，好让人在
+        // 仓库里改公告时不用关心部署域名。Image.network 只吃绝对地址，所以
+        // 这里按**实际拉到 json 的那个地址**补全 —— 三个回退源各自的目录
+        // 深度不同（Pages 是 /shuangyuebook/，raw 是 /main/docs/），用错了
+        // 图就 404，而 errorBuilder 会把失败悄悄吃掉，只能看到空白。
+        final base = Uri.parse(u).resolve('.');
+        return Announcement.fromJson(j).withResolvedImage(base);
       } catch (_) {
         continue; // 该地址不可达 → 换下一个
       }
@@ -118,6 +144,7 @@ class NoticePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = AppStore.I.prefs.theme;
     final text = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: AppThemes.scaffold(t),
       body: SafeArea(
@@ -148,7 +175,14 @@ class NoticePage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                         child: Image.network(
                           notice.image,
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          // 公告正文里的链接可能指向上一次发版，图片加载失败
+                          // 时留一条灰字，比整块空白更容易排查。
+                          errorBuilder: (_, __, ___) => Text(
+                            '（配图加载失败）',
+                            style: text.bodySmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
                         ),
                       ),
                     ],
