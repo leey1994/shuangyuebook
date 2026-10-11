@@ -1,0 +1,10 @@
+{
+  "_comment": "内置书源资产。sources 现在为空 —— 导入区默认留空，书源由用户自己导入；内置那 9 个是固化 Dart 适配器，不走这里。legacyBuiltinUrls 用于清理旧版本预置过的地址，让从旧版升级的用户导入区也能真正回到空。",
+  "sources": [],
+  "legacyBuiltinUrls": [
+    "https://www.hkmtxt.cc",
+    "https://www.bqgiu.cc",
+    "https://zh.wikisource.org",
+    "https://zh.m.wikisource.org"
+  ]
+}

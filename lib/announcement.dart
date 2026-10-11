@@ -1,0 +1,216 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'pet/pet_event.dart';
+import 'pet/pet_store.dart';
+import 'store.dart';
+import 'theme.dart';
+
+/// 公告数据（源文件：仓库 docs/announcement.json，GitHub Pages / raw 分发）。
+/// 发布流程 = 修改该文件并 push；客户端启动 + 周期轮询自动拉取。
+class Announcement {
+  final String id;
+  final String title;
+  final String body;
+  final String image;
+
+  /// 这条公告对应的版本号，**仅作记录，不参与显示判断**。
+  ///
+  /// 曾经拿它做门槛，方向先写反过一次（只有已更新的用户才看得到），改过来后
+  /// 又发现：装最新版的人恰恰看不到自己这一版的发布说明 —— 两种方向各漏一半人。
+  /// 正确做法就是不做版本门槛，靠 `noticeId` 判重：发出去谁没读谁弹，读过不再弹。
+  /// 字段保留只为兼容发布脚本与历史文件。
+  final String version;
+
+  const Announcement({
+    required this.id,
+    required this.title,
+    required this.body,
+    this.image = '',
+    this.version = '',
+  });
+
+  /// [fromJson] 之后拿到的公告，其中 image 可能仍是相对路径。
+  Announcement withResolvedImage(Uri base) {
+    if (image.isEmpty) return this;
+    final uri = Uri.parse(image);
+    if (uri.hasScheme) return this;
+    return Announcement(
+      id: id,
+      title: title,
+      body: body,
+      image: base.resolve(image).toString(),
+      version: version,
+    );
+  }
+
+  factory Announcement.fromJson(Map<String, dynamic> j) => Announcement(
+        id: (j['id'] as String? ?? '').trim(),
+        title: (j['title'] as String? ?? '').trim(),
+        body: (j['body'] as String? ?? '').trim(),
+        image: (j['image'] as String? ?? '').trim(),
+        // 官网脚本读 `version`，历史文件写的是 `min_version` —— 两个都认，
+        // 否则改文件名时 App 端和网页端会各自拿到一半。
+        version: (j['version'] as String? ?? j['min_version'] as String? ?? '')
+            .trim(),
+      );
+}
+
+/// 拉取公告 → 与本地已读 id 比对 → 不同则全屏弹出（关闭后记录）。
+class NoticeChecker {
+  NoticeChecker._();
+
+  static bool _busy = false;
+  static const _kSeen = 'noticeId';
+
+  /// 分发地址依次尝试：GitHub Pages（CDN）→ raw → Contents API。
+  /// 统一加时间戳参数穿透 CDN 缓存；Accept: raw 让 API 直返文件字节。
+  static const _urls = [
+    'https://leey1994.github.io/shuangyuebook/announcement.json',
+    'https://raw.githubusercontent.com/leey1994/shuangyuebook/main/docs/announcement.json',
+    'https://api.github.com/repos/leey1994/shuangyuebook/contents/docs/announcement.json',
+  ];
+
+  /// 检查新公告；有未读新公告则全屏显示并等待关闭，返回是否显示过。
+  static Future<bool> check(BuildContext context) async {
+    if (_busy) return false;
+    _busy = true;
+    try {
+      final n = await _fetch();
+      if (n == null || n.id.isEmpty || n.title.isEmpty) return false;
+      final sp = await SharedPreferences.getInstance();
+      if (sp.getString(_kSeen) == n.id) return false;
+      if (!context.mounted) return false;
+      PetStore.I.emit(PetAction.notice);
+      await Navigator.of(context).push(MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => NoticePage(notice: n),
+      ));
+      await sp.setString(_kSeen, n.id);
+      return true;
+    } catch (_) {
+      // 网络失败 / 解析失败：静默跳过，不影响正常使用
+      return false;
+    } finally {
+      _busy = false;
+    }
+  }
+
+  static Future<Announcement?> _fetch() async {
+    for (final u in _urls) {
+      try {
+        final sep = u.contains('?') ? '&' : '?';
+        final r = await http.get(
+          Uri.parse('$u${sep}t=${DateTime.now().millisecondsSinceEpoch}'),
+          headers: {
+            'User-Agent': 'shuangyuebook-notice',
+            'Accept': 'application/vnd.github.raw',
+          },
+        ).timeout(const Duration(seconds: 6));
+        if (r.statusCode != 200) continue;
+        // 注：Dart 的 jsonDecode 能容忍 UTF-8 BOM（实测过），这里不用剥。
+        // 会被 BOM 打挂的是网页端的 JSON.parse —— 那边才有必要剥。
+        final j = jsonDecode(utf8.decode(r.bodyBytes));
+        if (j is! Map<String, dynamic>) continue;
+        if (j['enabled'] == false) return null;
+        // 不做版本门槛：靠 noticeId 判重即可。版本门槛两种方向都会漏人，
+        // 详见 Announcement.version 的说明。
+        //
+        // image 常常在 json 里写成 "assets/xxx.png" 这种相对路径，好让人在
+        // 仓库里改公告时不用关心部署域名。Image.network 只吃绝对地址，所以
+        // 这里按**实际拉到 json 的那个地址**补全 —— 三个回退源各自的目录
+        // 深度不同（Pages 是 /shuangyuebook/，raw 是 /main/docs/），用错了
+        // 图就 404，而 errorBuilder 会把失败悄悄吃掉，只能看到空白。
+        final base = Uri.parse(u).resolve('.');
+        return Announcement.fromJson(j).withResolvedImage(base);
+      } catch (_) {
+        continue; // 该地址不可达 → 换下一个
+      }
+    }
+    return null;
+  }
+}
+
+/// 全屏公告页：右上角关闭 + 底部「知道了」，关闭即记为已读。
+class NoticePage extends StatelessWidget {
+  final Announcement notice;
+  const NoticePage({super.key, required this.notice});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppStore.I.prefs.theme;
+    final text = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    return Scaffold(
+      backgroundColor: AppThemes.scaffold(t),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: '关闭',
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      notice.title,
+                      style: text.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    if (notice.image.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          notice.image,
+                          // 公告正文里的链接可能指向上一次发版，图片加载失败
+                          // 时留一条灰字，比整块空白更容易排查。
+                          errorBuilder: (_, __, ___) => Text(
+                            '（配图加载失败）',
+                            style: text.bodySmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      notice.body,
+                      style: text.bodyLarge?.copyWith(height: 1.8),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('知道了'),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

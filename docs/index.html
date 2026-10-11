@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爽阅 · 爽快阅读，想看就看</title>
+<meta name="description" content="爽阅 —— 爽快阅读，想看就看。Android 与 Windows 双端小说阅读器，内置书源、可导入书源引擎、本地书离线读，还有一只会陪你长大的桌宠。MIT 协议，免费。">
+<link rel="icon" href="assets/favicon.png">
+
+<style>
+/* 极简：一条中性色阶、一种强调色、够用的留白。没有框架，没有构建。 */
+:root{
+  --bg:#0b1020;
+  --panel:#111a2e;
+  --line:#1e2a44;
+  --fg:#e6edf7;
+  --dim:#93a3bd;
+  --accent:#ffd65a;
+  --max:900px;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#fbfaf7; --panel:#fff; --line:#e6e2da; --fg:#16202f; --dim:#6b7688; }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit}
+.wrap{max-width:var(--max); margin:0 auto; padding:0 24px}
+header{padding:72px 0 8px}
+h1{font-size:clamp(34px,6vw,52px); line-height:1.2; margin:0 0 12px; letter-spacing:-.01em}
+.slogan{font-size:clamp(18px,3vw,22px); color:var(--dim); margin:0 0 28px}
+p{margin:0 0 16px}
+.mark{width:56px; height:56px; border-radius:14px; vertical-align:-14px; margin-right:14px}
+/* 宣传图：手机上是全宽横幅，窄屏会被 900px 的容器裁到刚好 */
+.hero{display:block; width:100%; height:auto; border-radius:14px; margin:0 0 28px}
+h2{font-size:20px; margin:56px 0 16px; letter-spacing:-.01em}
+h3{font-size:15px; margin:0 0 6px; font-weight:600}
+.row{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 8px}
+.btn{
+  display:inline-block; padding:11px 20px; border-radius:10px; text-decoration:none;
+  border:1px solid var(--line); background:var(--panel); font-size:15px;
+}
+.btn.primary{background:var(--accent); color:#1a1400; border-color:transparent; font-weight:600}
+.btn:hover{border-color:var(--dim)}
+.rule{height:1px; background:var(--line); border:0; margin:52px 0}
+.grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px}
+.muted{color:var(--dim); font-size:14px; margin:0}
+code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:2px 6px}
+ul{margin:0; padding-left:20px} li{margin:4px 0}
+table{width:100%; border-collapse:collapse; font-size:14px}
+th,td{text-align:left; padding:9px 8px; border-bottom:1px solid var(--line)}
+th{color:var(--dim); font-weight:500}
+.badge{display:inline-block; padding:3px 10px; border-radius:999px;
+  border:1px solid var(--line); color:var(--dim); font-size:13px}
+footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
+.tag{display:inline-block; font-size:12px; color:var(--accent); letter-spacing:.08em}
+@media (prefers-reduced-motion: no-preference){
+  .btn{transition:border-color .15s}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="tag" id="verline">爽阅</p>
+    <h1><img class="mark" src="assets/favicon.png" alt="">爽阅</h1>
+    <p class="slogan">爽快阅读，想看就看。</p>
+    <img class="hero" src="assets/slogan.png" width="1600" height="640"
+         alt="爽阅 —— 爽快阅读，想看就看">
+    <div class="row">
+      <a class="btn primary" id="dl-android" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Android 版</a>
+      <a class="btn" id="dl-windows" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Windows 版</a>
+      <a class="btn" href="https://github.com/leey1994/shuangyuebook">源码</a>
+    </div>
+    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端 · 约 22 MB</p>
+  </div>
+</header>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section>
+  <div class="wrap">
+    <h2>它是什么</h2>
+    <p>一个双端小说阅读器。内置书源开箱可读，也能导入「阅读 3.0」格式书源；TXT / EPUB 本地书和在线书共用同一套阅读体验，断网也能接着读。</p>
+    <p>顶部住着一只会陪你长大的小兽 —— 墨滴、纸兽、墨狐、书灵，看着你做的每一件事变化。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>功能</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>书源</h3>
+        <p class="muted">内置 9 个固化书源；支持导入书源，可批量启停、删除与导出。导入后自动体检，失效的直接移除并说明原因。</p>
+      </div>
+      <div class="card">
+        <h3>阅读</h3>
+        <p class="muted">四种翻页、行距字距主题、护眼背景、离线缓存、整本下载与断点续传，换源续读按章节名自动对齐进度。</p>
+      </div>
+      <div class="card">
+        <h3>本地书</h3>
+        <p class="muted">TXT 与 EPUB 都能导入，和在线书走同一条阅读、缓存、书签通路。</p>
+      </div>
+      <div class="card">
+        <h3>听书</h3>
+        <p class="muted">在线音色朗读，可调语速，随时切回阅读。</p>
+      </div>
+      <div class="card">
+        <h3>桌宠养成</h3>
+        <p class="muted">阅读时钉在顶部不打扰正文，其余界面整屏自由溜达，会绕开屏幕挖孔。61 种触发状态、300 多条台词。</p>
+      </div>
+      <div class="card">
+        <h3>双端</h3>
+        <p class="muted">Android 与 Windows 共用一套代码，窄屏宽屏自适应，桌面端独立窗口。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>内置书源</h2>
+    <p class="muted">第三方站点经常改版或关闭。失效的源会在「书源管理」里被体检标出，可随时停用或删除；也可以导入自己的书源来接替。</p>
+    <table>
+      <thead><tr><th>书源</th><th>搜索</th><th>发现 / 排行</th></tr></thead>
+      <tbody>
+      <tr><td>顶点小说</td><td>✔</td><td>✔</td></tr>
+      <tr><td>速读谷</td><td>✔</td><td>✔</td></tr>
+      <tr><td>黄金屋</td><td>✔</td><td>✔</td></tr>
+      <tr><td>52书库</td><td>✔</td><td>✔</td></tr>
+      <tr><td>神文小说</td><td>✔</td><td>✔</td></tr>
+      <tr><td>素书卷</td><td>✔</td><td>✔</td></tr>
+      <tr><td>篱笆好文学</td><td>✔</td><td>✔</td></tr>
+      <tr><td>小原文学</td><td>✔</td><td>✔</td></tr>
+      <tr><td>全本小说网</td><td>✔</td><td>✔</td></tr>
+    </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>从源码构建</h2>
+    <p class="muted">需要 Flutter 3.47 或更高。发版请带 <code>--dart-define=APP_VERSION=&lt;版本号&gt;</code>，自动更新靠它判断新旧。</p>
+    <p><code>git clone https://github.com/leey1994/shuangyuebook</code></p>
+    <p><code>flutter pub get &amp;&amp; flutter run</code></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="muted"><a href="https://github.com/leey1994/shuangyuebook/blob/main/LICENSE">MIT</a> · 个人学习与技术研究用途 · 不捆绑任何受版权保护的内容 · <span id="foot-ver">版本加载中…</span></p>
+  </div>
+</footer>
+
+<script>
+// 版本号不再手写：优先读 GitHub 最新 Release 的 tag，读不到就退回
+// announcement.json 里的 version，最后才用页面里写死的默认值。
+// 这样发一次版，网页自己就跟上，不用再改一次 HTML。
+(function () {
+  var FALLBACK = 'v0.0.1';
+  var REPO = 'leey1994/shuangyuebook';
+
+  function apply(v) {
+    if (!v) return;
+    document.getElementById('verline').textContent = '爽阅 ' + v;
+    document.getElementById('foot-ver').textContent = '当前版本 ' + v;
+  }
+
+  function clean(tag) {
+    if (!tag) return '';
+    return /^v/i.test(tag) ? tag : 'v' + tag;
+  }
+
+  // 同步 XHR：这段脚本在 <body> 末尾执行，元素已存在，且要保证
+  // 页面上任何 <span> 拿到版本号时已经是最终值 —— 用 fetch 会出现
+  // 首屏先闪一下「版本加载中」。
+  // JSON.parse 遇到 BOM 会直接抛 "Unexpected token"（Dart 的 jsonDecode
+// 反而能容忍），而 announcement.json 在 Windows 上被记事本存过就很容易
+// 带上 BOM —— 一次抛异常就把整条 fallback 链断了。先剥再解析。
+function parseJson(text) {
+    return JSON.parse(String(text).replace(/^﻿/, ''));
+  }
+
+  function xhr(url) {
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', url, false); // eslint-disable-line no-sync
+      x.send(null);
+      return x.status >= 200 && x.status < 300 ? x.responseText : '';
+    } catch (e) { return ''; }
+  }
+
+  apply(FALLBACK);
+  try {
+    apply(clean(parseJson(xhr('https://api.github.com/repos/' + REPO + '/releases/latest')).tag_name));
+  } catch (e) { /* 离线或限流：用公告里的版本 */ }
+  try {
+    apply(clean(parseJson(xhr('announcement.json')).version));
+  } catch (e) { /* 没有公告文件 */ }
+})();
+</script>
+</body>
+</html>
