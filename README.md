@@ -104,10 +104,12 @@ flutter pub get
 flutter analyze
 flutter test
 
-# APP_VERSION 取自 pubspec.yaml 的 version，必须显式传 ——
+# 一键构建：版本号（APP_VERSION）自动取自 pubspec.yaml 的 version，
+# 由 tool/build.sh 注入 --dart-define，无需手填，避免两处定义漂移。
 # 「设置 → 关于」与自动更新都靠它判断有没有新版本。
-flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=0.0.1
-flutter build windows --release --dart-define=APP_VERSION=0.0.1
+./tool/build.sh            # 同时构建 apk 与 windows
+./tool/build.sh apk        # 仅 Android（arm64）
+./tool/build.sh windows    # 仅 Windows
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
