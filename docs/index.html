@@ -1,507 +1,212 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>爽阅 · 多源聚合小说阅读器</title>
-<meta name="description" content="爽阅 — Flutter 双端小说阅读器：内置固化书源 + 可导入书源引擎、TXT/EPUB 本地书、四种翻页、离线缓存、在线音色听书、桌宠养成。Android + Windows。">
-<meta property="og:title" content="爽阅 · 多源聚合小说阅读器">
-<meta property="og:description" content="内置固化书源 + 可导入书源引擎，TXT/EPUB 本地书，四种翻页，养成系桌宠，Android + Windows 双端。">
+<title>爽阅 · 爽快阅读，想看就看</title>
+<meta name="description" content="爽阅 —— 爽快阅读，想看就看。Android 与 Windows 双端小说阅读器，内置书源、可导入书源引擎、本地书离线读，还有一只会陪你长大的桌宠。免费开源。">
+<link rel="icon" href="assets/favicon.png">
+
 <style>
-  :root{
-    --bg:#08090c; --bg2:#0c0e13; --card:#101319; --card2:#141822;
-    --line:#1e232e; --line2:#2b3240;
-    --fg:#e6eaf2; --dim:#8b95a8; --faint:#5d6675;
-    --accent:#4d8dff; --accent-soft:rgba(77,141,255,.12);
-    --ok:#4ecfa0; --ok-soft:rgba(78,207,160,.12);
-    --warn:#e8b563;
-    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-    --sans:"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,sans-serif;
-    --radius:14px;
-    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.3);
-  }
-  @media (prefers-color-scheme: light){
-    :root{
-      --bg:#fbfbfc; --bg2:#f4f6f9; --card:#fff; --card2:#f8fafc;
-      --line:#e6e9ef; --line2:#d6dce5;
-      --fg:#0f1319; --dim:#5a6373; --faint:#8d95a3;
-      --accent:#1f62d8; --accent-soft:rgba(31,98,216,.08);
-      --ok:#12855c; --ok-soft:rgba(18,133,92,.08);
-      --warn:#9a6412;
-      --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06);
-    }
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
-  body{
-    font-family:var(--sans);
-    background:var(--bg);color:var(--fg);line-height:1.75;
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
-    overflow-x:hidden;
-  }
-  /* 科技感底纹：细网格 + 顶部一点光晕，不用大面积渐变球 */
-  body::before{
-    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background-image:
-      linear-gradient(var(--line) 1px,transparent 1px),
-      linear-gradient(90deg,var(--line) 1px,transparent 1px);
-    background-size:56px 56px;
-    opacity:.30;
-    mask-image:linear-gradient(180deg,rgba(0,0,0,.85),transparent 620px);
-    -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,.85),transparent 620px);
-  }
-  body::after{
-    content:"";position:fixed;left:50%;top:-340px;width:1000px;height:520px;
-    transform:translateX(-50%);z-index:-1;pointer-events:none;
-    background:radial-gradient(closest-side,var(--accent-soft),transparent 72%);
-  }
-  .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
-
-  /* ---------- 顶栏 ---------- */
-  .nav{
-    position:sticky;top:0;z-index:20;
-    border-bottom:1px solid var(--line);
-    background:color-mix(in srgb,var(--bg) 82%,transparent);
-    backdrop-filter:saturate(1.4) blur(14px);
-    -webkit-backdrop-filter:saturate(1.4) blur(14px);
-  }
-  .nav .wrap{display:flex;align-items:center;gap:20px;height:56px}
-  .brand{display:flex;align-items:baseline;gap:9px;font-weight:800;font-size:17px;letter-spacing:2px}
-  .brand .sq{width:9px;height:9px;border-radius:2px;background:var(--accent);align-self:center;box-shadow:0 0 12px var(--accent)}
-  .brand .v{font-family:var(--mono);font-size:11.5px;color:var(--accent);font-weight:600;letter-spacing:0}
-  .nav nav{margin-left:auto;display:flex;gap:4px}
-  .nav nav a{
-    font-size:13.5px;color:var(--dim);text-decoration:none;padding:6px 11px;border-radius:8px;transition:.16s
-  }
-  .nav nav a:hover{color:var(--fg);background:var(--card)}
-
-  /* ---------- hero ---------- */
-  header{padding:96px 0 56px}
-  .eyebrow{
-    font-family:var(--mono);font-size:12px;color:var(--faint);
-    letter-spacing:.14em;text-transform:uppercase;margin-bottom:20px;
-    display:flex;align-items:center;gap:10px;
-  }
-  .eyebrow::before{content:"";width:26px;height:1px;background:var(--line2)}
-  .logo{
-    font-size:clamp(44px,8vw,68px);font-weight:800;letter-spacing:10px;line-height:1;
-    margin-bottom:22px;
-  }
-  .logo em{
-    font-style:normal;color:var(--accent);
-    text-shadow:0 0 34px var(--accent-soft);
-  }
-  .tag{color:var(--dim);font-size:16.5px;max-width:620px}
-  .badges{margin-top:26px;display:flex;gap:8px;flex-wrap:wrap}
-  .badge{
-    display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;
-    font-size:12.5px;border:1px solid var(--line);background:var(--card);color:var(--dim);
-    font-family:var(--mono);letter-spacing:.02em;
-  }
-  .badge b{color:var(--fg);font-weight:600}
-  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 8px var(--ok)}
-  .cta{margin-top:34px;display:flex;gap:12px;flex-wrap:wrap}
-  .btn{
-    display:inline-flex;align-items:center;gap:9px;padding:13px 26px;border-radius:11px;
-    text-decoration:none;font-size:14.5px;font-weight:600;transition:.16s;
-    border:1px solid transparent;
-  }
-  .btn:hover{transform:translateY(-2px)}
-  .btn-p{background:var(--accent);color:#fff;box-shadow:0 6px 22px rgba(77,141,255,.26)}
-  .btn-s{background:var(--card);color:var(--fg);border-color:var(--line2)}
-  .btn-s:hover{border-color:var(--accent)}
-  .btn .ar{font-family:var(--mono);transition:transform .16s}
-  .btn:hover .ar{transform:translateX(3px)}
-
-  /* ---------- section ---------- */
-  section{padding:52px 0;border-top:1px solid var(--line)}
-  .head{margin-bottom:28px}
-  .head .kick{
-    font-family:var(--mono);font-size:11.5px;color:var(--accent);
-    letter-spacing:.16em;text-transform:uppercase;margin-bottom:9px;
-  }
-  h2{font-size:23px;font-weight:700;letter-spacing:.2px}
-  .sub{color:var(--dim);font-size:14.5px;margin-top:7px;max-width:680px}
-
-  /* ---------- 数据条 ---------- */
-  .strip{
-    display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-    gap:1px;background:var(--line);border:1px solid var(--line);
-    border-radius:var(--radius);overflow:hidden;
-  }
-  .strip>div{background:var(--card);padding:20px 16px;text-align:center;transition:background .16s}
-  .strip>div:hover{background:var(--card2)}
-  .strip .n{font-family:var(--mono);font-size:25px;font-weight:700;color:var(--accent);line-height:1.15}
-  .strip .l{font-size:12.5px;color:var(--dim);margin-top:5px}
-
-  /* ---------- 卡片 ---------- */
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:14px}
-  .card{
-    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:20px;transition:.18s;
-  }
-  .card:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--shadow)}
-  .ico{
-    width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
-    background:var(--accent-soft);color:var(--accent);font-size:17px;margin-bottom:13px;
-    border:1px solid var(--line);
-  }
-  .card h3{font-size:16px;font-weight:700;margin-bottom:6px}
-  .card p{font-size:13.8px;color:var(--dim)}
-  .card p b{color:var(--fg);font-weight:600}
-  .card--wide{grid-column:1/-1}
-
-  /* ---------- 版本说明 ---------- */
-  .rel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-  .rel-top{
-    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-    padding:18px 22px;border-bottom:1px solid var(--line);background:var(--card2);
-  }
-  .tag-v{
-    font-family:var(--mono);font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;
-    background:var(--accent-soft);color:var(--accent);border:1px solid var(--line);
-  }
-  .rel-top .t{font-size:16px;font-weight:700}
-  .rel-top .n{font-size:12.5px;color:var(--faint);font-family:var(--mono)}
-  .rel-body{padding:20px 22px}
-  .grp{margin-bottom:22px}
-  .grp:last-child{margin-bottom:0}
-  .grp-t{
-    font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.12em;
-    text-transform:uppercase;margin-bottom:11px;
-    display:flex;align-items:center;gap:9px;
-  }
-  .grp-t::after{content:"";flex:1;height:1px;background:var(--line)}
-  .rel ul{list-style:none;display:grid;gap:8px}
-  .rel li{font-size:14px;color:var(--dim);padding-left:17px;position:relative}
-  .rel li::before{
-    content:"";position:absolute;left:0;top:9px;width:5px;height:5px;border-radius:1px;
-    background:var(--accent);opacity:.8;
-  }
-  .rel li b{color:var(--fg);font-weight:600}
-  .new{
-    display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;
-    color:var(--accent);background:var(--accent-soft);border:1px solid var(--line);
-    padding:1px 6px;border-radius:5px;margin-right:7px;vertical-align:1.5px;letter-spacing:.04em;
-  }
-
-  /* ---------- 桌宠展示 ---------- */
-  .pet{
-    display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;
-    background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
-  }
-  .pet>div{background:var(--card);padding:18px 12px;text-align:center}
-  .pet .st{width:86px;height:86px;margin:0 auto 8px;display:block;image-rendering:auto}
-  .pet .nm{font-size:14.5px;font-weight:700}
-  .pet .ds{font-size:12.5px;color:var(--dim);margin-top:3px}
-
-  /* ---------- 表格 ---------- */
-  .table-wrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-  table{width:100%;border-collapse:collapse;font-size:14px}
-  th,td{padding:10px 16px;text-align:left;border-bottom:1px solid var(--line)}
-  th{
-    color:var(--faint);font-weight:600;font-size:11.5px;background:var(--card2);
-    font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;
-  }
-  tr:last-child td{border-bottom:none}
-  tbody tr:hover{background:var(--card2)}
-  .ok{color:var(--ok);font-weight:600}
-  .no{color:var(--faint)}
-  .note{
-    margin-top:13px;font-size:13px;color:var(--faint);
-    border-left:2px solid var(--line2);padding-left:12px;
-  }
-
-  /* ---------- 下载 ---------- */
-  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:14px}
-  .dl a{
-    display:block;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:20px;text-decoration:none;color:var(--fg);transition:.18s;
-  }
-  .dl a:hover{border-color:var(--accent);transform:translateY(-2px)}
-  .dl .t{font-size:16.5px;font-weight:700;display:flex;align-items:center;gap:8px}
-  .dl .sz{
-    font-family:var(--mono);font-size:11px;color:var(--faint);
-    border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-weight:500;
-  }
-  .dl .d{font-size:13px;color:var(--dim);margin-top:7px}
-  .dl .u{
-    font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:12px;
-    word-break:break-all;
-  }
-
-  code{
-    font-family:var(--mono);background:var(--card2);padding:2px 6px;border-radius:5px;
-    font-size:12px;border:1px solid var(--line);
-  }
-  footer{
-    padding:40px 0 52px;border-top:1px solid var(--line);
-    text-align:center;color:var(--faint);font-size:12.5px;
-  }
-  footer a{color:var(--dim);text-decoration:none;font-family:var(--mono)}
-  footer a:hover{color:var(--accent)}
-
-  @media (max-width:640px){
-    header{padding:64px 0 40px}
-    .logo{letter-spacing:6px}
-    .nav nav{display:none}
-    section{padding:40px 0}
-    .wrap{padding:0 18px}
-  }
+/* 极简：一条中性色阶、一种强调色、够用的留白。没有框架，没有构建。 */
+:root{
+  --bg:#0b1020;
+  --panel:#111a2e;
+  --line:#1e2a44;
+  --fg:#e6edf7;
+  --dim:#93a3bd;
+  --accent:#ffd65a;
+  --max:900px;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#fbfaf7; --panel:#fff; --line:#e6e2da; --fg:#16202f; --dim:#6b7688; }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit}
+.wrap{max-width:var(--max); margin:0 auto; padding:0 24px}
+header{padding:72px 0 8px}
+h1{font-size:clamp(34px,6vw,52px); line-height:1.2; margin:0 0 12px; letter-spacing:-.01em}
+.slogan{font-size:clamp(18px,3vw,22px); color:var(--dim); margin:0 0 28px}
+p{margin:0 0 16px}
+.mark{width:56px; height:56px; border-radius:14px; vertical-align:-14px; margin-right:14px}
+h2{font-size:20px; margin:56px 0 16px; letter-spacing:-.01em}
+h3{font-size:15px; margin:0 0 6px; font-weight:600}
+.row{display:flex; gap:12px; flex-wrap:wrap; margin:0 0 8px}
+.btn{
+  display:inline-block; padding:11px 20px; border-radius:10px; text-decoration:none;
+  border:1px solid var(--line); background:var(--panel); font-size:15px;
+}
+.btn.primary{background:var(--accent); color:#1a1400; border-color:transparent; font-weight:600}
+.btn:hover{border-color:var(--dim)}
+.rule{height:1px; background:var(--line); border:0; margin:52px 0}
+.grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px}
+.muted{color:var(--dim); font-size:14px; margin:0}
+code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:2px 6px}
+ul{margin:0; padding-left:20px} li{margin:4px 0}
+table{width:100%; border-collapse:collapse; font-size:14px}
+th,td{text-align:left; padding:9px 8px; border-bottom:1px solid var(--line)}
+th{color:var(--dim); font-weight:500}
+.badge{display:inline-block; padding:3px 10px; border-radius:999px;
+  border:1px solid var(--line); color:var(--dim); font-size:13px}
+footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
+.tag{display:inline-block; font-size:12px; color:var(--accent); letter-spacing:.08em}
+@media (prefers-reduced-motion: no-preference){
+  .btn{transition:border-color .15s}
+}
 </style>
 </head>
 <body>
 
-<div class="nav">
+<header>
   <div class="wrap">
-    <div class="brand"><span class="sq"></span>爽阅<span class="v">v1.2.2</span></div>
-    <nav>
-      <a href="#update">更新</a>
-      <a href="#features">功能</a>
-      <a href="#sources">书源</a>
-      <a href="#download">下载</a>
-      <a href="https://github.com/leey1994/shuangyuebook">GitHub</a>
-    </nav>
-  </div>
-</div>
-
-<header class="wrap">
-  <div class="eyebrow">Flutter · Android / Windows</div>
-  <h1 class="logo">爽<em>阅</em></h1>
-  <p class="tag">内置固化书源 + 可导入书源引擎 · 本地书与在线书同一套阅读体验 · 顶部住着一只会成长的书页精灵</p>
-  <div class="badges">
-    <span class="badge"><span class="dot"></span>当前版本 <b>v1.2.2</b></span>
-    <span class="badge">Android</span>
-    <span class="badge">Windows x64</span>
-    <span class="badge">APK 22.4 MB</span>
-    <span class="badge">开源免费</span>
-  </div>
-  <div class="cta">
-    <a class="btn btn-p" href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">下载 Android APK <span class="ar">→</span></a>
-    <a class="btn btn-s" href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_windows_x64.zip">下载 Windows 版 <span class="ar">→</span></a>
+    <p class="tag" id="verline">爽阅</p>
+    <h1><img class="mark" src="assets/favicon.png" alt="">爽阅</h1>
+    <p class="slogan">爽快阅读，想看就看。</p>
+    <div class="row">
+      <a class="btn primary" id="dl-android" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Android 版</a>
+      <a class="btn" id="dl-windows" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Windows 版</a>
+      <a class="btn" href="https://github.com/leey1994/shuangyuebook">源码</a>
+    </div>
+    <p class="muted" id="dl-note">免费开源 · 无广告 · Android / Windows 双端</p>
   </div>
 </header>
 
-<section class="wrap" id="update">
-  <div class="head">
-    <div class="kick">/ v1.2.2 changelog</div>
-    <h2>这一版，小墨学会绕开摄像头了</h2>
-    <p class="sub">翻页不再卡在半页，桌宠慢下来、养得久一点，也会在整屏范围内自己玩了。</p>
+<div class="wrap"><hr class="rule"></div>
+
+<section>
+  <div class="wrap">
+    <h2>它是什么</h2>
+    <p>一个双端小说阅读器。内置书源开箱可读，也能导入「阅读 3.0」格式书源；TXT / EPUB 本地书和在线书共用同一套阅读体验，断网也能接着读。</p>
+    <p>顶部住着一只会陪你长大的小兽 —— 墨滴、纸兽、墨狐、书灵，看着你做的每一件事变化。</p>
   </div>
-  <div class="rel">
-    <div class="rel-top">
-      <span class="tag-v">v1.2.2</span>
-      <span class="t">翻页修复 · 桌宠玩法</span>
-      <span class="n">2026-10-11</span>
-    </div>
-    <div class="rel-body">
-      <div class="grp">
-        <div class="grp-t">新增</div>
-        <ul>
-          <li><span class="new">NEW</span><b>绕开屏幕挖孔</b>：桌宠规划路线时会避开前置摄像头，凑到附近还会探头看一眼。挖孔类型在「设置 → 桌宠」里选。</li>
-          <li><span class="new">NEW</span><b>整屏自由溜达</b>：阅读时钉在顶部不打扰正文；回到书架、发现、搜索等界面，它会在整个屏幕范围内自己到处玩。</li>
-        </ul>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>功能</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>书源</h3>
+        <p class="muted">内置 9 个固化书源；支持导入书源，可批量启停、删除与导出。导入后自动体检，失效的直接移除并说明原因。</p>
       </div>
-      <div class="grp">
-        <div class="grp-t">改进</div>
-        <ul>
-          <li><b>桌宠长得慢多了</b>：养成周期拉长到长期陪伴，第一阶约两周，之后逐步成长为纸兽、墨狐、书灵。</li>
-          <li><b>散步慢下来</b>：一段路 2.6 秒走完，节奏不规则，不再像被弹射出去。</li>
-          <li>导入书源默认留空，书源完全由你自己挑选；内置 9 个固化书源照常开箱可用。</li>
-        </ul>
+      <div class="card">
+        <h3>阅读</h3>
+        <p class="muted">四种翻页、行距字距主题、护眼背景、离线缓存、整本下载与断点续传，换源续读按章节名自动对齐进度。</p>
       </div>
-      <div class="grp">
-        <div class="grp-t">修复</div>
-        <ul>
-          <li><b>覆盖翻页只显示一半、过很久才整体显示</b>（翻页动画被反复打断）。</li>
-          <li><b>更新公告不弹</b>（版本判断方向写反，发出去的公告自己人都看不到）。</li>
-          <li>下架一个内容不合规的书源（搬山人），其余书源不受影响。</li>
-        </ul>
+      <div class="card">
+        <h3>本地书</h3>
+        <p class="muted">TXT 与 EPUB 都能导入，和在线书走同一条阅读、缓存、书签通路。</p>
       </div>
-      <div class="grp">
-        <div class="grp-t">升级提示</div>
-        <ul>
-          <li>桌宠与挖孔设置均可在「设置 → 桌宠」调整，不影响任何功能。</li>
-          <li>本版本不新增任何权限申请。</li>
-        </ul>
+      <div class="card">
+        <h3>听书</h3>
+        <p class="muted">在线音色朗读，可调语速，随时切回阅读。</p>
+      </div>
+      <div class="card">
+        <h3>桌宠养成</h3>
+        <p class="muted">阅读时钉在顶部不打扰正文，其余界面整屏自由溜达，会绕开屏幕挖孔。61 种触发状态、300 多条台词。</p>
+      </div>
+      <div class="card">
+        <h3>双端</h3>
+        <p class="muted">Android 与 Windows 共用一套代码，窄屏宽屏自适应，桌面端独立窗口。</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="wrap">
-  <div class="strip">
-    <div><div class="n">9</div><div class="l">内置固化书源</div></div>
-    <div><div class="n">∞</div><div class="l">可导入书源</div></div>
-    <div><div class="n">4</div><div class="l">翻页方式</div></div>
-    <div><div class="n">12</div><div class="l">在线音色</div></div>
-    <div><div class="n">6</div><div class="l">阅读背景</div></div>
-    <div><div class="n">22.4</div><div class="l">APK / MB</div></div>
-  </div>
-</section>
-
-<section class="wrap" id="pet">
-  <div class="head">
-    <div class="kick">/ companion</div>
-    <h2>小墨的四个形态</h2>
-    <p class="sub">水滴头、页角耳、额头朱红印 —— 无论长到哪一形态，这三样都不会变，所以认得出是同一只。</p>
-  </div>
-  <div class="pet">
-    <div>
-      <img class="st" src="assets/pet/drop.png" alt="墨滴" width="86" height="86">
-      <div class="nm">墨滴</div>
-      <div class="ds">刚出生，只有一颗头</div>
-    </div>
-    <div>
-      <img class="st" src="assets/pet/paper.png" alt="纸兽" width="86" height="86">
-      <div class="nm">纸兽</div>
-      <div class="ds">长出身体与书页波浪底</div>
-    </div>
-    <div>
-      <img class="st" src="assets/pet/fox.png" alt="墨狐" width="86" height="86">
-      <div class="nm">墨狐</div>
-      <div class="ds">拖起一卷墨尾</div>
-    </div>
-    <div>
-      <img class="st" src="assets/pet/spirit.png" alt="书灵" width="86" height="86">
-      <div class="nm">书灵</div>
-      <div class="ds">朱色光环，浮起书页</div>
-    </div>
-  </div>
-</section>
-
-<section class="wrap" id="features">
-  <div class="head">
-    <div class="kick">/ capabilities</div>
-    <h2>功能亮点</h2>
-    <p class="sub">在线书与本地书共用同一套阅读、缓存、书签与统计。</p>
-  </div>
-  <div class="grid">
-    <div class="card">
-      <div class="ico">◈</div>
-      <h3>书源引擎</h3>
-      <p>内置 <b>9 个固化书源</b>，另可导入「阅读 3.0」格式书源扩展（导入区默认为空，书源由你自己挑）。两种书源在搜索、发现、书架、换源里完全同构，可以混用。</p>
-    </div>
-    <div class="card">
-      <div class="ico">✓</div>
-      <h3>书源体检</h3>
-      <p>导入后自动批量验活，失效书源直接移除并说明原因；每天首次启动自动体检，结果汇总在阅读记录页。</p>
-    </div>
-    <div class="card">
-      <div class="ico">▤</div>
-      <h3>本地书</h3>
-      <p>导入 <b>TXT / EPUB</b>：自动识别 UTF-8、UTF-16、GBK 编码，自动分章，抽取封面与书内插图，支持按目录批量扫描。</p>
-    </div>
-    <div class="card">
-      <div class="ico">⇄</div>
-      <h3>四种翻页</h3>
-      <p><b>滑动 / 覆盖 / 淡入 / 滚动</b>。覆盖模式逐行对照「阅读 3.0」的手感实现，翻页吸附按固定速率收敛，不会拖尾。</p>
-    </div>
-    <div class="card">
-      <div class="ico">Aa</div>
-      <h3>排版与背景</h3>
-      <p>字号、行距、字距、左右边距、上下留白、首行缩进、正文字体可调；<b>6 种阅读背景</b>，页眉页脚分别开关。</p>
-    </div>
-    <div class="card">
-      <div class="ico">♪</div>
-      <h3>听书</h3>
-      <p>逐段朗读、自动跨章、段落高亮跟随。<b>12 款在线音色</b>在线合成并缓存到本地，断网自动回退系统语音。</p>
-    </div>
-    <div class="card">
-      <div class="ico">⇩</div>
-      <h3>离线缓存</h3>
-      <p>读过的章节自动落盘，无网络时离线续读；支持整本下载、断点续传，可随时暂停不白干。</p>
-    </div>
-    <div class="card">
-      <div class="ico">◷</div>
-      <h3>阅读记录</h3>
-      <p>累计时长、连续阅读天数、读完本数、最近 7 天柱状图，以及当天的书源可用情况。</p>
-    </div>
-    <div class="card">
-      <div class="ico">◑</div>
-      <h3>养成桌宠</h3>
-      <p>阅读时长直接换算成长值，配合搜索与抚摸一起推动进化；四个阶段、四种情绪，会在你久坐、深夜、久别时主动开口。</p>
-    </div>
-    <div class="card">
-      <div class="ico">↻</div>
-      <h3>自动更新</h3>
-      <p>启动静默检查新版本，弹窗公告即 Release 说明；安卓一键安装，Windows 自动替换重启，多线路回退不怕网络抽风。</p>
-    </div>
-    <div class="card">
-      <div class="ico">▣</div>
-      <h3>书架与换源</h3>
-      <p>长卡片 / 正方形卡片两种样式带进度条，两种排序方向；换源保留阅读进度，按章节标题自动对齐。</p>
-    </div>
-    <div class="card">
-      <div class="ico">▤</div>
-      <h3>双端自适应</h3>
-      <p>同一套代码覆盖 Android 与 Windows 桌面端，宽窄屏自动切换导航形态与文字缩放。</p>
-    </div>
-  </div>
-</section>
-
-<section class="wrap" id="sources">
-  <div class="head">
-    <div class="kick">/ built-in sources</div>
-    <h2>内置固化书源</h2>
-    <p class="sub">手写适配，随包发布，不依赖任何外部配置。</p>
-  </div>
-  <div class="table-wrap">
+<section>
+  <div class="wrap">
+    <h2>内置书源</h2>
+    <p class="muted">第三方站点经常改版或关闭。失效的源会在「书源管理」里被体检标出，可随时停用或删除；也可以导入自己的书源来接替。</p>
     <table>
-      <thead><tr><th>书源</th><th>首页</th><th>排行</th><th>书单</th><th>搜索</th></tr></thead>
-      <tbody>
-        <tr><td>顶点小说</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>速读谷</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>黄金屋</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>52书库</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td><td class="ok">✔</td></tr>
-        
-        <tr><td>神文小说</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>素书卷</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>篱笆好文学</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>小原文学</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="ok">✔</td></tr>
-        <tr><td>全本小说网</td><td class="ok">✔</td><td class="ok">✔</td><td class="no">—</td><td class="no">—</td></tr>
-      </tbody>
+      <thead><tr><th>书源</th><th>搜索</th><th>发现 / 排行</th></tr></thead>
+      <tbody id="sources"></tbody>
     </table>
   </div>
-  <div class="note">
-    第三方站点经常改版或关闭。失效的源会在「书源管理」里被体检标出，可随时停用或删除；
-    也可以导入自己的书源来接替。
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>从源码构建</h2>
+    <p class="muted">需要 Flutter 3.47 或更高。</p>
+    <p><code>git clone https://github.com/leey1994/shuangyuebook</code></p>
+    <p><code>flutter pub get &amp;&amp; flutter run</code></p>
   </div>
 </section>
 
-<section class="wrap" id="download">
-  <div class="head">
-    <div class="kick">/ download</div>
-    <h2>下载</h2>
-    <p class="sub">三个包都是最新版本，链接指向 GitHub Release 的 latest。</p>
+<footer>
+  <div class="wrap">
+    <p class="muted">GPL-3.0 · <span id="foot-ver">版本加载中…</span></p>
+    <p class="muted">宣传语与开屏图由 <code>assets/brand/generate_slogan.ps1</code> 从 <code>assets/brand/slogan.txt</code> 生成，改文案不用重画。</p>
   </div>
-  <div class="dl">
-    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_android.apk">
-      <div class="t">Android APK <span class="sz">22.4 MB</span></div>
-      <div class="d">arm64 · 启动自动检查更新，一键安装</div>
-      <div class="u">novel_reader_android.apk</div>
-    </a>
-    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_windows_x64.zip">
-      <div class="t">Windows x64 <span class="sz">~21 MB</span></div>
-      <div class="d">解压即用 · 自动检查更新并替换重启</div>
-      <div class="u">novel_reader_windows_x64.zip</div>
-    </a>
-    <a href="https://github.com/leey1994/shuangyuebook/releases/latest/download/novel_reader_source.zip">
-      <div class="t">源码 <span class="sz">ZIP</span></div>
-      <div class="d">Flutter 3.x · Android + Windows 双端单一代码库</div>
-      <div class="u">novel_reader_source.zip</div>
-    </a>
-  </div>
-  <div class="note">
-    正文字体「霞鹜文楷」不含在安装包里（那样体积会翻倍）。
-    在阅读器「外观 → 正文字体」里点它会先询问是否下载，确认后从网络获取并长期缓存。
-  </div>
-</section>
-
-<footer class="wrap">
-  <p>仅用于个人学习与技术研究；内容版权归各站点与作者所有，请支持正版阅读，请勿商用。<br>
-  <a href="https://github.com/leey1994/shuangyuebook">github.com/leey1994/shuangyuebook</a></p>
 </footer>
 
+<script>
+// 版本号不再手写：优先读 GitHub 最新 Release 的 tag，读不到就退回
+// announcement.json 里的 version，最后才用页面里写死的默认值。
+// 这样发一次版，网页自己就跟上，不用再改一次 HTML。
+(function () {
+  var FALLBACK = 'v0.0.1';
+  var REPO = 'leey1994/shuangyuebook';
+
+  function apply(v) {
+    if (!v) return;
+    document.getElementById('verline').textContent = '爽阅 ' + v;
+    document.getElementById('foot-ver').textContent = '当前版本 ' + v;
+  }
+
+  function clean(tag) {
+    if (!tag) return '';
+    return /^v/i.test(tag) ? tag : 'v' + tag;
+  }
+
+  // 同步 XHR：这段脚本在 <body> 末尾执行，元素已存在，且要保证
+  // 页面上任何 <span> 拿到版本号时已经是最终值 —— 用 fetch 会出现
+  // 首屏先闪一下「版本加载中」。
+  function xhr(url) {
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', url, false); // eslint-disable-line no-sync
+      x.send(null);
+      return x.status >= 200 && x.status < 300 ? x.responseText : '';
+    } catch (e) { return ''; }
+  }
+
+  apply(FALLBACK);
+  try {
+    var rel = JSON.parse(xhr('https://api.github.com/repos/' + REPO + '/releases/latest'));
+    apply(clean(rel.tag_name));
+  } catch (e) { /* 离线或限流：用公告里的版本 */ }
+  try {
+    var ann = JSON.parse(xhr('announcement.json'));
+    apply(clean(ann.version));
+  } catch (e) { /* 没有公告文件 */ }
+
+  var src = [
+    ['顶点小说', 'https://m.yewa.cc'],
+    ['速读谷', 'https://www.suduguu.com'],
+    ['黄金屋', 'https://www.huangjinwu.org'],
+    ['52书库', 'https://www.52shuku.net'],
+    ['神文小说', 'https://www.shenwen.org'],
+    ['素书卷', 'https://www.sushujuan.cc'],
+    ['篱笆好文学', 'https://m.libahao2.com'],
+    ['小原文学', 'https://www.min-yuan.com'],
+    ['全本小说网', 'https://quanben.io']
+  ];
+  var tb = document.getElementById('sources');
+  if (tb) {
+    tb.innerHTML = src.map(function (s) {
+      return '<tr><td>' + s[0] + '</td><td>✔</td><td>✔</td></tr>';
+    }).join('');
+  }
+})();
+</script>
 </body>
 </html>

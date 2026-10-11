@@ -1,16 +1,26 @@
 # 爽阅
 
+> **爽快阅读，想看就看。**
+
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
-静态主页：<https://leey1994.github.io/shuangyuebook/>
+当前版本：**v0.0.1**
 
-当前版本：**v1.2.2**
+静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/) · 开屏页：[splash.html](https://leey1994.github.io/shuangyuebook/splash.html)
+
+![爽阅 · 爽快阅读，想看就看](docs/assets/slogan.png)
 
 ## 功能
 
+### 开屏与宣传
+
+* App 冷启动先亮出**开屏页**（900ms），App 内与官网用同一张宣传图
+* 宣传语「**爽快阅读，想看就看**」只存在 `assets/brand/slogan.txt` 一个文件里；改完重跑 `assets/brand/generate_slogan.ps1`，App 开屏图、官网横幅、官网开屏页背景三处一起重新出
+* 官网是极简单页，**版本号自动获取**（读 GitHub 最新 Release），发一次版不用再手动改网页
+
 ### 桌宠「小墨」
 
-* 顶部常驻一只书页精灵，随阅读时长自然成长：**墨滴 → 纸兽 → 墨狐 → 书灵**
+* 顶部常驻一只书页精灵，随阅读时长自然成长：**墨滴 → 纸兽 → 墨狐 → 书灵**（养成周期按长期陪伴设计，第一阶约两周）
 * **全程同一个角色**：不管长到哪一形态，水滴头、页角耳、额头的朱红印都不会变，所以认得出是同一只
 * 会呼吸、会眨眼；没人理它也**自己玩**——跳两下、翻身、伸懒腰、打哈欠、抖一抖
 * **阅读时钉在顶部预留带**（不打扰正文），**其它界面在整屏范围内自由溜达**，走路时整只按方向翻面（尾巴在身后）
@@ -96,13 +106,20 @@ flutter build windows --release
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tool\shot.ps1 -Out build\shot.png -WaitMs 9000 -Dismiss
+powershell -ExecutionPolicy Bypass -File tool\\shot.ps1 -Out build\\shot.png -WaitMs 9000 -Dismiss
 ```
 
 重新生成应用图标（各密度自适应图层 + 传统图标 + Windows ico）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File assets\icon\generate_icon.ps1
+powershell -ExecutionPolicy Bypass -File assets\\icon\\generate\_icon.ps1
+```
+
+宣传语与开屏图：改 `assets/brand/slogan.txt` 里的三行文案，然后重跑生成器，
+App 开屏图、官网横幅和开屏页背景会一起重新出（不需要重画）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File assets\\brand\\generate\_slogan.ps1
 ```
 
 ## 说明
@@ -110,3 +127,4 @@ powershell -ExecutionPolicy Bypass -File assets\icon\generate_icon.ps1
 仅用于个人学习与技术研究。应用不捆绑、不分发、不存储任何受版权保护的书籍内容；内置的第三方书源仅提供索引与阅读工具，内容版权归各站点与作者所有，请支持正版阅读。
 
 正文字体「霞鹜文楷 Lite Regular」以 OFL-1.1 授权在线分发，许可全文随 Release 的 `fonts/OFL.txt` 一并提供。
+
