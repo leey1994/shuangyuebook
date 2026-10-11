@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:fast_gbk/fast_gbk.dart';
 import 'package:http/http.dart' as http;
 
 /// HTTP 响应封装。
@@ -186,13 +187,14 @@ class Net {
     );
   }
 
-  /// 极简 GBK 容错：按字节高位猜测。仅在非 UTF-8 声明时使用。
+  /// 真正的 GBK/GB2312 解码（fast_gbk，与 legado 引擎同源）。
+  /// 仅当页面声明 charset=gb/GB 时调用；解码失败再退回 utf8（allowMalformed），
+  /// 避免整体失败。原先的 latin1 兜底会把中文字节拆成乱码，故此处改用 fast_gbk。
   static String gbkFallback(List<int> bytes) {
     try {
-      return utf8.decode(bytes);
+      return gbk.decode(bytes);
     } catch (_) {
-      // 无法精确解码时保留原始替换字符，避免整体失败
-      return latin1.decode(bytes);
+      return utf8.decode(bytes, allowMalformed: true);
     }
   }
 }
