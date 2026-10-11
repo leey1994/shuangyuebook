@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -79,6 +80,37 @@ class ReaderPrefs {
   String get layoutSignature =>
       '$fontSize|$lineHeight|$letterSpacing|$indentFirstLine|$fontIndex|'
       '$marginH|$marginV|${pageMode.name}|$bgIndex';
+
+  /// 从持久化 map 恢复；缺省/未知字段保留当前（默认）值，兼容旧版本与新增字段。
+  /// 新增/重命名字段只改这里，init 不再逐行手写，降低迁移遗漏。
+  void applyFrom(Map<String, dynamic>? m) {
+    if (m == null) return;
+    fontSize = (m['fontSize'] as num?)?.toDouble() ?? fontSize;
+    lineHeight = (m['lineHeight'] as num?)?.toDouble() ?? lineHeight;
+    // 旧版三主题(0白天/1护眼/2夜间)迁移为两主题(0锦绣白/1极光黑)
+    final rawTheme = m['theme'];
+    theme = rawTheme is int ? (rawTheme == 2 ? 1 : 0) : theme;
+    final modeName = m['pageMode'] as String?;
+    if (modeName != null) {
+      pageMode = PageMode.fromName(modeName);
+    } else if (m['paginate'] is bool) {
+      // 老版本只有 paginate(bool)，false → 滚动
+      pageMode = (m['paginate'] as bool) ? PageMode.slide : PageMode.scroll;
+    }
+    autoCache = m['autoCache'] as int? ?? autoCache;
+    ttsRate = (m['ttsRate'] as num?)?.toDouble() ?? ttsRate;
+    ttsPitch = (m['ttsPitch'] as num?)?.toDouble() ?? ttsPitch;
+    ttsVoice = m['ttsVoice'] as String? ?? ttsVoice;
+    edgeNotice = m['edgeNotice'] as bool? ?? edgeNotice;
+    marginH = (m['marginH'] as num?)?.toDouble() ?? marginH;
+    marginV = (m['marginV'] as num?)?.toDouble() ?? marginV;
+    letterSpacing = (m['letterSpacing'] as num?)?.toDouble() ?? letterSpacing;
+    indentFirstLine = m['indentFirstLine'] as bool? ?? indentFirstLine;
+    fontIndex = m['fontIndex'] as int? ?? fontIndex;
+    showHeader = m['showHeader'] as bool? ?? showHeader;
+    showFooter = m['showFooter'] as bool? ?? showFooter;
+    bgIndex = m['bgIndex'] as int? ?? bgIndex;
+  }
 }
 
 /// 全局状态：书架、历史、书签、偏好、章节离线缓存。
@@ -102,6 +134,9 @@ class AppStore extends ChangeNotifier {
   Directory? _cacheDir;
   bool inited = false;
 
+  /// 滚动中进度落盘合并定时器（见 _scheduleProgressSave）。
+  Timer? _progressSaveTimer;
+
   Future<void> init() async {
     if (inited) return;
     try {
@@ -111,33 +146,19 @@ class AppStore extends ChangeNotifier {
     }
     final sp = _sp;
     if (sp != null) {
-      prefs.fontSize = sp.getDouble('fontSize') ?? prefs.fontSize;
-      prefs.lineHeight = sp.getDouble('lineHeight') ?? prefs.lineHeight;
-      // 旧版三主题(0白天/1护眼/2夜间)迁移为两主题(0锦绣白/1极光黑)
-      prefs.theme = (sp.getInt('theme') ?? 0) == 2 ? 1 : 0;
-      // 翻页方式：新字段优先；老版本只有 paginate(bool)，false → 滚动
-      final modeName = sp.getString('pageMode');
-      if (modeName != null) {
-        prefs.pageMode = PageMode.fromName(modeName);
-      } else {
-        prefs.pageMode =
-            (sp.getBool('paginate') ?? true) ? PageMode.slide : PageMode.scroll;
+      // 阅读偏好统一读取为 map 后由 ReaderPrefs.applyFrom 应用；
+      // 新增/重命名字段只改 applyFrom，这里不再逐行手写，降低迁移遗漏。
+      final pm = <String, dynamic>{};
+      for (final k in const [
+        'fontSize', 'lineHeight', 'theme', 'pageMode', 'paginate',
+        'autoCache', 'ttsRate', 'ttsPitch', 'ttsVoice', 'edgeNotice',
+        'marginH', 'marginV', 'letterSpacing', 'indentFirstLine',
+        'fontIndex', 'showHeader', 'showFooter', 'bgIndex',
+      ]) {
+        final v = sp.get(k);
+        if (v != null) pm[k] = v;
       }
-      prefs.autoCache = sp.getInt('autoCache') ?? prefs.autoCache;
-      prefs.ttsRate = sp.getDouble('ttsRate') ?? prefs.ttsRate;
-      prefs.ttsPitch = sp.getDouble('ttsPitch') ?? prefs.ttsPitch;
-      prefs.ttsVoice = sp.getString('ttsVoice') ?? prefs.ttsVoice;
-      prefs.edgeNotice = sp.getBool('edgeNotice') ?? prefs.edgeNotice;
-      prefs.marginH = sp.getDouble('marginH') ?? prefs.marginH;
-      prefs.marginV = sp.getDouble('marginV') ?? prefs.marginV;
-      prefs.letterSpacing =
-          sp.getDouble('letterSpacing') ?? prefs.letterSpacing;
-      prefs.indentFirstLine =
-          sp.getBool('indentFirstLine') ?? prefs.indentFirstLine;
-      prefs.fontIndex = sp.getInt('fontIndex') ?? prefs.fontIndex;
-      prefs.showHeader = sp.getBool('showHeader') ?? prefs.showHeader;
-      prefs.showFooter = sp.getBool('showFooter') ?? prefs.showFooter;
-      prefs.bgIndex = sp.getInt('bgIndex') ?? prefs.bgIndex;
+      prefs.applyFrom(pm);
       shelf = _loadList('shelf');
       history = _loadList('history');
       final bm = sp.getString('bookmarks');
@@ -505,7 +526,22 @@ class AppStore extends ChangeNotifier {
       shelf.insert(0, h);
     }
     if (history.length > 100) history.removeRange(100, history.length);
-    _save(notify: !silent, bookmarks: false);
+    if (silent) {
+      _scheduleProgressSave();
+    } else {
+      _progressSaveTimer?.cancel();
+      _save(notify: true, bookmarks: false);
+    }
+  }
+
+  /// 滚动中高频进度更新的合并落盘：1 秒内多次调用只真正写一次
+  /// SharedPreferences，避免每帧写盘。非安静（翻页/退出）路径会立即落盘并取消定时器。
+  void _scheduleProgressSave() {
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = Timer(const Duration(seconds: 1), () {
+      _progressSaveTimer = null;
+      _save(notify: false, bookmarks: false);
+    });
   }
 
   void clearHistory() {
@@ -593,7 +629,12 @@ class AppStore extends ChangeNotifier {
     final f = _bookFile(bookUrl);
     if (f == null) return;
     try {
-      await f.writeAsString(jsonEncode(j), flush: true);
+      // 先写临时文件再原子 rename，避免下载中途崩溃/被杀留下半截 JSON，
+      // 导致整本书缓存损坏（原实现直接覆盖，损坏即整本重抓）。
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(jsonEncode(j), flush: true);
+      if (await f.exists()) await f.delete();
+      await tmp.rename(f.path);
     } catch (_) {}
   }
 
