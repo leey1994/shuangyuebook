@@ -39,7 +39,6 @@ flutter:
   assets:
     - assets/images/ # 无封面时按书名稳定分配的占位插画
     - assets/sources/ # 内置书源资产（当前只当清理清单用，导入区默认为空）
-    - assets/brand/   # 开屏宣传图
 
   # 注：正文字体「霞鹜文楷」已改为**在线按需下载**（见 lib/data/online_font.dart），
   # 不再随包分发 —— 一个字重就有 13.5MB，APK 体积几乎翻倍。

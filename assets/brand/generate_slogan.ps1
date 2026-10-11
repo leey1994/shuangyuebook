@@ -151,86 +151,38 @@ function Draw-Text($g, [float]$cx, [float]$top, [float]$colW,
     }
 }
 
-# Two arrangements: stacked for portrait/square, side-by-side for landscape.
-# Deriving every size from min(w,h) keeps one function usable for all three
-# exports - scaling everything by width blows the vertical stack off-canvas.
+# Website hero banner. Landscape-only: the mark sits left, the text block right.
+#
+# Sizes come from the canvas HEIGHT, not the width. An earlier version scaled
+# everything by width and laid the text out in a vertical stack, which on a
+# 1600x640 canvas ran the slogan straight off the bottom of the image.
 function New-Slogan([int]$w, [int]$h) {
     $pair = New-Gfx $w $h
     $bmp = $pair[0]; $g = $pair[1]
     Fill-Bg $g $w $h
-
     $fw = [float]$w; $fh = [float]$h
-    $min = [math]::Min($fw, $fh)
-    $landscape = ($fw / $fh) -gt 1.35
-
-    if ($landscape) {
-        $r = [float]($fh * 0.20)
-        Draw-Mark $g ([float]($fw * 0.245)) ([float]($fh * 0.50)) $r
-        Draw-Text $g ([float]($fw * 0.655)) ([float]($fh * 0.20)) ([float]($fw * 0.50)) `
-            ([float]($fh * 0.20)) ([float]($fh * 0.088)) ([float]($fh * 0.046))
-    }
-    else {
-        $r = [float]($min * 0.125)
-        $markCy = [float]($fh * 0.265)
-        Draw-Mark $g ([float]($fw * 0.50)) $markCy $r
-        $colW = [float]($fw * 0.78)
-        $tCap = [float]($min * 0.155)
-        $tFs = Fit-Font $g $title $colW $tCap
-        $top = [float]($markCy + $r * 1.25 + $tFs * 0.30)
-        Draw-Text $g ([float]($fw * 0.50)) $top $colW $tCap ([float]($min * 0.072)) ([float]($min * 0.036))
-    }
-
+    Draw-Mark $g ([float]($fw * 0.245)) ([float]($fh * 0.50)) ([float]($fh * 0.20))
+    Draw-Text $g ([float]($fw * 0.655)) ([float]($fh * 0.20)) ([float]($fw * 0.50)) `
+        ([float]($fh * 0.20)) ([float]($fh * 0.088)) ([float]($fh * 0.046))
     $g.Dispose()
     return $bmp
 }
 
-# app splash - shipped inside the APK, one file per orientation
-$p = New-Slogan 900 1600
-$p.Save((Join-Path $brand 'splash-portrait.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$p.Dispose()
-Write-Host "  assets/brand/splash-portrait.png (900x1600)"
-
-$l = New-Slogan 1600 640
-$l.Save((Join-Path $brand 'splash-landscape.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$l.Dispose()
-Write-Host "  assets/brand/splash-landscape.png (1600x640)"
-
-$old = Join-Path $brand 'splash.png'
-if (Test-Path $old) { Remove-Item $old -Force }
-
-# website hero (landscape) - shipped on docs/assets
+# website hero banner - the only thing this generator emits now
 $web = New-Slogan 1600 640
 $web.Save((Join-Path $webOut 'slogan.png'), [System.Drawing.Imaging.ImageFormat]::Png)
 $web.Dispose()
 Write-Host "  docs/assets/slogan.png (1600x640)"
 
-# Backdrop for splash.html - gradient + mark ONLY, no baked-in text.
-#
-# Why no text: the page puts the slogan in real HTML (selectable, screen-reader
-# reachable, and it reflows). Baking it into a 1080x1920 portrait image meant a
-# landscape viewport got it `cover`-cropped, and the buttons landed on top of it.
-# One decoration-only backdrop works at every aspect ratio.
-function New-Backdrop([int]$w, [int]$h) {
-    $pair = New-Gfx $w $h
-    $bmp = $pair[0]; $g = $pair[1]
-    Fill-Bg $g $w $h
-    $min = [math]::Min([float]$w, [float]$h)
-    Draw-Mark $g ([float]($w / 2)) ([float]($h * 0.24)) ([float]($min * 0.10))
-    $g.Dispose()
-    return $bmp
+# tidy leftovers from earlier iterations
+foreach ($stale in @(
+        (Join-Path $brand 'splash.png'),
+        (Join-Path $brand 'splash-portrait.png'),
+        (Join-Path $brand 'splash-landscape.png'),
+        (Join-Path $webOut 'splash-bg.png'),
+        (Join-Path $webOut 'bg-portrait.png'),
+        (Join-Path $webOut 'bg-landscape.png'))) {
+    if (Test-Path $stale) { Remove-Item $stale -Force }
 }
-
-$bp = New-Backdrop 1080 1920
-$bp.Save((Join-Path $webOut 'bg-portrait.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$bp.Dispose()
-Write-Host "  docs/assets/bg-portrait.png (1080x1920)"
-
-$bl = New-Backdrop 1600 900
-$bl.Save((Join-Path $webOut 'bg-landscape.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$bl.Dispose()
-Write-Host "  docs/assets/bg-landscape.png (1600x900)"
-
-$oldBg = Join-Path $webOut 'splash-bg.png'
-if (Test-Path $oldBg) { Remove-Item $oldBg -Force }
 
 Write-Host "done"

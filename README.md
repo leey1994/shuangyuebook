@@ -6,18 +6,16 @@ Flutter 打造的双端（Android / Windows）小说阅读器——内置固化�
 
 当前版本：**v0.0.1**
 
-静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/) · 开屏页：[splash.html](https://leey1994.github.io/shuangyuebook/splash.html) 
+静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/)
 
 ![爽阅 · 爽快阅读，想看就看](docs/assets/slogan.png)
 
 ## 功能
 
-### 开屏与宣传
+### 官网
 
-* App 冷启动先亮出**开屏页**（900ms），**铺满整个窗口**（桌面端连自绘标题栏一起盖住，不留缝）
-* 宣传语「**爽快阅读，想看就看**」贯穿 App 开屏、官网首页与官网开屏页
-* 桌面端固定横版开屏，移动端按屏幕方向自动切换横竖版
-* 官网是极简单页，**版本号自动获取**（读 GitHub 最新 Release），发一次版不用再手动改网页
+* 极简单页，一条中性色阶、一种强调色，没有框架没有构建
+* **版本号自动获取**：页面读 GitHub 最新 Release 的 tag，取不到退回公告文件，再退回页面默认值 —— 发一次版网页自己跟上，不用手改 HTML
 
 ### 桌宠「小墨」
 
