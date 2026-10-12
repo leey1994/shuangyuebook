@@ -4,7 +4,7 @@
 
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
-当前版本：**v0.0.1**
+当前版本：**v0.0.2**
 
 静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/)
 
@@ -106,8 +106,8 @@ flutter test
 
 # APP_VERSION 取自 pubspec.yaml 的 version，必须显式传 ——
 # 「设置 → 关于」与自动更新都靠它判断有没有新版本。
-flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=0.0.1
-flutter build windows --release --dart-define=APP_VERSION=0.0.1
+flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=0.0.2
+flutter build windows --release --dart-define=APP_VERSION=0.0.2
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：

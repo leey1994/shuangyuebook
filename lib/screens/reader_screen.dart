@@ -423,6 +423,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     int startOffset = 0,
   }) async {
     if (_detail == null || idx < 0 || idx >= _detail!.chapters.length) return;
+    final g = _gen + 1; // 本次加载的代数：await 返回时若已被新加载取代则丢弃
     setState(() {
       _gen++; // 作废进行中的连载加载
       _chIdx = idx;
@@ -441,7 +442,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     try {
       final paras =
           await _store.chapterText(_src, _detail!, _detail!.chapters[idx]);
-      if (!mounted) return;
+      if (!mounted || g != _gen) return; // 已切去别的章：迟到结果丢弃，
+      // 否则会把旧章正文盖到新章上（快速连跳目录/滑杆时的竞态）
       setState(() {
         _paras = paras;
         _loading = false;
@@ -457,22 +459,21 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (_startOffset > 0) {
         // 滚动模式恢复位置
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollCtrl.hasClients) {
-            _scrollCtrl.jumpTo(_startOffset
-                .toDouble()
-                .clamp(0, _scrollCtrl.position.maxScrollExtent)
-                .toDouble());
-          }
+          if (g != _gen || !_scrollCtrl.hasClients) return;
+          _scrollCtrl.jumpTo(_startOffset
+              .toDouble()
+              .clamp(0, _scrollCtrl.position.maxScrollExtent)
+              .toDouble());
         });
       }
       // 滚动模式：本章不足一屏（短章）时自动续载下一章
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_prefs.paginate && _scrollCtrl.hasClients) {
+        if (mounted && g == _gen && !_prefs.paginate && _scrollCtrl.hasClients) {
           if (_scrollCtrl.position.maxScrollExtent < 300) _loadMore();
         }
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || g != _gen) return; // 过期加载的报错不打扰新章节
       setState(() {
         _loading = false;
         _error = e;
@@ -1969,6 +1970,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _showToc() {
     final d = _detail;
     if (d == null) return;
+    final chIdx = _chIdx;
+    final ctrl = ScrollController();
+    final probeKey = GlobalKey(); // 第 0 项：量实际行高（行高随系统字号缩放）
+    final curKey = GlobalKey(); // 当前章：跳转后精确对齐
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1983,18 +1988,22 @@ class _ReaderScreenState extends State<ReaderScreen>
             ),
             Expanded(
               child: ListView.builder(
+                controller: ctrl,
                 itemCount: d.chapters.length,
                 itemBuilder: (ctx2, i) => ListTile(
+                  key: i == 0
+                      ? probeKey
+                      : (i == chIdx ? curKey : null),
                   dense: true,
                   title: Text(
                     d.chapters[i].title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: i == _chIdx
+                      color: i == chIdx
                           ? Theme.of(ctx2).colorScheme.primary
                           : null,
-                      fontWeight: i == _chIdx ? FontWeight.bold : null,
+                      fontWeight: i == chIdx ? FontWeight.bold : null,
                     ),
                   ),
                   onTap: () {
@@ -2007,7 +2016,34 @@ class _ReaderScreenState extends State<ReaderScreen>
           ],
         ),
       ),
-    );
+    ).whenComplete(ctrl.dispose);
+    // 打开后定位到当前章节：各条目等高（单行 dense ListTile），按第 0 项
+    // 实测行高算目标位（列表从顶部构建，第 0 项必然存在），平滑滚过去；
+    // 落点与实际行高若有微小偏差，再对当前章条目 ensureVisible 精修。
+    // 直接 ensureVisible 不行 —— 跳转前远端条目还没被 builder 构建。
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!ctrl.hasClients) return;
+      final box = probeKey.currentContext?.findRenderObject() as RenderBox?;
+      final h = box?.size.height ?? 36;
+      if (h <= 0) return;
+      final pos = ctrl.position;
+      final target =
+          (chIdx * h).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
+      if ((target - pos.pixels).abs() < 1) return;
+      try {
+        await ctrl.animateTo(target,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic);
+      } catch (_) {
+        return; // 动画期间面板被关掉 / controller 已释放
+      }
+      if (!ctrl.hasClients) return;
+      final c = curKey.currentContext;
+      if (c == null || !c.mounted) return;
+      Scrollable.ensureVisible(c,
+          duration: const Duration(milliseconds: 120),
+          alignment: 0.5);
+    });
   }
 
   void _showBookmarks() {

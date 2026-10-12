@@ -67,6 +67,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     try {
       final more =
           await _src.fetchDetail(widget.book, nextUrl: d.nextChaptersUrl);
+      if (!mounted) return; // 拉取期间退出详情页：迟到结果丢弃，别对死 State setState
       final seen = d.chapters.map((c) => c.url).toSet();
       final merged = [...d.chapters];
       for (final c in more.chapters) {
