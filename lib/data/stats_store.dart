@@ -10,6 +10,33 @@ import 'package:flutter/foundation.dart';
 
 import '../platform/native_bridge.dart';
 
+/// 一块成就徽章：[met] 判断当前统计是否达标。
+class ReadingBadge {
+  ReadingBadge(this.id, this.name, this.hint, this.met);
+
+  final String id;
+  final String name; // 徽章墙 / 气泡里用的短名
+  final String hint; // 徽章墙上的达标说明
+  final bool Function(StatsStore) met;
+}
+
+/// 里程碑清单：连续天数 / 累计时长 / 读完书数。列表顺序即徽章墙展示顺序。
+final List<ReadingBadge> kReadingBadges = [
+  ReadingBadge('streak3', '三日之约', '连续阅读 3 天', (s) => s.streak >= 3),
+  ReadingBadge('streak7', '七日不辍', '连续阅读 7 天', (s) => s.streak >= 7),
+  ReadingBadge('streak14', '两周同行', '连续阅读 14 天', (s) => s.streak >= 14),
+  ReadingBadge('streak30', '满月守护', '连续阅读 30 天', (s) => s.streak >= 30),
+  ReadingBadge(
+      'hours10', '十万秒', '累计阅读 10 小时', (s) => s.totalSeconds >= 36000),
+  ReadingBadge(
+      'hours50', '五十小时', '累计阅读 50 小时', (s) => s.totalSeconds >= 180000),
+  ReadingBadge(
+      'hours100', '百小时', '累计阅读 100 小时', (s) => s.totalSeconds >= 360000),
+  ReadingBadge('books1', '开卷有益', '读完第一本书', (s) => s.finishedBooks >= 1),
+  ReadingBadge('books10', '十卷在手', '读完 10 本', (s) => s.finishedBooks >= 10),
+  ReadingBadge('books50', '半百书虫', '读完 50 本', (s) => s.finishedBooks >= 50),
+];
+
 /// 阅读统计：总时长 / 每日时长 / 读完书数。
 class StatsStore extends ChangeNotifier {
   StatsStore({AppDirs? dirsOverride}) : _dirsOverride = dirsOverride;
@@ -27,8 +54,15 @@ class StatsStore extends ChangeNotifier {
   int _totalSeconds = 0;
   int _finishedBooks = 0;
   final Map<String, int> _days = {};
+  final Set<String> _badges = {};
   File? _file;
   Timer? _saveTimer;
+
+  /// 已点亮的徽章 id。
+  Set<String> get badges => Set.unmodifiable(_badges);
+
+  /// 新徽章达成时的通知（main 注入桌宠联动，避免 data → pet 反向依赖）。
+  static void Function(ReadingBadge)? onBadgeEarned;
 
   int get totalSeconds => _totalSeconds;
   int get finishedBooks => _finishedBooks;
@@ -85,11 +119,18 @@ class StatsStore extends ChangeNotifier {
               if (v is num) _days[k.toString()] = v.toInt();
             });
           }
+          final bd = data['badges'];
+          if (bd is List) {
+            _badges.addAll(bd.map((e) => e.toString()));
+          }
         }
       }
     } catch (_) {
       // 读取失败时从零开始
     }
+    // 老存档没有 badges 字段：把已达标的里程碑**静默**回填（不庆祝），
+    // 之后真正跨线时才冒泡。
+    _checkBadges(celebrate: false);
     notifyListeners();
   }
 
@@ -101,6 +142,7 @@ class StatsStore extends ChangeNotifier {
     final key = _dateKey(DateTime.now());
     _days[key] = (_days[key] ?? 0) + s;
     _saveSoon();
+    _checkBadges();
     notifyListeners();
   }
 
@@ -115,7 +157,28 @@ class StatsStore extends ChangeNotifier {
   void addFinishedBook() {
     _finishedBooks++;
     _saveSoon();
+    _checkBadges();
     notifyListeners();
+  }
+
+  /// 对照里程碑表，把新达标的徽章入册。[celebrate]=false 时只回填不庆祝。
+  void _checkBadges({bool celebrate = true}) {
+    final fresh = <ReadingBadge>[];
+    for (final b in kReadingBadges) {
+      if (!_badges.contains(b.id) && b.met(this)) {
+        _badges.add(b.id);
+        fresh.add(b);
+      }
+    }
+    if (fresh.isEmpty) return;
+    _saveSoon();
+    notifyListeners();
+    if (celebrate) {
+      // 按表序逐个通知，最后一条是最高档 —— 气泡只留一句，让最高的胜出
+      for (final b in fresh) {
+        onBadgeEarned?.call(b);
+      }
+    }
   }
 
   void _saveSoon() {
@@ -140,6 +203,7 @@ class StatsStore extends ChangeNotifier {
           'totalSeconds': _totalSeconds,
           'finishedBooks': _finishedBooks,
           'days': _days,
+          'badges': _badges.toList(),
         }),
       );
     } catch (_) {

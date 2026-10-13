@@ -197,6 +197,20 @@ class PetStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 直接冒泡一句自定义台词（成就徽章等带具体名称的场合，绕过动作表）。
+  /// 成就本来就罕见，不设动作冷却；[exp] 记入奖励经验。
+  void celebrate(String line, {int exp = 0, PetMood mood = PetMood.cheer}) {
+    if (exp > 0) {
+      _bonusExp += exp;
+      _prefs()?.setInt('petBonusExp', _bonusExp);
+    }
+    setMood(mood, const Duration(seconds: 4));
+    _bubble = line;
+    _bubbleSeq++;
+    checkStage();
+    notifyListeners();
+  }
+
   /// 摸一下。有冷却防连点刷经验，返回是否真的生效。
   bool pet() {
     final now = DateTime.now();

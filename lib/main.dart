@@ -110,6 +110,9 @@ Future<void> main(List<String> args) async {
     // 桌宠的偏好句柄接在 AppStore 上（反过来 import 会和 store 循环引用）
     PetStore.prefsProvider = () => AppStore.I.sp;
     PetStore.I.load();
+    // 成就徽章点亮时让小墨报喜（stats 不反向 import pet，走回调注入）
+    StatsStore.onBadgeEarned =
+        (b) => PetStore.I.celebrate('${b.name}达成！', exp: 10);
   } catch (_) {}
   try {
     // 在线正文字体：磁盘上已有就直接注册，冷启动不必重新下载

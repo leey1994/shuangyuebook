@@ -196,31 +196,16 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 输入框下方的进度条：已完成 / 总数 + 文字说明。
+  /// 输入框下方的进度条：3px 通栏细线，只表进度不带文字 ——
+  /// 「已完成 x/y · 已找到 n 本」由结果区空态和列表底部行负责，
+  /// 这里再压一行字只会把 AppBar 撑得又厚又花。
   PreferredSizeWidget _progressBar() => PreferredSize(
-        preferredSize: const Size.fromHeight(22),
-        child: Container(
-          height: 22,
-          color: Theme.of(context).colorScheme.surface,
-          child: Row(
-            children: [
-              Expanded(
-                child: LinearProgressIndicator(
-                  value: _total == 0 ? null : _done / _total,
-                  minHeight: 22,
-                  backgroundColor:
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  '$_done/$_total · 已找到 ${_results.length} 本',
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ),
-            ],
-          ),
+        preferredSize: const Size.fromHeight(3),
+        child: LinearProgressIndicator(
+          value: _total == 0 ? null : _done / _total,
+          minHeight: 3,
+          backgroundColor:
+              Theme.of(context).colorScheme.surfaceContainerHighest,
         ),
       );
 

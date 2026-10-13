@@ -25,6 +25,7 @@ enum PetAction {
   shelfView('换视图'),
   shelfRemove('移出书架'),
   shelfClear('清空书架'),
+  shelfUpdate('发现更新'),
   importLocal('导入本地书'),
 
   // 找书
@@ -171,6 +172,14 @@ PetReaction reactionFor(PetAction a, PetStage stage) => switch (a) {
           '清干净了。',
           '重新来过。',
           '空的也清爽。',
+        ]),
+      PetAction.shelfUpdate =>
+        const PetReaction(exp: 2, mood: PetMood.cheer, lines: [
+          '追的书更新了。',
+          '有新章了。',
+          '书架有动静。',
+          '来了来了。',
+          '更新到了，去看看。',
         ]),
       PetAction.importLocal =>
         const PetReaction(exp: 8, mood: PetMood.cheer, lines: [

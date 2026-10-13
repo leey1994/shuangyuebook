@@ -48,6 +48,8 @@ class StatsPage extends StatelessWidget {
               const SizedBox(height: 12),
               _weeklyCard(context, days, maxSeconds),
               const SizedBox(height: 12),
+              _badgeCard(context, stats),
+              const SizedBox(height: 12),
               _sourceCard(context),
             ],
           );
@@ -140,6 +142,73 @@ class StatsPage extends StatelessWidget {
                   ],
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 成就徽章墙：点亮的实色，未达成的灰显（留个盼头，悬停看达标条件）。
+  Widget _badgeCard(BuildContext context, StatsStore stats) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('成就徽章',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text('连续天数、阅读时长、读完的书',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final b in kReadingBadges)
+                  _badgeChip(context, b, stats.badges.contains(b.id)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _badgeChip(BuildContext context, ReadingBadge b, bool earned) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: b.hint,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: earned
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest.withValues(alpha: .4),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: earned ? scheme.primary : scheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              earned ? Icons.emoji_events : Icons.lock_outline,
+              size: 14,
+              color: earned ? scheme.onPrimaryContainer : scheme.outline,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              b.name,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: earned ? scheme.onPrimaryContainer : scheme.outline,
+              ),
+            ),
           ],
         ),
       ),

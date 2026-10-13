@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/shelf_sort.dart';
@@ -10,13 +12,47 @@ import 'local_import_page.dart';
 import 'reader_screen.dart';
 
 /// 书架 + 阅读历史。
-class ShelfScreen extends StatelessWidget {
+class ShelfScreen extends StatefulWidget {
   const ShelfScreen({super.key});
 
+  @override
+  State<ShelfScreen> createState() => _ShelfScreenState();
+}
+
+class _ShelfScreenState extends State<ShelfScreen> {
   static const _viewIcons = {
     ShelfViewMode.wide: Icons.view_agenda_outlined,
     ShelfViewMode.square: Icons.grid_on_outlined,
   };
+
+  /// 每个进程只自动补查一次；手动按钮不受此限。
+  static bool _sessionChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 首次进书架且距上次检查超过间隔：后台补一次，红点自己冒出来。
+    // 延迟两秒避开启动高峰，不与公告/版本检查抢网。
+    if (!_sessionChecked && AppStore.I.updateCheckDue) {
+      _sessionChecked = true;
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        unawaited(AppStore.I.checkShelfUpdates());
+      });
+    }
+  }
+
+  Future<void> _manualCheck() async {
+    final (updated, newCh, failed) = await AppStore.I.checkShelfUpdates();
+    if (!mounted) return;
+    final msg = updated > 0
+        ? '$updated 本书更新了 $newCh 章'
+        : (failed > 0 ? '暂无新章节（$failed 本检查失败）' : '暂无新章节');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      duration: const Duration(seconds: 2),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +62,20 @@ class ShelfScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('书架'),
           actions: [
+            ListenableBuilder(
+              listenable: AppStore.I,
+              builder: (context, _) => IconButton(
+                tooltip: '检查更新',
+                icon: AppStore.I.checkingUpdates
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
+                onPressed: AppStore.I.checkingUpdates ? null : _manualCheck,
+              ),
+            ),
             IconButton(
               tooltip: '切换视图（${AppStore.I.shelfView.label}）',
               icon: Icon(_viewIcons[AppStore.I.shelfView]),
@@ -202,7 +252,8 @@ class _EntryList extends StatelessWidget {
     final coverW = square ? w : 58.0;
     final coverH = square ? w * 1.16 : 78.0;
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
+    final upd = AppStore.I.shelfUpdates[e.book.url] ?? 0;
+    final card = InkWell(
       onTap: () => onOpen(e),
       onLongPress: () => _confirmRemove(context, e),
       borderRadius: BorderRadius.circular(12),
@@ -220,6 +271,33 @@ class _EntryList extends StatelessWidget {
             ? _squareCard(context, e, coverW, coverH)
             : _wideCard(context, e, coverW, coverH),
       ),
+    );
+    if (upd <= 0) return card;
+    // 追更角标：右上角红药丸，打开书（章节基线前进）即消
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        card,
+        Positioned(
+          top: 6,
+          right: 6,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: scheme.error,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              upd > 99 ? '更新 99+' : '更新 +$upd',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: scheme.onError,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

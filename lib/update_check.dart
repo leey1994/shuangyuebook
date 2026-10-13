@@ -12,7 +12,7 @@ import 'platform/native_bridge.dart';
 
 /// 应用版本：构建时由 --dart-define=APP_VERSION 注入（取自 pubspec.yaml 的 version）。
 const String kAppVersion =
-    String.fromEnvironment('APP_VERSION', defaultValue: '0.0.2');
+    String.fromEnvironment('APP_VERSION', defaultValue: '0.0.3');
 
 const String _repo = 'leey1994/shuangyuebook';
 

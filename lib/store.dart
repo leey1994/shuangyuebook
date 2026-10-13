@@ -149,6 +149,16 @@ class AppStore extends ChangeNotifier {
         } catch (_) {}
       }
       searchHistory = sp.getStringList('searchHistory') ?? [];
+      final su = sp.getString('shelfUpdates');
+      if (su != null) {
+        try {
+          shelfUpdates = (jsonDecode(su) as Map<String, dynamic>)
+              .map((k, v) => MapEntry(k, (v as num).toInt()));
+        } catch (_) {}
+      }
+      final luc = sp.getInt('shelfUpdateCheckAt');
+      _lastUpdateCheck =
+          luc == null ? null : DateTime.fromMillisecondsSinceEpoch(luc);
       _shelfSort = shelfSortModeFrom(sp.getString('shelfSort'));
       _shelfAscending =
           sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
@@ -447,6 +457,7 @@ class AppStore extends ChangeNotifier {
 
   void removeFromShelf(String bookUrl) {
     shelf.removeWhere((e) => e.book.url == bookUrl);
+    if (shelfUpdates.remove(bookUrl) != null) _saveUpdates();
     _save(history: false, bookmarks: false);
     _pet(PetAction.shelfRemove);
   }
@@ -463,7 +474,11 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    if (changed) _save(bookmarks: false);
+    // 基线前进 = 用户看过最新目录：追更角标一并清掉
+    if (changed) {
+      if (shelfUpdates.remove(bookUrl) != null) _saveUpdates();
+      _save(bookmarks: false);
+    }
   }
 
   /// 更新阅读进度（同时写书架与历史）。
@@ -498,7 +513,12 @@ class AppStore extends ChangeNotifier {
       return e;
     }
 
+    final prevCount = shelfEntry(b.url)?.chapterCount ?? 0;
     final h = upsert(history);
+    // 阅读进度带着更大的章节数 = 详情已刷新：追更角标视为已读
+    if (h.chapterCount > prevCount && shelfUpdates.remove(b.url) != null) {
+      _saveUpdates();
+    }
     final si = shelf.indexWhere((e) => e.book.url == b.url);
     if (si >= 0) {
       shelf.removeAt(si);
@@ -621,6 +641,87 @@ class AppStore extends ChangeNotifier {
     final j = await _loadBookJson(bookUrl);
     final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
     return texts.length;
+  }
+
+  /// 读取已缓存的章节正文（书内搜索用）：chapterUrl → 段落数组。
+  Future<Map<String, List<String>>> cachedTexts(String bookUrl) async {
+    final j = await _loadBookJson(bookUrl);
+    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
+    final out = <String, List<String>>{};
+    texts.forEach((k, v) {
+      if (v is List) out[k] = v.map((e) => e.toString()).toList();
+    });
+    return out;
+  }
+
+  // ---------- 追更红点 ----------
+
+  /// 书架追更角标：bookUrl → 新增章节数（自上次打开以来）。
+  Map<String, int> shelfUpdates = {};
+  bool checkingUpdates = false;
+  DateTime? _lastUpdateCheck;
+
+  /// 自动检查的最小间隔；手动按钮不受它限制。
+  static const Duration kUpdateCheckMinInterval = Duration(hours: 6);
+
+  /// 距上次检查是否已超过间隔（书架页进屏时据此决定要不要自动补一刀）。
+  bool get updateCheckDue {
+    final last = _lastUpdateCheck;
+    return last == null ||
+        DateTime.now().difference(last) >= kUpdateCheckMinInterval;
+  }
+
+  void _saveUpdates() {
+    _sp?.setString('shelfUpdates', jsonEncode(shelfUpdates));
+  }
+
+  /// 检查书架连载更新：逐本拉最新目录，对比已知章节数。
+  ///
+  /// 返回 (更新书数, 新增章节数, 检查失败数)。跳过本地书与没有基线
+  /// （从没打开过详情）的书；网络失败单本不拖垮整轮。5 本并发一轮，
+  /// 兼顾速度与对书源的礼貌。
+  Future<(int, int, int)> checkShelfUpdates() async {
+    if (checkingUpdates) return (0, 0, 0);
+    checkingUpdates = true;
+    notifyListeners();
+    var updated = 0, newCh = 0, failed = 0;
+    try {
+      final targets = shelf
+          .where((e) =>
+              e.book.sourceId != LocalSource.sourceId && e.chapterCount > 0)
+          .toList();
+      for (var i = 0; i < targets.length; i += 5) {
+        final chunk = targets.skip(i).take(5);
+        await Future.wait(chunk.map((e) async {
+          final src = sourceById(e.book.sourceId);
+          if (src == null) return; // 书源已删：静默跳过
+          try {
+            final d = await src.fetchDetail(e.book);
+            final remote = d.chapters.length;
+            final known = e.chapterCount;
+            if (remote > known) {
+              shelfUpdates[e.book.url] = remote - known;
+              updated++;
+              newCh += remote - known;
+            } else if (shelfUpdates.remove(e.book.url) != null) {
+              // 远端不再有超出已知的章节：清掉过期角标
+            }
+          } catch (_) {
+            failed++;
+          }
+        }));
+      }
+      _lastUpdateCheck = DateTime.now();
+      _sp?.setInt(
+          'shelfUpdateCheckAt', _lastUpdateCheck!.millisecondsSinceEpoch);
+      _saveUpdates();
+      notifyListeners();
+    } finally {
+      checkingUpdates = false;
+      notifyListeners();
+    }
+    if (updated > 0) _pet(PetAction.shelfUpdate);
+    return (updated, newCh, failed);
   }
 
   /// 离线兜底：读取缓存的目录。

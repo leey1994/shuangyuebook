@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -51,6 +52,15 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       ),
     );
   }
+}
+
+/// 每次刷新随机抽一个子集：先洗牌，再取 [ceil(len/2), len] 条。
+/// 配合 [_interleave] 的跨源交错，大部分刷新的构成都不一样。
+List<Book> _sample(List<Book> books, Random rng) {
+  if (books.length < 3) return books;
+  final pool = [...books]..shuffle(rng);
+  final minN = (pool.length + 1) ~/ 2;
+  return pool.take(minN + rng.nextInt(pool.length - minN + 1)).toList();
 }
 
 /// 各源标题列表轮询交错合并（每个源都露头，避免被单一源刷屏）。
@@ -109,6 +119,9 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
   /// 已上屏的推荐按源分组，供下一源到达时重新交错（保证各源轮流露头）。
   final Map<String, List<Book>> _bySource = {};
 
+  /// 抽样用的随机源：进程内复用，每次刷新拿到的子集都不同。
+  final _rng = Random();
+
   bool _loading = true;
   Object? _error;
 
@@ -147,7 +160,8 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
       if (!mounted || gen != _gen) return;
       setState(() {
         _done++;
-        _bySource[s.id] = books;
+        // 随机子集 + 交错：每次刷新各源贡献的条数和书目都不同
+        _bySource[s.id] = _sample(books, _rng);
         _home = _interleave(_bySource.values.toList());
         // 一旦有书可看就撤掉转圈，不再空等
         if (_home.isNotEmpty) _loading = false;
@@ -172,7 +186,7 @@ class _HomeTabState extends State<_HomeTab> with AutomaticKeepAliveClientMixin {
       }));
       if (!mounted || gen != _gen) return;
       setState(() {
-        _rank = _interleave(pages);
+        _rank = _interleave(pages.map((p) => _sample(p, _rng)).toList());
         _loading = false;
       });
     } catch (_) {

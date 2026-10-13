@@ -26,6 +26,7 @@ import '../ui/pet_top_band.dart';
 import '../ui/reader/cover_turn.dart';
 import '../ui/reader/page_snap_physics.dart';
 import '../widgets.dart';
+import 'book_search_sheet.dart';
 
 /// 阅读器：左右翻页 / 上下滚动双模式，
 /// 目录、进度条、字号行距、主题、书签、离线、换源。
@@ -647,6 +648,42 @@ class _ReaderScreenState extends State<ReaderScreen>
     _loadChapter(idx);
   }
 
+  void _showSearch() {
+    final d = _detail;
+    if (d == null) return;
+    showBookSearch(context, d, _jumpToHit);
+  }
+
+  /// 书内搜索跳转：载入目标章后定位到段落。
+  /// 翻页模式按「页首段落探针」反查页码；滚动模式复用听书的段落跟随。
+  void _jumpToHit(int chIdx, int paraIdx) {
+    if (_detail == null) return;
+    if (chIdx < 0 || chIdx >= _detail!.chapters.length) return;
+    setState(() => _menu = false);
+    _loadChapter(chIdx).then((_) {
+      if (!mounted || _chIdx != chIdx) return;
+      if (_prefs.paginate) {
+        // 等这一帧把页排出来，再按段落探针找页
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || paraIdx >= _paras.length) return;
+          final para = _paras[paraIdx];
+          // 长段可能被切成多页：用前 8 字探针找它的第一页
+          final probe = para.substring(0, para.length < 8 ? para.length : 8);
+          var pi = _currentPages
+              .indexWhere((page) => page.any((t) => t.contains(probe)));
+          if (pi < 0 && probe.length > 4) {
+            // 探针恰好被分页切开时退半步，用更短的头部再试
+            pi = _currentPages.indexWhere(
+                (page) => page.any((t) => t.contains(probe.substring(0, 4))));
+          }
+          if (pi >= 0) _setPage(pi, animate: false);
+        });
+      } else {
+        _followPara(paraIdx);
+      }
+    });
+  }
+
   // ---------- 主题配色（与全局主题同步） ----------
 
   /// 当前阅读配色。六种背景任选，越界时按全局主题回退。
@@ -1206,6 +1243,12 @@ class _ReaderScreenState extends State<ReaderScreen>
               icon: const Icon(Icons.list),
               color: c.fg,
               onPressed: _showToc,
+            ),
+            IconButton(
+              tooltip: '书内搜索',
+              icon: const Icon(Icons.search),
+              color: c.fg,
+              onPressed: _showSearch,
             ),
             IconButton(
               tooltip: '书签',
