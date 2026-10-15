@@ -1,0 +1,423 @@
+{
+  "builtin": [
+    {
+      "name": "🌙 七猫聚合 · 小说·听书·短剧·漫剧",
+      "url": "https://api-bc.wtzw.com/#qimao-aggregate-md3",
+      "host": "api-bc.wtzw.com",
+      "type": 0,
+      "ms": 52,
+      "med": 52,
+      "msMax": 166,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "起点·搜索目录修复V4",
+      "url": "https://www.qidian.com/#on-toc-v2",
+      "host": "qidian.com",
+      "type": 0,
+      "ms": 77,
+      "med": 78,
+      "msMax": 92,
+      "okCount": 3,
+      "status": 202
+    },
+    {
+      "name": "番茄小说",
+      "url": "https://api5-normal-sinfonlinec.fqnovel.com",
+      "host": "api5-normal-sinfonlinec.fqnovel.com",
+      "type": 0,
+      "ms": 99,
+      "med": 123,
+      "msMax": 133,
+      "okCount": 3,
+      "status": 404
+    },
+    {
+      "name": "kk笔趣阁(http://www.kkbiquge.net)",
+      "url": "http://www.kkbiquge.net",
+      "host": "kkbiquge.net",
+      "type": 0,
+      "ms": 167,
+      "med": 167,
+      "msMax": 357,
+      "okCount": 3,
+      "status": 403
+    },
+    {
+      "name": "新龙小说网",
+      "url": "https://wap.longshuwu.com",
+      "host": "wap.longshuwu.com",
+      "type": 0,
+      "ms": 193,
+      "med": 194,
+      "msMax": 554,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "智能书库(zzbook MO版)",
+      "url": "https://www.zzbook.net",
+      "host": "zzbook.net",
+      "type": 0,
+      "ms": 219,
+      "med": 222,
+      "msMax": 674,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "最终小说网",
+      "url": "https://www.zuizhong.net/",
+      "host": "zuizhong.net",
+      "type": 0,
+      "ms": 234,
+      "med": 234,
+      "msMax": 5154,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "若雨中文",
+      "url": "http://www.3yt.info",
+      "host": "3yt.info",
+      "type": 0,
+      "ms": 176,
+      "med": 353,
+      "msMax": 449,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "纸间",
+      "url": "https://www.zjread.cc",
+      "host": "zjread.cc",
+      "type": 0,
+      "ms": 348,
+      "med": 363,
+      "msMax": 785,
+      "okCount": 3,
+      "status": 503
+    },
+    {
+      "name": "uu书库",
+      "url": "https://www.uushuk.com",
+      "host": "uushuk.com",
+      "type": 0,
+      "ms": 377,
+      "med": 381,
+      "msMax": 1172,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "书豪小说网",
+      "url": "https://www.shuhaoxs.com/",
+      "host": "shuhaoxs.com",
+      "type": 0,
+      "ms": 431,
+      "med": 437,
+      "msMax": 1364,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "🌞大文学无错",
+      "url": "https://www.dwxwc.com",
+      "host": "dwxwc.com",
+      "type": 0,
+      "ms": 434,
+      "med": 440,
+      "msMax": 1643,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "🍅番茄小说(APP)",
+      "url": "https://fanqienovel.com",
+      "host": "fanqienovel.com",
+      "type": 0,
+      "ms": 511,
+      "med": 531,
+      "msMax": 593,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "鬼吹灯",
+      "url": "http://www.gdbzkz.com",
+      "host": "gdbzkz.com",
+      "type": 0,
+      "ms": 589,
+      "med": 605,
+      "msMax": 819,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "👍 同人小说🪜",
+      "url": "https://trxs.cc",
+      "host": "trxs.cc",
+      "type": 0,
+      "ms": 608,
+      "med": 617,
+      "msMax": 761,
+      "okCount": 3,
+      "status": 403
+    },
+    {
+      "name": "抖音小说(douyinxs.com)20260919",
+      "url": "https://www.douyinxs.com",
+      "host": "douyinxs.com",
+      "type": 0,
+      "ms": 635,
+      "med": 701,
+      "msMax": 725,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "书海阁(book.washai.net)",
+      "url": "https://book.washai.net",
+      "host": "book.washai.net",
+      "type": 0,
+      "ms": 701,
+      "med": 717,
+      "msMax": 929,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "伪速读谷²",
+      "url": "https://www.sudugu.cc",
+      "host": "sudugu.cc",
+      "type": 0,
+      "ms": 701,
+      "med": 734,
+      "msMax": 1041,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "魔丸小说",
+      "url": "https://www.mowan.lol",
+      "host": "mowan.lol",
+      "type": 0,
+      "ms": 717,
+      "med": 756,
+      "msMax": 1710,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "得奇小说网(deqixs.cc)20260904",
+      "url": "https://www.deqixs.cc",
+      "host": "deqixs.cc",
+      "type": 0,
+      "ms": 796,
+      "med": 849,
+      "msMax": 1445,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "霹雳书屋",
+      "url": "https://www.pilishuwu.com",
+      "host": "pilishuwu.com",
+      "type": 0,
+      "ms": 803,
+      "med": 870,
+      "msMax": 892,
+      "okCount": 3,
+      "status": 403
+    },
+    {
+      "name": "思路客",
+      "url": "https://www.szndz.com",
+      "host": "szndz.com",
+      "type": 0,
+      "ms": 691,
+      "med": 905,
+      "msMax": 1450,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "🌙 得奇小说",
+      "url": "https://www.deqixss.com/",
+      "host": "deqixss.com",
+      "type": 0,
+      "ms": 697,
+      "med": 926,
+      "msMax": 1331,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "搬山人",
+      "url": "https://www.banshanren.com",
+      "host": "banshanren.com",
+      "type": 0,
+      "ms": 940,
+      "med": 1022,
+      "msMax": 1034,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "74小说网",
+      "url": "https://www.74xswz.com",
+      "host": "74xswz.com",
+      "type": 0,
+      "ms": 562,
+      "med": 1186,
+      "msMax": 1849,
+      "okCount": 3,
+      "status": 200
+    },
+    {
+      "name": "故事族",
+      "url": "https://www.gushizu.com",
+      "host": "gushizu.com",
+      "type": 0,
+      "ms": 1340,
+      "med": 1368,
+      "msMax": 1592,
+      "okCount": 3,
+      "status": 200
+    }
+  ],
+  "optional": [
+    {
+      "name": "八叉书库",
+      "url": "https://bcshuku.com/",
+      "host": "bcshuku.com",
+      "type": 0,
+      "ms": null,
+      "med": null,
+      "msMax": null,
+      "okCount": 0,
+      "status": 0,
+      "why": "连接失败"
+    },
+    {
+      "name": "可乐小说（使用webView环境）",
+      "url": "https://www.kelexs.com/",
+      "host": "kelexs.com",
+      "type": 0,
+      "ms": null,
+      "med": null,
+      "msMax": null,
+      "okCount": 0,
+      "status": 0,
+      "why": "连接失败"
+    },
+    {
+      "name": "⚡📂有度中文",
+      "url": "https://www.yoduzw.com",
+      "host": "yoduzw.com",
+      "type": 0,
+      "ms": null,
+      "med": null,
+      "msMax": null,
+      "okCount": 0,
+      "status": 0,
+      "why": "连接失败"
+    },
+    {
+      "name": "海棠搜书🔞蓝海搜书",
+      "url": "https://www.lanlanbo.com",
+      "host": "lanlanbo.com",
+      "type": 0,
+      "ms": null,
+      "why": "成人内容，默认不含"
+    },
+    {
+      "name": "🔞腐小说",
+      "url": "https://fxshu.org",
+      "host": "fxshu.org",
+      "type": 0,
+      "ms": null,
+      "why": "成人内容，默认不含"
+    },
+    {
+      "name": "禁忌书屋·书贴聚合",
+      "url": "https://www.cool18.com/bbs4/",
+      "host": "cool18.com",
+      "type": 0,
+      "ms": null,
+      "why": "成人内容，默认不含"
+    },
+    {
+      "name": "🔞禁漫天堂API",
+      "url": "https://www.cdngwc.cc##禁漫API",
+      "host": "cdngwc.cc",
+      "type": 2,
+      "ms": null,
+      "why": "成人内容，默认不含"
+    },
+    {
+      "name": "🍅番茄短剧·漫剧(APP)",
+      "url": "https://api5-normal-sinfonlineb.fqnovel.com##短剧版",
+      "host": "api5-normal-sinfonlineb.fqnovel.com",
+      "type": 4,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "G社漫画/包子漫画",
+      "url": "https://manhuafree.com",
+      "host": "manhuafree.com",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "Z-Library（登录版）",
+      "url": "https://zh.zlib.bz",
+      "host": "zh.zlib.bz",
+      "type": 3,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "嬉皮漫画",
+      "url": "https://hipmh.com",
+      "host": "hipmh.com",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "🍊巴卡漫画",
+      "url": "https://baka3.cfd",
+      "host": "baka3.cfd",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "漫画团",
+      "url": "https://www.manhuatuan.com",
+      "host": "manhuatuan.com",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "MP3流媒体电台合集",
+      "url": "https://raw.giteeusercontent.com/xiteledeyayi/mp3-streaming/raw/master/MP3流媒体.json",
+      "host": "raw.giteeusercontent.com",
+      "type": 1,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "🔞禁漫天堂API",
+      "url": "https://www.cdngwc.cc##禁漫API",
+      "host": "cdngwc.cc",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    },
+    {
+      "name": "🎨包子漫画",
+      "url": "https://cn.bzmanga.com",
+      "host": "cn.bzmanga.com",
+      "type": 2,
+      "why": "非文本类型，不适用"
+    }
+  ]
+}

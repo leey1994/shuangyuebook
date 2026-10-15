@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爽阅 · UI 设计效果图 v1.0</title>
+<style>
+:root{
+  --paper:#F1F6EE; --card:#FBFDF9; --hair:#DDE5DA; --hair2:#E7EEE4;
+  --fg:#1E2420; --fg2:#5B6660; --fg3:#93A098;
+  --green:#2F6B3C; --green-l:#E9F2E6; --red:#D9503F; --gold:#E5B83D;
+  --night:#0B0F14; --ncard:#151B22; --nline:#232B34; --nfg:#E9EEF4; --nfg2:#97A3B0;
+  --ui:system-ui,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  --serif:"Noto Serif SC","Source Han Serif SC","SimSun","Songti SC",serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0B1418;color:#E6EFEA;font-family:var(--ui)}
+body{background:radial-gradient(1100px 520px at 72% -8%, #143039 0%, #0B1418 58%) fixed,#0B1418}
+.wrap{max-width:1480px;margin:0 auto;padding:52px 34px 90px}
+a{text-decoration:none;color:inherit}
+
+/* ---------- 图标 ---------- */
+.ic{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.xm{display:block}
+
+/* ---------- 页头 ---------- */
+.hero{display:flex;align-items:center;gap:26px;padding-bottom:34px;border-bottom:1px solid #1B2A31}
+.hero .logo{width:96px;height:96px;flex:none;background:radial-gradient(circle at 50% 34%,#17323A,#0E1D23);border:1px solid #1E3038;border-radius:26px;display:flex;align-items:center;justify-content:center}
+.hero h1{font-size:42px;letter-spacing:.06em;display:flex;align-items:baseline;gap:14px}
+.hero h1 em{font-style:normal;color:#8FD9AE}
+.hero h1 s{position:relative;text-decoration:none;font-size:15px;font-weight:400;color:#7E8F96}
+.hero p.sub{margin-top:8px;color:#9DB0AE;font-size:15px}
+.hero .meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.hero .meta span{font-size:12px;color:#BCD2CB;background:#12242A;border:1px solid #1E3A40;border-radius:999px;padding:4px 12px}
+.hero .meta span b{color:#8FD9AE;font-weight:600}
+
+/* ---------- 区块 ---------- */
+section{margin-top:56px}
+h2.sec{font-size:22px;display:flex;align-items:center;gap:12px}
+h2.sec::before{content:"";width:5px;height:22px;border-radius:3px;background:linear-gradient(#3DDC97,#2F6B3C)}
+h2.sec small{font-size:13px;font-weight:400;color:#7E8F96}
+p.sec-desc{margin:12px 0 0 17px;color:#8DA0A5;font-size:13.5px;line-height:1.8}
+p.sec-desc b{color:#BCD2CB;font-weight:600}
+
+/* ---------- 色彩/规格条 ---------- */
+.sw{display:flex;flex-wrap:wrap;gap:12px;margin-top:22px}
+.sw .s{display:flex;align-items:center;gap:10px;background:#102027;border:1px solid #1B2F36;border-radius:14px;padding:9px 14px 9px 10px}
+.sw .s i{width:30px;height:30px;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+.sw .s b{font-size:12.5px;color:#DCE9E4;font-weight:600}
+.sw .s s{text-decoration:none;font-size:11px;color:#7E939B;font-family:ui-monospace,Consolas,monospace}
+.bgs{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
+.bgs .g{width:132px;border-radius:14px;border:1px solid #1B2F36;overflow:hidden}
+.bgs .g .p{height:64px;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:17px}
+.bgs .g .l{padding:7px 10px;font-size:11px;color:#8DA0A5;background:#0E1B21;display:flex;justify-content:space-between}
+.bgs .g .l s{text-decoration:none;font-family:ui-monospace,Consolas,monospace;font-size:10px}
+
+/* ---------- 手机框 ---------- */
+.units{display:grid;grid-template-columns:repeat(auto-fit,minmax(374px,1fr));justify-items:center;gap:52px 26px;margin-top:34px}
+.unit{width:374px}
+.phone{width:374px;padding:10px;border-radius:44px;background:#05080a;border:1px solid #22343c;box-shadow:0 34px 70px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.04);position:relative}
+.phone::after{content:"";position:absolute;top:20px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;background:#0a1216;border:1px solid #1c2c33}
+.screen{width:354px;height:732px;border-radius:35px;overflow:hidden;background:var(--paper);color:var(--fg);display:flex;flex-direction:column;position:relative}
+figcaption{margin-top:14px;padding:0 6px}
+figcaption b{font-size:14px;color:#DCE9E4}
+figcaption span{display:block;margin-top:4px;font-size:12px;color:#7E939B;line-height:1.65}
+figcaption em{display:inline-block;font-style:normal;font-size:10.5px;color:#8FD9AE;border:1px solid #23503C;background:#10241C;border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:1px}
+
+/* ---------- 状态栏（小墨驻守） ---------- */
+.st{height:34px;flex:none;display:flex;align-items:center;gap:7px;padding:0 20px;font-size:13px;font-weight:600}
+.st .t{flex:1}
+.st .cls{fill:currentColor;opacity:.9}
+
+/* ---------- 通用控件 ---------- */
+.appbar{flex:none;height:46px;display:flex;align-items:center;gap:10px;padding:0 16px}
+.appbar .ttl{font-size:21px;font-weight:800;letter-spacing:.02em;flex:1}
+.appbar .ia{color:var(--fg2);display:flex;align-items:center;gap:14px}
+.sb{height:40px;border-radius:999px;background:var(--card);border:1px solid var(--hair);display:flex;align-items:center;gap:9px;padding:0 15px;color:var(--fg3);font-size:13px}
+.sb .flex{flex:1}
+.hrow{display:flex;gap:8px;padding:0 16px;overflow:hidden}
+.chip{height:29px;padding:0 13px;border-radius:999px;background:var(--card);border:1px solid var(--hair);display:inline-flex;align-items:center;font-size:12px;color:var(--fg2);white-space:nowrap}
+.chip.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+.sh{display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin:15px 0 9px}
+.sh b{font-size:15.5px}
+.sh .ac{font-size:12px;color:var(--green);display:flex;align-items:center;gap:2px}
+.sh .ac.gray{color:var(--fg3)}
+.cover{position:relative;border-radius:9px;overflow:hidden;flex:none;display:flex;align-items:flex-start;justify-content:flex-end;padding:7px}
+.cover::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,.17),transparent 56%)}
+.cover i{writing-mode:vertical-rl;font-family:var(--serif);font-style:normal;font-weight:700;color:rgba(255,255,255,.93);letter-spacing:.2em;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.cv1{background:linear-gradient(165deg,#1F4A38,#2F6B3C)}.cv2{background:linear-gradient(165deg,#6E2A24,#A8432F)}
+.cv3{background:linear-gradient(165deg,#1E3A57,#2E5C8A)}.cv4{background:linear-gradient(165deg,#2A2340,#4A3B6B)}
+.cv5{background:linear-gradient(165deg,#4A3A1E,#7A6230)}.cv6{background:linear-gradient(165deg,#2C3E50,#4A6B8A)}
+.cv7{background:linear-gradient(165deg,#4E2A26,#7A463A)}.cv8{background:linear-gradient(165deg,#111C30,#22365C)}
+.cv9{background:linear-gradient(165deg,#14303A,#235062)}.cv10{background:linear-gradient(165deg,#33234A,#543A75)}
+.cv11{background:linear-gradient(165deg,#233327,#3B5A44)}.cv12{background:linear-gradient(165deg,#3A1F2E,#6B2E4A)}
+.cv13{background:linear-gradient(165deg,#20323E,#3A5A6E)}.cv14{background:linear-gradient(165deg,#1C3244,#2E5E7A)}
+.cv15{background:linear-gradient(165deg,#40342A,#6B5A42)}.cv16{background:linear-gradient(165deg,#2A2E4E,#474E8A)}
+.src{font-size:10px;padding:1.5px 7px;border-radius:999px;background:#E7F2E3;color:#2F6B3C;font-weight:600;white-space:nowrap}
+.rk{width:20px;text-align:center;font-weight:800;font-size:16.5px;font-family:var(--serif);flex:none}
+.rk1{color:#D9503F}.rk2{color:#E5853D}.rk3{color:#D9A83D}.rk4{color:#9AA69F}
+.brow{display:flex;align-items:center;gap:12px;padding:7px 16px}
+.brow .bx{flex:1;min-width:0}
+.brow .bt{font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brow .bt mark{background:none;color:var(--red)}
+.brow .bm{margin-top:3px;font-size:11.5px;color:var(--fg3);display:flex;align-items:center;gap:7px}
+.brow .chev{width:15px;height:15px;color:#C3CEC2}
+.tabbar{flex:none;height:60px;background:rgba(251,253,249,.94);border-top:1px solid var(--hair);display:flex;align-items:center;padding:0 8px 4px}
+.tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--fg3);font-size:10.5px}
+.tabbar a.on{color:var(--green);font-weight:700}
+.tabbar a.on .ic{stroke-width:2.1}
+.btn{height:38px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:600;padding:0 16px;white-space:nowrap}
+.btn.p{background:var(--green);color:#fff}
+.btn.o{border:1.5px solid var(--green);color:var(--green);background:#fff}
+.btn.g{background:#EAF0E7;color:var(--fg2)}
+.btn.rd{border:1px solid var(--hair);background:var(--card);color:var(--fg)}
+.btn.flex{flex:1}
+.prog{height:4px;border-radius:2px;background:#E2EAE0;overflow:hidden}
+.prog i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,#3E8A50,#2F6B3C)}
+.sld{height:4px;border-radius:2px;background:#E3EAE1;position:relative;flex:1}
+.sld i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:linear-gradient(90deg,#3E8A50,#2F6B3C)}
+.sld u{position:absolute;top:50%;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--green);transform:translate(-50%,-50%);box-shadow:0 2px 5px rgba(30,60,40,.22)}
+body.darkmode .prog{background:#22322B}
+/* ---------- 桌面框 ---------- */
+.dframes{display:flex;flex-direction:column;gap:64px;align-items:center;margin-top:36px}
+.desktop{width:1180px;max-width:97vw;background:var(--paper);color:var(--fg);border-radius:16px;overflow:hidden;border:1px solid #22343c;box-shadow:0 34px 80px rgba(0,0,0,.55)}
+.dbar{height:42px;background:#F7FAF5;border-bottom:1px solid var(--hair);display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 14px;font-size:12.5px;flex:none}
+.dbar .dl{display:flex;align-items:center;gap:9px;font-weight:800}
+.dbar .sep{width:1px;height:14px;background:var(--hair)}
+.dbar .pg{color:var(--fg3);font-weight:400}
+.wbtns{display:flex}
+.wbtn{width:42px;height:42px;display:flex;align-items:center;justify-content:center;color:var(--fg2);font-size:12px}
+.wbtn.close{color:#B4483C}
+.dbody{display:flex;height:660px}
+.drail{width:88px;flex:none;background:#F7FAF5;border-right:1px solid var(--hair);display:flex;flex-direction:column;gap:4px;padding:12px 9px}
+.ri{height:58px;border-radius:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--fg2);font-size:11px}
+.ri.on{background:#E9F2E6;color:var(--green);font-weight:700}
+.ri .ic{width:20px;height:20px}
+.dmain{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper);position:relative}
+.dtop{height:58px;flex:none;display:flex;align-items:center;gap:16px;padding:0 22px;border-bottom:1px solid var(--hair);background:#F7FAF5}
+.dcontent{flex:1;min-height:0;display:flex;gap:20px;padding:18px 22px;overflow:hidden}
+.dcol{flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.dside{width:300px;flex:none;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.dcard{background:var(--card);border:1px solid var(--hair);border-radius:16px;padding:13px 16px}
+.dsec{font-size:14px;font-weight:800;display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+@media(max-width:520px){.unit,.phone,.screen{width:min(354px,92vw)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 小墨：水滴头 · 页角耳 · 额头朱印 -->
+  <symbol id="mascot" viewBox="0 0 64 64">
+    <path d="M20 22 L9 7 L30 13 Z" fill="#FBFDF9" stroke="#B9C6D4" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M44 22 L55 7 L34 13 Z" fill="#FBFDF9" stroke="#B9C6D4" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M32 13 C42 13 48 21 48 30 C48 40 40 50 32 55 C24 50 16 40 16 30 C16 21 22 13 32 13 Z" fill="#C9D6E3" stroke="#A9B8C7" stroke-width="1.4"/>
+    <circle cx="32" cy="21" r="4.6" fill="#D9503F"/>
+    <circle cx="25.2" cy="31.5" r="3.5" fill="#23282E"/>
+    <circle cx="38.8" cy="31.5" r="3.5" fill="#23282E"/>
+  </symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.6 12 3.6l9 7"/><path d="M5.2 9.4V20a1 1 0 0 0 1 1h11.6a1 1 0 0 0 1-1V9.4"/></symbol>
+  <symbol id="i-rank" viewBox="0 0 24 24"><path d="M4.5 20V12"/><path d="M12 20V4.5"/><path d="M19.5 20v-5"/><path d="M2.5 20h19"/></symbol>
+  <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h10M4 17.5h6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.4v13.2L19 12z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9.2 5v14M14.8 5v14" stroke-width="3.2"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5.5v13" stroke-width="2.4"/><path d="M19 6.5v11L9.5 12z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5.5v13" stroke-width="2.4"/><path d="M5 6.5v11L14.5 12z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-headset" viewBox="0 0 24 24"><path d="M4 17.5v-5.7a8 8 0 0 1 16 0v5.7"/><path d="M4.2 15H6a1.4 1.4 0 0 1 1.4 1.4v3A1.4 1.4 0 0 1 6 20.8H5.6A1.4 1.4 0 0 1 4.2 19.4zM19.8 15h-1.8a1.4 1.4 0 0 0-1.4 1.4v3a1.4 1.4 0 0 0 1.4 1.4h.4a1.4 1.4 0 0 0 1.4-1.4z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 6.5h8.6M17.8 6.5H20M4 12h2.2M11.4 12H20M4 17.5h8.6M17.8 17.5H20"/><circle cx="15.2" cy="6.5" r="2.4"/><circle cx="8.8" cy="12" r="2.4"/><circle cx="15.2" cy="17.5" r="2.4"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 4.5v5.6h-5.6"/><path d="M3 19.5v-5.6h5.6"/><path d="M3.8 9.6A9 9 0 0 1 18.5 5.4L21 7.9"/><path d="M20.2 14.4A9 9 0 0 1 5.5 18.6L3 16.1"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="m16 3.5 4 4-4 4"/><path d="M20 7.5H4"/><path d="m8 20.5-4-4 4-4"/><path d="M4 16.5h16"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.7"/><circle cx="6" cy="12" r="2.7"/><circle cx="18" cy="19" r="2.7"/><path d="m8.4 10.8 7.2-4.6M8.4 13.2l7.2 4.6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.4 2"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6L12 16.9 6.6 19.7l1.1-6L3.2 9.4l6.1-.8z"/></symbol>
+  <symbol id="i-award" viewBox="0 0 24 24"><circle cx="12" cy="8.6" r="5.6"/><path d="m8.6 13.6-1.4 6.9L12 17.7l4.8 2.8-1.4-6.9"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 4.8-9 4.8-9-4.8z"/><path d="m4.6 12.9 7.4 4 7.4-4"/><path d="m4.6 16.9 7.4 4 7.4-4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3.5 6.5h17"/><path d="M8.5 6.5v-2h7v2"/><path d="m6 6.5 1 13.5h10l1-13.5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.5V11.5"/><circle cx="12" cy="8.4" r=".5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-txt" viewBox="0 0 24 24"><path d="M7 3.5h7l4.5 4.5v12.5h-11.5z"/><path d="M14 3.5V8h4.5"/><path d="M9.5 12.5h5M9.5 16h5"/></symbol>
+  <symbol id="i-st-r" viewBox="0 0 78 13">
+    <g fill="currentColor" stroke="none">
+      <rect x="0" y="7.6" width="2.7" height="4.8" rx="1.1"/><rect x="4.2" y="5.6" width="2.7" height="6.8" rx="1.1"/><rect x="8.4" y="3.4" width="2.7" height="9" rx="1.1"/><rect x="12.6" y="1.4" width="2.7" height="11" rx="1.1"/>
+      <rect x="38" y="3.6" width="27" height="9.4" rx="2.8" fill="none" stroke="currentColor" stroke-width="1.1"/>
+      <rect x="40" y="5.6" width="18" height="5.4" rx="1.4"/><path d="M66.6 6.2v4.4a2.3 2.3 0 0 0 2-2.2 2.3 2.3 0 0 0-2-2.2z"/>
+    </g>
+    <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M22.5 7a7.5 7.5 0 0 1 9 0"/><path d="M24.7 9.6a4.2 4.2 0 0 1 4.6 0"/></g>
+    <circle cx="27" cy="11.4" r="1.15" fill="currentColor"/>
+  </symbol>
+</svg>
+<header class="hero">
+  <div class="logo"><svg class="xm" width="64" height="64" viewBox="0 0 64 64"><use href="#mascot"/></svg></div>
+  <div>
+    <h1>爽<em>阅</em> <s>在线聚合阅读器 · 设计效果图 v1.0</s></h1>
+    <p class="sub"><b>爽快阅读，想看就看</b> · 全新架构 · 纯客户端实时采集 · Android + Windows 双端</p>
+    <div class="meta">
+      <span><b>13</b> 个内置书源（原生适配）</span>
+      <span><b>阅读 3.0</b> 书源导入</span>
+      <span>桌宠<b>小墨</b>全程陪伴</span>
+      <span><b>12</b> 款在线音色听书</span>
+      <span>Flutter 单一代码库</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <h2 class="sec">设计基调 <small>继承爽阅的墨绿基因，加入小墨朱印的点缀色</small></h2>
+  <div class="sw">
+    <div class="s"><i style="background:#2F6B3C"></i><div><b>主绿</b><br><s>#2F6B3C</s></div></div>
+    <div class="s"><i style="background:#3DDC97"></i><div><b>醒绿 · 深色主题</b><br><s>#3DDC97</s></div></div>
+    <div class="s"><i style="background:#D9503F"></i><div><b>朱砂 · 小墨朱印</b><br><s>#D9503F</s></div></div>
+    <div class="s"><i style="background:#E5B83D"></i><div><b>藤黄 · 名次/徽章</b><br><s>#E5B83D</s></div></div>
+    <div class="s"><i style="background:#F1F6EE"></i><div><b>锦绣白 · 底色</b><br><s>#F1F6EE</s></div></div>
+    <div class="s"><i style="background:#0B0F14"></i><div><b>极光黑 · 底色</b><br><s>#0B0F14</s></div></div>
+    <div class="s"><i style="background:linear-gradient(135deg,#1E4D3A,#2F6B3C)"></i><div><b>封面群 · 1</b><br><s>深墨绿</s></div></div>
+    <div class="s"><i style="background:linear-gradient(135deg,#2A2340,#4A3B6B)"></i><div><b>封面群 · 2</b><br><s>夜紫</s></div></div>
+  </div>
+  <div class="bgs">
+    <div class="g"><div class="p" style="background:#FFFFFF;color:#1A1A1A">文</div><div class="l"><span>纸白</span><s>#FFFFFF</s></div></div>
+    <div class="g"><div class="p" style="background:#F7F0E1;color:#2E2A22">文</div><div class="l"><span>米黄</span><s>#F7F0E1</s></div></div>
+    <div class="g"><div class="p" style="background:#E8F0E4;color:#22301F">文</div><div class="l"><span>护眼绿</span><s>#E8F0E4</s></div></div>
+    <div class="g"><div class="p" style="background:#20242A;color:#D6DCE4">文</div><div class="l"><span>浅灰</span><s>#20242A</s></div></div>
+    <div class="g"><div class="p" style="background:#12151A;color:#C9D1DA">文</div><div class="l"><span>夜间</span><s>#12151A</s></div></div>
+    <div class="g"><div class="p" style="background:#000000;color:#BFC6CE">文</div><div class="l"><span>纯黑</span><s>#000000</s></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="sec">安卓端 <small>Android · 逻辑基准 390 × 844 · 底部 4 Tab</small></h2>
+  <p class="sec-desc">顶部状态栏一行由<b>小墨</b>驻守（爽阅基因，挖孔自动避让）；搜索全局可达；<b>首页 / 排行 / 书架 / 我的</b>四条根导航。</p>
+  <div class="units">
+  <figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div class="appbar">
+        <div class="ttl" style="display:flex;align-items:center;gap:8px"><svg class="xm" width="27" height="27" viewBox="0 0 64 64"><use href="#mascot"/></svg>爽阅</div>
+        <div class="ia"><svg class="ic"><use href="#i-moon"/></svg><svg class="ic"><use href="#i-more"/></svg></div>
+      </div>
+      <div style="padding:0 16px 12px"><div class="sb"><svg class="ic" style="width:17px;height:17px"><use href="#i-search"/></svg><span class="flex">搜书名 / 作者 / 内容</span><span class="src">13 源聚合</span></div></div>
+      <div style="padding:0 16px">
+        <div style="position:relative;border-radius:18px;background:linear-gradient(120deg,#14352A 0%,#204B36 55%,#2E6B44 100%);padding:16px;display:flex;gap:14px;color:#fff">
+          <div class="cover cv1" style="width:62px;height:86px"><i>剑来</i></div>
+          <div style="flex:1;min-width:0">
+            <span style="font-size:10px;background:rgba(229,184,61,.14);color:#E5B83D;border:1px solid rgba(229,184,61,.4);border-radius:999px;padding:2px 8px">今日热榜 TOP1</span>
+            <div style="font-size:19px;font-weight:800;margin-top:8px;letter-spacing:.04em">剑来</div>
+            <div style="font-size:11.5px;opacity:.72;margin-top:4px">烽火戏诸侯 · 玄幻 · 连载</div>
+            <div style="font-size:11.5px;opacity:.88;margin-top:9px;line-height:1.5">一把剑，一座浩然天下，一处江湖庙堂。</div>
+          </div>
+          <div style="position:absolute;bottom:11px;right:14px;display:flex;gap:4px">
+            <span style="width:14px;height:3.5px;border-radius:2px;background:#fff"></span>
+            <span style="width:5px;height:3.5px;border-radius:2px;background:rgba(255,255,255,.38)"></span>
+            <span style="width:5px;height:3.5px;border-radius:2px;background:rgba(255,255,255,.38)"></span>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <div class="hrow" style="margin-top:14px">
+          <span class="chip on">玄幻</span><span class="chip">都市</span><span class="chip">仙侠</span><span class="chip">历史</span><span class="chip">科幻</span><span class="chip">悬疑</span>
+        </div>
+        <div class="sh"><b>热榜速览</b><span class="ac">全源聚合 · 更多 <svg class="ic" style="width:13px;height:13px"><use href="#i-chev-r"/></svg></span></div>
+        <div style="padding:0 16px">
+          <div class="brow" style="padding:8px 0"><span class="rk rk1">1</span><div class="bx"><div class="bt">剑来</div><div class="bm">烽火戏诸侯 · 玄幻 · 326 万字</div></div><span class="src">顶点小说</span></div>
+          <div class="brow" style="padding:8px 0"><span class="rk rk2">2</span><div class="bx"><div class="bt">斗破苍穹</div><div class="bm">天蚕土豆 · 玄幻 · 532 万字</div></div><span class="src">速读谷</span></div>
+          <div class="brow" style="padding:8px 0"><span class="rk rk3">3</span><div class="bx"><div class="bt">诡秘之主</div><div class="bm">爱潜水的乌贼 · 奇幻 · 447 万字</div></div><span class="src">黄金屋</span></div>
+        </div>
+        <div class="sh"><b>今日推荐</b><span class="ac"><svg class="ic" style="width:13px;height:13px"><use href="#i-refresh"/></svg>换一批</span></div>
+        <div style="display:flex;gap:12px;padding:0 16px">
+          <div style="flex:1"><div class="cover cv11" style="height:110px"><i>圣墟</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">圣墟</div><div style="font-size:10.5px;color:var(--fg3);margin-top:1px">辰东 · 玄幻</div></div>
+          <div style="flex:1"><div class="cover cv13" style="height:110px"><i>全球高武</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">全球高武</div><div style="font-size:10.5px;color:var(--fg3);margin-top:1px">老鹰吃小鸡 · 都市</div></div>
+          <div style="flex:1"><div class="cover cv15" style="height:110px"><i>绍宋</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">绍宋</div><div style="font-size:10.5px;color:var(--fg3);margin-top:1px">榴弹怕水 · 历史</div></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <a class="on"><svg class="ic"><use href="#i-home"/></svg>首页</a>
+        <a><svg class="ic"><use href="#i-rank"/></svg>排行</a>
+        <a><svg class="ic"><use href="#i-shelf"/></svg>书架</a>
+        <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+      </nav>
+    </div></div>
+    <figcaption><b>01 · 首页 · 推荐聚合</b><span>全源推荐交错出屏；横幅 5s 自动轮播；热榜速览 TOP3 直达排行；今日推荐一键换一批。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div class="appbar"><div class="ttl">排行</div><div class="ia"><svg class="ic"><use href="#i-refresh"/></svg><svg class="ic"><use href="#i-more"/></svg></div></div>
+      <div class="hrow" style="gap:22px;padding:0 18px">
+        <span style="font-size:15.5px;font-weight:800;color:var(--green);border-bottom:2.5px solid var(--green);padding-bottom:7px">热销榜</span>
+        <span style="font-size:15.5px;color:var(--fg3);padding-bottom:7px">新书榜</span>
+        <span style="font-size:15.5px;color:var(--fg3);padding-bottom:7px">完结榜</span>
+        <span style="font-size:15.5px;color:var(--fg3);padding-bottom:7px">口碑榜</span>
+      </div>
+      <div style="padding:9px 16px 0;font-size:11px;color:var(--fg3)">4 个榜单 × 9 个分类 · 13 个书源实时聚合</div>
+      <div class="hrow" style="margin-top:10px">
+        <span class="chip on">全部</span><span class="chip">玄幻</span><span class="chip">都市</span><span class="chip">仙侠</span><span class="chip">历史</span><span class="chip">科幻</span><span class="chip">悬疑</span>
+      </div>
+      <div style="display:flex;gap:11px;padding:16px 16px 6px">
+        <div style="flex:1;position:relative">
+          <div class="cover cv2" style="height:98px;width:100%"><i>斗破苍穹</i></div>
+          <span style="position:absolute;top:-7px;left:-7px;width:26px;height:26px;border-radius:50%;background:#D9503F;color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(217,80,63,.45)">1</span>
+          <div style="font-size:12.5px;font-weight:700;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">斗破苍穹</div>
+          <div style="font-size:10.5px;color:var(--fg3);margin-top:1px">天蚕土豆</div>
+        </div>
+        <div style="flex:1;position:relative">
+          <div class="cover cv1" style="height:98px;width:100%"><i>剑来</i></div>
+          <span style="position:absolute;top:-7px;left:-7px;width:26px;height:26px;border-radius:50%;background:#E5853D;color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(229,133,61,.45)">2</span>
+          <div style="font-size:12.5px;font-weight:700;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">剑来</div>
+          <div style="font-size:10.5px;color:var(--fg3);margin-top:1px">烽火戏诸侯</div>
+        </div>
+        <div style="flex:1;position:relative">
+          <div class="cover cv4" style="height:98px;width:100%"><i>诡秘之主</i></div>
+          <span style="position:absolute;top:-7px;left:-7px;width:26px;height:26px;border-radius:50%;background:#D9A83D;color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(217,168,61,.45)">3</span>
+          <div style="font-size:12.5px;font-weight:700;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">诡秘之主</div>
+          <div style="font-size:10.5px;color:var(--fg3);margin-top:1px">爱潜水的乌贼</div>
+        </div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:8px 16px 0">
+        <div class="brow" style="padding:8px 0"><span class="rk rk4">4</span><div class="cover cv6" style="width:40px;height:54px"><i>雪中</i></div><div class="bx"><div class="bt">雪中悍刀行</div><div class="bm">烽火戏诸侯 · 武侠 · 461 万字</div></div><span class="bm" style="color:var(--red);font-weight:700">11.2万</span></div>
+        <div class="brow" style="padding:8px 0"><span class="rk rk4">5</span><div class="cover cv3" style="width:40px;height:54px"><i>凡人</i></div><div class="bx"><div class="bt">凡人修仙传</div><div class="bm">忘语 · 仙侠 · 747 万字</div></div><span class="bm" style="color:var(--red);font-weight:700">9.8万</span></div>
+        <div class="brow" style="padding:8px 0"><span class="rk rk4">6</span><div class="cover cv8" style="width:40px;height:54px"><i>夜术</i></div><div class="bx"><div class="bt">夜的命名术</div><div class="bm">会说话的肘子 · 都市 · 259 万字</div></div><span class="bm" style="color:var(--red);font-weight:700">8.6万</span></div>
+        <div class="brow" style="padding:8px 0"><span class="rk rk4">7</span><div class="cover cv9" style="width:40px;height:54px"><i>深空</i></div><div class="bx"><div class="bt">深空彼岸</div><div class="bm">辰东 · 科幻 · 508 万字</div></div><span class="bm" style="color:var(--red);font-weight:700">7.9万</span></div>
+        <div class="brow" style="padding:8px 0"><span class="rk rk4">8</span><div class="cover cv10" style="width:40px;height:54px"><i>万古</i></div><div class="bx"><div class="bt">万古神帝</div><div class="bm">飞天鱼 · 玄幻 · 1096 万字</div></div><span class="bm" style="color:var(--red);font-weight:700">6.4万</span></div>
+        <div style="text-align:center;font-size:10.5px;color:var(--fg3);margin-top:6px">数据来自各书源站内榜单实时抓取 · 下拉刷新</div>
+      </div>
+      <nav class="tabbar">
+        <a><svg class="ic"><use href="#i-home"/></svg>首页</a>
+        <a class="on"><svg class="ic"><use href="#i-rank"/></svg>排行</a>
+        <a><svg class="ic"><use href="#i-shelf"/></svg>书架</a>
+        <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+      </nav>
+    </div></div>
+    <figcaption><b>02 · 排行 · 多榜单 × 分类</b><span>热销 / 新书 / 完结 / 口碑 × 9 分类二维筛选；TOP3 特写卡；条目带来源与热度；榜单由 13 源实时聚合、名次加权排序。</span><em>独立一级页面</em></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 16px 10px">
+        <svg class="ic" style="color:var(--fg2)"><use href="#i-back"/></svg>
+        <div class="sb" style="flex:1;background:#fff;color:var(--fg)"><svg class="ic" style="width:16px;height:16px;color:var(--green)"><use href="#i-search"/></svg><span class="flex" style="font-weight:600">剑来</span><svg class="ic" style="width:14px;height:14px;color:var(--fg3)"><use href="#i-x"/></svg></div>
+        <span style="font-size:14px;color:var(--fg2)">取消</span>
+      </div>
+      <div style="padding:0 16px 4px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg3)"><span style="color:var(--green);font-weight:700">已从 4/13 个源返回</span><span>· 持续上屏中…</span></div>
+        <div class="prog" style="margin-top:6px"><i style="width:78%"></i></div>
+      </div>
+      <div class="hrow" style="margin:10px 0 4px">
+        <span class="chip on">全部来源</span><span class="chip">顶点小说 ✓</span><span class="chip">速读谷 ✓</span><span class="chip">黄金屋 ✓</span><span class="chip">52 书库</span>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:4px 16px 0">
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv1" style="width:44px;height:60px"><i>剑来</i></div>
+          <div class="bx"><div class="bt"><mark>剑来</mark></div><div class="bm">烽火戏诸侯 · 玄幻 · 连载 · 326 万字</div><div class="bm" style="margin-top:4px"><span class="src" style="background:#FDECE8;color:#D9503F">6 个来源</span><span style="color:var(--red);font-weight:700">12.4 万人在读</span></div></div>
+        </div>
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv5" style="width:44px;height:60px"><i>剑来：大骊风云</i></div>
+          <div class="bx"><div class="bt"><mark>剑来</mark>：大骊风云</div><div class="bm">青衫客 · 玄幻 · 完结 · 98 万字</div><div class="bm" style="margin-top:4px"><span class="src">速读谷</span></div></div>
+        </div>
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv14" style="width:44px;height:60px"><i>我的剑来人生</i></div>
+          <div class="bx"><div class="bt">我的<mark>剑来</mark>人生</div><div class="bm">一叶知秋 · 都市 · 连载 · 152 万字</div><div class="bm" style="margin-top:4px"><span class="src">黄金屋</span></div></div>
+        </div>
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv7" style="width:44px;height:60px"><i>剑来行</i></div>
+          <div class="bx"><div class="bt"><mark>剑来</mark>行</div><div class="bm">雪满弓刀 · 武侠 · 连载 · 76 万字</div><div class="bm" style="margin-top:4px"><span class="src">52 书库</span></div></div>
+        </div>
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv15" style="width:44px;height:60px"><i>仗剑来长安</i></div>
+          <div class="bx"><div class="bt">仗<mark>剑来</mark>长安</div><div class="bm">长安月 · 历史 · 完结 · 210 万字</div><div class="bm" style="margin-top:4px"><span class="src">全本小说网</span></div></div>
+        </div>
+        <div class="brow" style="padding:9px 0">
+          <div class="cover cv16" style="width:44px;height:60px"><i>剑来时</i></div>
+          <div class="bx"><div class="bt"><mark>剑来</mark>时</div><div class="bm">白露未晞 · 仙侠 · 连载 · 134 万字</div><div class="bm" style="margin-top:4px"><span class="src">素书卷</span></div></div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--fg3);margin-top:8px">同名书自动合并 · 没搜到？试试导入更多书源</div>
+      </div>
+    </div></div>
+    <figcaption><b>03 · 搜索 · 实时聚合结果</b><span>边到边显：任一源返回即刻上屏，不等最慢的源；来源筛选、关键词高亮、同名书合并为一条（显示 N 个来源）。</span><em>爽阅「实时出结果」升级</em></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div class="appbar"><div class="ttl">书架 <span style="font-size:12px;color:var(--fg3);font-weight:400">12 本</span></div><div class="ia"><svg class="ic"><use href="#i-sort"/></svg><svg class="ic"><use href="#i-grid"/></svg><svg class="ic"><use href="#i-more"/></svg></div></div>
+      <div style="padding:2px 16px 10px">
+        <div style="display:flex;background:#E7EEE4;border-radius:11px;padding:3px">
+          <span style="flex:1;height:32px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--green);box-shadow:0 1px 4px rgba(30,60,40,.12)">在线书架</span>
+          <span style="flex:1;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--fg2)">本地书 · 5</span>
+        </div>
+      </div>
+      <div class="hrow" style="margin-bottom:12px">
+        <span class="chip on">最近阅读 <svg class="ic" style="width:11px;height:11px;margin-left:3px"><use href="#i-chev-d"/></svg></span><span class="chip">进度</span><span class="chip">添加时间</span><span class="chip">字数</span>
+      </div>
+      <div style="display:flex;gap:12px;padding:0 16px">
+        <div style="flex:1">
+          <div class="cover cv2" style="height:102px;width:100%"><i>斗破苍穹</i></div>
+          <div class="prog" style="margin-top:7px"><i style="width:42%"></i></div>
+          <div style="display:flex;justify-content:space-between;gap:4px;margin-top:5px"><span style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">斗破苍穹</span><span style="font-size:10px;color:var(--green);font-weight:700">42%</span></div>
+        </div>
+        <div style="flex:1">
+          <div class="cover cv1" style="height:102px;width:100%"><i>剑来</i></div>
+          <div class="prog" style="margin-top:7px"><i style="width:12%"></i></div>
+          <div style="display:flex;justify-content:space-between;gap:4px;margin-top:5px"><span style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">剑来</span><span style="font-size:10px;color:var(--green);font-weight:700">12%</span></div>
+        </div>
+        <div style="flex:1">
+          <div class="cover cv4" style="height:102px;width:100%"><i>诡秘之主</i></div>
+          <div class="prog" style="margin-top:7px"><i style="width:88%"></i></div>
+          <div style="display:flex;justify-content:space-between;gap:4px;margin-top:5px"><span style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">诡秘之主</span><span style="font-size:10px;color:var(--green);font-weight:700">88%</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;padding:14px 16px 0">
+        <div style="flex:1">
+          <div class="cover cv6" style="height:102px;width:100%"><i>雪中悍刀行</i></div>
+          <div class="prog" style="margin-top:7px"><i style="width:100%"></i></div>
+          <div style="display:flex;justify-content:space-between;gap:4px;margin-top:5px"><span style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">雪中悍刀行</span><span style="font-size:10px;color:var(--fg3);font-weight:700">读完</span></div>
+        </div>
+        <div style="flex:1">
+          <div class="cover cv8" style="height:102px;width:100%"><i>夜的命名术</i></div>
+          <div class="prog" style="margin-top:7px"><i style="width:3%"></i></div>
+          <div style="display:flex;justify-content:space-between;gap:4px;margin-top:5px"><span style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">夜的命名术</span><span style="font-size:10px;color:var(--green);font-weight:700">3%</span></div>
+        </div>
+        <div style="flex:1">
+          <div style="height:102px;border:1.5px dashed #BFCDBB;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--fg3);background:#F7FAF5">
+            <svg class="ic" style="width:22px;height:22px"><use href="#i-plus"/></svg><span style="font-size:10.5px">导入本地书</span>
+          </div>
+          <div style="font-size:10.5px;color:var(--fg3);margin-top:7px;text-align:center">TXT / EPUB</div>
+        </div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <div class="sh" style="margin-top:16px"><b style="font-size:14px">本地书</b><span class="ac gray">5 本</span></div>
+        <div style="display:flex;gap:12px;padding:0 16px">
+          <div style="flex:1"><div class="cover cv9" style="height:84px;width:100%"><i>三体</i></div><div style="font-size:10.5px;color:var(--fg2);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">三体全集.txt</div></div>
+          <div style="flex:1"><div class="cover cv15" style="height:84px;width:100%"><i>明朝</i></div><div style="font-size:10.5px;color:var(--fg2);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">明朝那些事儿.epub</div></div>
+          <div style="flex:1"><div class="cover cv3" style="height:84px;width:100%"><i>平凡</i></div><div style="font-size:10.5px;color:var(--fg2);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">平凡的世界.txt</div></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <a><svg class="ic"><use href="#i-home"/></svg>首页</a>
+        <a><svg class="ic"><use href="#i-rank"/></svg>排行</a>
+        <a class="on"><svg class="ic"><use href="#i-shelf"/></svg>书架</a>
+        <a><svg class="ic"><use href="#i-user"/></svg>我的</a>
+      </nav>
+    </div></div>
+    <figcaption><b>04 · 书架 · 方格卡片</b><span>在线 / 本地分段；卡片带进度条与百分比；排序六维可切；网格尾部常驻「导入本地书」；长按多选批量管理。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 16px 6px;color:var(--fg2)">
+        <svg class="ic"><use href="#i-back"/></svg>
+        <span style="display:flex;gap:16px"><svg class="ic"><use href="#i-share"/></svg><svg class="ic"><use href="#i-more"/></svg></span>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <div style="display:flex;gap:15px;padding:4px 16px 0">
+          <div class="cover cv1" style="width:94px;height:130px"><i>剑来</i></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:22px;font-weight:800;letter-spacing:.03em">剑来</div>
+            <div style="font-size:12.5px;color:var(--fg2);margin-top:6px">烽火戏诸侯</div>
+            <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
+              <span class="src" style="background:#EFF3ED;color:var(--fg2)">玄幻</span>
+              <span class="src" style="background:#EFF3ED;color:var(--fg2)">连载</span>
+              <span class="src" style="background:#EFF3ED;color:var(--fg2)">326 万字</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--fg3);margin-top:9px">更新至 第 1024 章 · 3 小时前</div>
+            <div style="font-size:11.5px;margin-top:5px;color:var(--red);font-weight:700">12.4 万人在读</div>
+          </div>
+        </div>
+        <div style="margin:16px 16px 0;background:var(--card);border:1px solid var(--hair);border-radius:14px;padding:11px 13px;display:flex;align-items:center;gap:10px">
+          <svg class="ic" style="color:var(--green)"><use href="#i-layers"/></svg>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:700">当前来源 · 顶点小说</div>
+            <div style="font-size:10.5px;color:var(--fg3);margin-top:2px">6 个来源可用 · 换源后按章节自动对齐进度</div>
+          </div>
+          <span class="btn o" style="height:30px;font-size:12.5px;border-radius:999px;padding:0 13px">换源</span>
+        </div>
+        <div style="display:flex;gap:10px;padding:15px 16px 0">
+          <span class="btn p flex"><svg class="ic" style="width:16px;height:16px"><use href="#i-plus"/></svg>加入书架</span>
+          <span class="btn rd" style="width:46px;padding:0"><svg class="ic" style="color:var(--fg2)"><use href="#i-headset"/></svg></span>
+          <span class="btn rd" style="width:46px;padding:0"><svg class="ic" style="color:var(--fg2)"><use href="#i-share"/></svg></span>
+        </div>
+        <div style="padding:17px 16px 0">
+          <div style="font-size:15px;font-weight:700">简介</div>
+          <p style="font-size:12.5px;color:var(--fg2);line-height:1.85;margin-top:8px">大千世界，无奇不有。少年自骊珠洞天而出，负剑远行，走过山下的江湖与山上的庙堂，在一次次选择里长成自己的剑心。</p>
+        </div>
+        <div class="sh"><b>目录</b><span class="ac gray">共 1024 章 · 正序 <svg class="ic" style="width:12px;height:12px"><use href="#i-chev-d"/></svg></span></div>
+        <div style="padding:0 16px">
+          <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--hair2)"><span style="font-size:13px">第 1024 章 大骊风云</span><span style="font-size:10.5px;color:var(--fg3)">3 小时前</span></div>
+          <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--hair2)"><span style="font-size:13px">第 1023 章 落子无悔</span><span style="font-size:10.5px;color:var(--fg3)">前天</span></div>
+          <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:13px">第 1022 章 山外来客</span><span style="font-size:10.5px;color:var(--fg3)">前天</span></div>
+        </div>
+      </div>
+      <div style="flex:none;height:62px;background:var(--card);border-top:1px solid var(--hair);display:flex;align-items:center;gap:18px;padding:0 18px">
+        <span style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--fg2)"><svg class="ic"><use href="#i-list"/></svg>目录</span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--fg2)"><svg class="ic"><use href="#i-dl"/></svg>缓存</span>
+        <span class="btn p flex" style="margin-left:4px">加书架并开始阅读</span>
+      </div>
+    </div></div>
+    <figcaption><b>05 · 书籍详情 · 来源与换源</b><span>来源面板一目了然：当前源、可用源数量、换源后按章名自动对齐进度（爽阅换源续读能力）；热度数据来自榜单聚合，无数据则不显示。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen" style="background:#E8F0E4;color:#22301F">
+      <div class="st" style="color:#3E4E3A"><span class="t">23:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:2px 24px 0;font-size:11.5px;color:#6E7F6B">
+        <span>剑来 · 第 1021 章</span>
+        <span style="display:flex;gap:14px"><svg class="ic" style="width:15px;height:15px"><use href="#i-dl"/></svg><svg class="ic" style="width:15px;height:15px"><use href="#i-more"/></svg></span>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:22px 26px 0;font-family:var(--serif);font-size:14.5px;line-height:2.05;color:#22301F">
+        <div style="text-align:center;font-size:17px;font-weight:700;margin-bottom:18px">第 1021 章 拼死一搏</div>
+        <p style="text-indent:2em">夜色沿着屋檐低垂下来，长街尽头的灯火被风揉碎，洒在青石板上，忽明忽暗。</p>
+        <p style="text-indent:2em;margin-top:6px">少年立在街心，缓缓吐出一口气，指尖按在剑柄上，指节因为用力而微微发白。他知道，今夜这一战，避无可避。</p>
+        <p style="text-indent:2em;margin-top:6px">对面的人影终于动了。没有一句多余的话，只有一道快得几乎看不见的寒光，撕开了夜色。</p>
+        <p style="text-indent:2em;margin-top:6px">剑光相撞的刹那，整条街的灯影一齐摇晃。少年的手腕沉稳得像一座山，剑势一转，硬生生把那道寒光压了下去。</p>
+        <p style="text-indent:2em;margin-top:6px">“好。”黑暗里传来一声低低的赞许。仅一个字，却让少年背后的汗毛尽数竖起。</p>
+        <div style="margin-top:16px;text-align:center;font-size:11px;color:#8B9A87;font-family:var(--ui)">— 本章未完，继续下拉 —</div>
+      </div>
+      <div style="flex:none;text-align:center;font-size:10.5px;color:#8B9A87;padding:10px 0 8px">23:41 · 第 128/1024 页 · 电量 82%</div>
+      <div style="flex:none;padding:0 16px 16px">
+        <div style="border-radius:20px;background:rgba(20,28,20,.88);color:#EDF2EC;padding:9px 6px 8px;box-shadow:0 10px 26px rgba(10,20,12,.28)">
+          <div class="prog" style="height:3px;margin:0 14px 8px;background:rgba(255,255,255,.18)"><i style="width:13%;background:#8FD9AE"></i></div>
+          <div style="display:flex">
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#B9C6B4"><svg class="ic" style="width:18px;height:18px"><use href="#i-list"/></svg>目录</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#B9C6B4"><svg class="ic" style="width:18px;height:18px"><use href="#i-swap"/></svg>换源</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#B9C6B4"><svg class="ic" style="width:18px;height:18px"><use href="#i-headset"/></svg>听书</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#8FD9AE"><svg class="ic" style="width:18px;height:18px"><use href="#i-set"/></svg>设置</span>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>06 · 阅读器 · 护眼绿</b><span>四种翻页（滑动/覆盖/淡入/滚动）；页脚时间·页码·电量；工具栏含换源入口；小墨钉在顶带随阅读成长；章末继续拖动直达下一章。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen" style="background:#E8F0E4">
+      <div class="st" style="color:#3E4E3A;opacity:.5"><span class="t">23:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div style="flex:1;overflow:hidden;padding:18px 26px 0;font-family:var(--serif);font-size:14.5px;line-height:2.05;color:#22301F;opacity:.34">
+        <div style="text-align:center;font-size:17px;font-weight:700;margin-bottom:18px">第 1021 章 拼死一搏</div>
+        <p style="text-indent:2em">夜色沿着屋檐低垂下来，长街尽头的灯火被风揉碎，洒在青石板上，忽明忽暗。</p>
+        <p style="text-indent:2em;margin-top:6px">少年立在街心，缓缓吐出一口气，指尖按在剑柄上，指节因为用力而微微发白。</p>
+        <p style="text-indent:2em;margin-top:6px">对面的人影终于动了。没有一句多余的话，只有一道快得几乎看不见的寒光。</p>
+      </div>
+      <div style="flex:none;background:var(--card);border-radius:22px 22px 0 0;box-shadow:0 -14px 44px rgba(16,30,20,.22);padding:10px 20px 18px">
+        <div style="width:38px;height:4px;border-radius:2px;background:#D9E2D6;margin:0 auto 10px"></div>
+        <div style="display:flex;gap:24px;font-size:14.5px;padding:0 2px 10px;border-bottom:1px solid var(--hair2)">
+          <span style="font-weight:800;color:var(--green);border-bottom:2.5px solid var(--green);padding-bottom:6px;margin-bottom:-11px">排版</span>
+          <span style="color:var(--fg3)">外观</span>
+          <span style="color:var(--fg3)">听书</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:16px;font-size:12px;color:var(--fg2)">
+          <span style="width:46px">字号</span>
+          <span class="sld" style="flex:1"><i style="width:56%"></i><u style="left:56%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">17</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;font-size:12px;color:var(--fg2)">
+          <span style="width:46px">行距</span>
+          <span class="sld" style="flex:1"><i style="width:62%"></i><u style="left:62%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">1.9</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;font-size:12px;color:var(--fg2)">
+          <span style="width:46px">字距</span>
+          <span class="sld" style="flex:1"><i style="width:42%"></i><u style="left:42%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">0.1</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;font-size:12px;color:var(--fg2)">
+          <span style="width:46px">页边距</span>
+          <span class="sld" style="flex:1"><i style="width:50%"></i><u style="left:50%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">26</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:15px;font-size:12px;color:var(--fg2)">
+          <span>首行缩进</span>
+          <span style="width:38px;height:22px;border-radius:999px;background:var(--green);position:relative"><i style="position:absolute;right:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff"></i></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:15px;font-size:12px;color:var(--fg2)">
+          <span style="width:46px;flex:none">翻页</span>
+          <span class="chip on" style="height:27px">滑动</span><span class="chip" style="height:27px;background:var(--green);border-color:var(--green);color:#fff;font-weight:600;box-shadow:0 3px 8px rgba(47,107,60,.3)">覆盖</span><span class="chip" style="height:27px">淡入</span><span class="chip" style="height:27px">滚动</span>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:18px">
+          <span class="btn g flex">恢复默认</span>
+          <span class="btn p flex">完成</span>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>07 · 阅读器 · 设置面板</b><span>排版 / 外观 / 听书三页签；调参时正文保持可见；覆盖翻页逐行对照「阅读 3.0」手感，翻页吸附固定速率收敛。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">23:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div class="appbar"><svg class="ic" style="color:var(--fg2)"><use href="#i-back"/></svg><div class="ttl" style="font-size:18px">听书</div><div class="ia"><svg class="ic"><use href="#i-more"/></svg></div></div>
+      <div style="display:flex;align-items:center;gap:13px;padding:2px 18px 0">
+        <div class="cover cv1" style="width:52px;height:72px"><i>剑来</i></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:800">第 1021 章 拼死一搏</div>
+          <div style="font-size:11.5px;color:var(--fg3);margin-top:4px">剑来 · 烽火戏诸侯</div>
+          <div style="font-size:11px;color:var(--green);font-weight:700;margin-top:4px">段落高亮跟随 · 自动跨章</div>
+        </div>
+        <span class="chip" style="height:26px"><svg class="ic" style="width:12px;height:12px;margin-right:3px"><use href="#i-clock"/></svg>30 分</span>
+      </div>
+      <div style="padding:20px 22px 0">
+        <div class="waveholder" style="display:flex;gap:3px;align-items:center;height:44px">
+          <i class="on" style="height:24%"></i><i class="on" style="height:40%"></i><i class="on" style="height:58%"></i><i class="on" style="height:32%"></i><i class="on" style="height:68%"></i><i class="on" style="height:46%"></i><i class="on" style="height:26%"></i><i class="on" style="height:54%"></i><i class="on" style="height:72%"></i><i class="on" style="height:38%"></i><i class="on" style="height:30%"></i><i class="on" style="height:62%"></i><i class="on" style="height:48%"></i><i class="on" style="height:34%"></i><i class="on" style="height:56%"></i><i class="on" style="height:66%"></i><i class="on" style="height:42%"></i><i style="height:28%"></i><i style="height:60%"></i><i style="height:50%"></i><i style="height:36%"></i><i style="height:70%"></i><i style="height:52%"></i><i style="height:32%"></i><i style="height:58%"></i><i style="height:64%"></i><i style="height:40%"></i><i style="height:26%"></i><i style="height:54%"></i><i style="height:68%"></i><i style="height:44%"></i><i style="height:30%"></i><i style="height:52%"></i><i style="height:62%"></i><i style="height:40%"></i><i style="height:32%"></i>
+        </div>
+        <style>.waveholder i{flex:1;border-radius:2px;background:#D5E0D2}.waveholder i.on{background:linear-gradient(#3E8A50,#2F6B3C)}</style>
+        <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:11px;color:var(--fg3);font-family:ui-monospace,Consolas,monospace"><span>12:34</span><span>45:20</span></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:34px;padding:18px 0 4px">
+        <svg class="ic" style="width:30px;height:30px;color:var(--fg2)"><use href="#i-prev"/></svg>
+        <span style="width:64px;height:64px;border-radius:50%;background:linear-gradient(150deg,#3E8A50,#2F6B3C);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(47,107,60,.35)"><svg class="ic" style="width:28px;height:28px;color:#fff"><use href="#i-pause"/></svg></span>
+        <svg class="ic" style="width:30px;height:30px;color:var(--fg2)"><use href="#i-next"/></svg>
+      </div>
+      <div style="margin:14px 18px 0;background:var(--card);border:1px solid var(--hair);border-radius:14px;padding:12px 14px">
+        <div style="font-size:10.5px;color:var(--green);font-weight:700;display:flex;align-items:center;gap:5px"><svg class="ic" style="width:12px;height:12px"><use href="#i-headset"/></svg>正在朗读 · 在线音色「小臻」</div>
+        <p style="font-size:13px;line-height:1.8;margin-top:7px;color:var(--fg2);font-family:var(--serif)">剑光相撞的刹那，<span style="background:#DCEFD6;border-radius:4px;padding:1px 3px;color:#1F3A22;font-weight:600">整条街的灯影一齐摇晃</span>，少年的手腕沉稳得像一座山。</p>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <div class="sh"><b style="font-size:14px">在线音色</b><span class="ac gray">12 款 · 断网自动回退系统语音</span></div>
+        <div class="hrow">
+          <span class="chip on" style="height:52px;border-radius:14px;flex-direction:column;gap:1px;display:flex;align-items:center;justify-content:center;padding:0 14px"><b style="font-size:12.5px">小臻</b><s style="text-decoration:none;font-size:9.5px;opacity:.85">甜美女声</s></span>
+          <span class="chip" style="height:52px;border-radius:14px;flex-direction:column;gap:1px;display:flex;align-items:center;justify-content:center;padding:0 14px"><b style="font-size:12.5px">小瑜</b><s style="text-decoration:none;font-size:9.5px;color:var(--fg3)">温婉女声</s></span>
+          <span class="chip" style="height:52px;border-radius:14px;flex-direction:column;gap:1px;display:flex;align-items:center;justify-content:center;padding:0 14px"><b style="font-size:12.5px">云希</b><s style="text-decoration:none;font-size:9.5px;color:var(--fg3)">阳光青年</s></span>
+          <span class="chip" style="height:52px;border-radius:14px;flex-direction:column;gap:1px;display:flex;align-items:center;justify-content:center;padding:0 14px"><b style="font-size:12.5px">云健</b><s style="text-decoration:none;font-size:9.5px;color:var(--fg3)">解说男声</s></span>
+          <span class="chip" style="height:52px;border-radius:14px;flex-direction:column;gap:1px;display:flex;align-items:center;justify-content:center;padding:0 14px"><b style="font-size:12.5px">晓北</b><s style="text-decoration:none;font-size:9.5px;color:var(--fg3)">东北味</s></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin:16px 18px 0;font-size:12px;color:var(--fg2)">
+          <span style="width:36px">语速</span>
+          <span class="sld" style="flex:1"><i style="width:40%"></i><u style="left:40%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">1.2x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin:13px 18px 0;font-size:12px;color:var(--fg2)">
+          <span style="width:36px">音调</span>
+          <span class="sld" style="flex:1"><i style="width:52%"></i><u style="left:52%"></u></span>
+          <span style="width:34px;text-align:right;font-weight:700;color:var(--fg)">0</span>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>08 · 听书 · 在线音色</b><span>12 款在线音色（爽阅全套）+ 系统语音离线回退；逐段高亮跟随、自动跨章；新增 15/30/60 分钟定时停止与<b>锁屏 / 通知栏控制</b>（Android 前台服务）。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen">
+      <div class="st"><span class="t">9:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div class="appbar"><div class="ttl">我的</div><div class="ia"><svg class="ic"><use href="#i-set"/></svg></div></div>
+      <div style="margin:2px 16px 0;background:linear-gradient(120deg,#E7F1E2,#F4F9F0);border:1px solid #D8E6D2;border-radius:18px;padding:14px 16px;display:flex;align-items:center;gap:14px">
+        <svg class="xm" width="56" height="56" viewBox="0 0 64 64"><use href="#mascot"/></svg>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14.5px;font-weight:800">小墨 · 纸兽期</div>
+          <div style="font-size:11px;color:var(--fg2);margin-top:3px">已陪伴 42 天 · 距离「墨狐」还有 58%</div>
+          <div class="prog" style="margin-top:8px;background:#D9E7D3"><i style="width:42%;background:linear-gradient(90deg,#8FD9AE,#2F6B3C)"></i></div>
+        </div>
+        <span class="btn o" style="height:30px;font-size:12px;border-radius:999px;padding:0 12px">戳一戳</span>
+      </div>
+      <div style="margin:14px 16px 0;background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:15px 18px 12px">
+        <div style="display:flex;text-align:center">
+          <div style="flex:1"><div style="font-size:19px;font-weight:800">36.5<span style="font-size:11px;font-weight:600">h</span></div><div style="font-size:10.5px;color:var(--fg3);margin-top:3px">累计阅读</div></div>
+          <div style="flex:1;border-left:1px solid var(--hair2);border-right:1px solid var(--hair2)"><div style="font-size:19px;font-weight:800">12<span style="font-size:11px;font-weight:600">天</span></div><div style="font-size:10.5px;color:var(--fg3);margin-top:3px">连续天</div></div>
+          <div style="flex:1"><div style="font-size:19px;font-weight:800">5<span style="font-size:11px;font-weight:600">本</span></div><div style="font-size:10.5px;color:var(--fg3);margin-top:3px">读完</div></div>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:11px;height:56px;margin-top:16px">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:26px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:38px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:19px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:45px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:31px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:50px;border-radius:5px 5px 2px 2px;background:#DDE9DA"></i></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><i style="width:100%;height:39px;border-radius:5px 5px 2px 2px;background:linear-gradient(#3E8A50,#2F6B3C)"></i></div>
+        </div>
+        <div style="display:flex;gap:11px;margin-top:6px">
+          <span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">一</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">二</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">三</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">四</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">五</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--fg3)">六</span><span style="flex:1;text-align:center;font-size:9.5px;color:var(--green);font-weight:700">日</span>
+        </div>
+      </div>
+      <div class="sh"><b style="font-size:14px">成就</b><span class="ac gray">查看全部 14 枚 <svg class="ic" style="width:12px;height:12px"><use href="#i-chev-r"/></svg></span></div>
+      <div style="display:flex;gap:14px;padding:0 18px">
+        <div style="flex:1;text-align:center"><div style="height:46px;border-radius:14px;background:#E9F2E6;color:#2F6B3C;display:flex;align-items:center;justify-content:center"><svg class="ic" style="width:22px;height:22px"><use href="#i-book"/></svg></div><div style="font-size:9.5px;color:var(--fg2);margin-top:5px">首读达成</div></div>
+        <div style="flex:1;text-align:center"><div style="height:46px;border-radius:14px;background:#FBF0DA;color:#C08A2D;display:flex;align-items:center;justify-content:center"><svg class="ic" style="width:22px;height:22px"><use href="#i-award"/></svg></div><div style="font-size:9.5px;color:var(--fg2);margin-top:5px">连续 7 天</div></div>
+        <div style="flex:1;text-align:center"><div style="height:46px;border-radius:14px;background:#E8ECF7;color:#5B6FA8;display:flex;align-items:center;justify-content:center"><svg class="ic" style="width:22px;height:22px"><use href="#i-moon"/></svg></div><div style="font-size:9.5px;color:var(--fg2);margin-top:5px">夜读诗人</div></div>
+        <div style="flex:1;text-align:center"><div style="height:46px;border-radius:14px;background:#EFF2ED;color:#B9C4B7;display:flex;align-items:center;justify-content:center"><svg class="ic" style="width:22px;height:22px"><use href="#i-headset"/></svg></div><div style="font-size:9.5px;color:var(--fg3);margin-top:5px">听书达人</div></div>
+        <div style="flex:1;text-align:center"><div style="height:46px;border-radius:14px;background:#EFF2ED;color:#B9C4B7;display:flex;align-items:center;justify-content:center"><svg class="ic" style="width:22px;height:22px"><use href="#i-swap"/></svg></div><div style="font-size:9.5px;color:var(--fg3);margin-top:5px">换源大师</div></div>
+      </div>
+      <div style="flex:1;overflow:hidden;margin-top:14px;border-top:1px solid var(--hair2)">
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--hair2)"><svg class="ic" style="color:var(--green)"><use href="#i-layers"/></svg><span style="flex:1;font-size:13.5px">书源管理</span><span style="font-size:11px;color:var(--fg3)">13 内置 · 0 导入</span><svg class="ic" style="width:14px;height:14px;color:#C3CEC2"><use href="#i-chev-r"/></svg></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--hair2)"><svg class="ic" style="color:var(--fg2)"><use href="#i-headset"/></svg><span style="flex:1;font-size:13.5px">听书设置</span><span style="font-size:11px;color:var(--fg3)">小臻 · 1.2x</span><svg class="ic" style="width:14px;height:14px;color:#C3CEC2"><use href="#i-chev-r"/></svg></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--hair2)"><svg class="ic" style="color:var(--fg2)"><use href="#i-moon"/></svg><span style="flex:1;font-size:13.5px">主题</span><span style="font-size:11px;color:var(--fg3)">锦绣白</span><svg class="ic" style="width:14px;height:14px;color:#C3CEC2"><use href="#i-chev-r"/></svg></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--hair2)"><svg class="ic" style="color:var(--fg2)"><use href="#i-trash"/></svg><span style="flex:1;font-size:13.5px">缓存</span><span style="font-size:11px;color:var(--fg3)">128 MB</span><svg class="ic" style="width:14px;height:14px;color:#C3CEC2"><use href="#i-chev-r"/></svg></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 18px"><svg class="ic" style="color:var(--fg2)"><use href="#i-refresh"/></svg><span style="flex:1;font-size:13.5px">检查更新</span><span style="font-size:11px;color:var(--fg3)">v1.0.0</span><svg class="ic" style="width:14px;height:14px;color:#C3CEC2"><use href="#i-chev-r"/></svg></div>
+      </div>
+      <nav class="tabbar">
+        <a><svg class="ic"><use href="#i-home"/></svg>首页</a>
+        <a><svg class="ic"><use href="#i-rank"/></svg>排行</a>
+        <a><svg class="ic"><use href="#i-shelf"/></svg>书架</a>
+        <a class="on"><svg class="ic"><use href="#i-user"/></svg>我的</a>
+      </nav>
+    </div></div>
+    <figcaption><b>09 · 我的 · 统计与成就</b><span>小墨陪伴面板（形态 · 成长 · 陪伴天数）；阅读统计三数字 + 7 日柱状图；成就 14 枚，点亮时小墨报喜；设置已并入本页（书源 · 阅读 · 缓存 · 关于）。</span></figcaption>
+  </figure>
+<figure class="unit">
+    <div class="phone"><div class="screen" style="background:#12151A;color:#C9D1DA">
+      <div class="st" style="color:#8892A0"><span class="t">23:41</span><svg class="xm" width="15" height="15" viewBox="0 0 64 64"><use href="#mascot"/></svg><svg width="70" height="12" viewBox="0 0 78 13" class="cls"><use href="#i-st-r"/></svg></div>
+      <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:2px 24px 0;font-size:11.5px;color:#6F7884">
+        <span>剑来 · 第 1021 章</span>
+        <span style="display:flex;gap:14px;align-items:center"><svg class="ic" style="width:15px;height:15px;color:#E5B83D"><use href="#i-star"/></svg><svg class="ic" style="width:15px;height:15px"><use href="#i-more"/></svg></span>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:22px 26px 0;font-family:var(--serif);font-size:14.5px;line-height:2.05;color:#C9D1DA">
+        <div style="text-align:center;font-size:17px;font-weight:700;margin-bottom:18px;color:#DCE2EA">第 1021 章 拼死一搏</div>
+        <p style="text-indent:2em">夜色沿着屋檐低垂下来，长街尽头的灯火被风揉碎，洒在青石板上，忽明忽暗。</p>
+        <p style="text-indent:2em;margin-top:6px">少年立在街心，缓缓吐出一口气，指尖按在剑柄上，指节因为用力而微微发白。他知道，今夜这一战，避无可避。</p>
+        <p style="text-indent:2em;margin-top:6px">对面的人影终于动了。没有一句多余的话，只有一道快得几乎看不见的寒光，撕开了夜色。</p>
+        <p style="text-indent:2em;margin-top:6px">剑光相撞的刹那，整条街的灯影一齐摇晃。少年的手腕沉稳得像一座山，剑势一转，硬生生把那道寒光压了下去。</p>
+        <p style="text-indent:2em;margin-top:6px">“好。”黑暗里传来一声低低的赞许。仅一个字，却让少年背后的汗毛尽数竖起。</p>
+      </div>
+      <div style="flex:none;text-align:center;font-size:10.5px;color:#6F7884;padding:10px 0 8px">23:41 · 第 128/1024 页 · 电量 82%</div>
+      <div style="flex:none;padding:0 16px 16px">
+        <div style="border-radius:20px;background:rgba(40,48,58,.85);color:#DFE6EE;padding:9px 6px 8px;box-shadow:0 10px 26px rgba(0,0,0,.4)">
+          <div class="prog" style="height:3px;margin:0 14px 8px;background:rgba(255,255,255,.16)"><i style="width:13%;background:#8FD9AE"></i></div>
+          <div style="display:flex">
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#AAB6C2"><svg class="ic" style="width:18px;height:18px"><use href="#i-list"/></svg>目录</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#AAB6C2"><svg class="ic" style="width:18px;height:18px"><use href="#i-swap"/></svg>换源</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#AAB6C2"><svg class="ic" style="width:18px;height:18px"><use href="#i-headset"/></svg>听书</span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#8FD9AE"><svg class="ic" style="width:18px;height:18px"><use href="#i-set"/></svg>设置</span>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>10 · 阅读器 · 夜间</b><span>6 档阅读背景之「夜间」；书签金色标记；页脚时间·页码·电量随背景同步；深色下工具栏半透明悬浮。</span></figcaption>
+  </figure>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">Windows 端 <small>桌面 · 宽屏 ≥ 720 逻辑宽 · 侧栏 + 多栏</small></h2>
+  <p class="sec-desc">自绘标题栏（爽阅同款，可拖动 / 缩放）；左侧 NavigationRail 常驻；宽屏主区多栏，<b>小墨</b>从顶部链路走进侧栏卡片。</p>
+  <div class="dframes">
+  <figure style="width:auto">
+    <div class="desktop">
+      <div class="dbar">
+        <div class="dl"><svg class="xm" width="18" height="18" viewBox="0 0 64 64"><use href="#mascot"/></svg>爽阅<span class="sep"></span><span class="pg">首页</span></div>
+        <div class="wbtns"><span class="wbtn">—</span><span class="wbtn">▢</span><span class="wbtn close">✕</span></div>
+      </div>
+      <div class="dbody">
+        <aside class="drail">
+          <span class="ri on"><svg class="ic"><use href="#i-home"/></svg>首页</span>
+          <span class="ri"><svg class="ic"><use href="#i-rank"/></svg>排行</span>
+          <span class="ri"><svg class="ic"><use href="#i-shelf"/></svg>书架</span>
+          <span class="ri"><svg class="ic"><use href="#i-user"/></svg>我的</span>
+        </aside>
+        <main class="dmain">
+          <div class="dtop">
+            <div class="sb" style="width:440px;height:36px;background:#fff"><svg class="ic" style="width:16px;height:16px"><use href="#i-search"/></svg><span class="flex">搜书名 / 作者 / 内容</span><span class="src">13 源聚合</span></div>
+            <span style="flex:1"></span>
+            <svg class="ic" style="color:var(--fg2)"><use href="#i-moon"/></svg>
+            <svg class="ic" style="color:var(--fg2)"><use href="#i-dl"/></svg>
+            <svg class="ic" style="color:var(--fg2)"><use href="#i-more"/></svg>
+          </div>
+          <div class="dcontent">
+            <div class="dcol">
+              <div style="border-radius:18px;background:linear-gradient(120deg,#14352A,#204B36 55%,#2E6B44);padding:18px 22px;display:flex;gap:18px;color:#fff;align-items:center;position:relative;overflow:hidden">
+                <div class="cover cv1" style="width:76px;height:104px"><i>剑来</i></div>
+                <div style="flex:1;min-width:0">
+                  <span style="font-size:10.5px;background:rgba(229,184,61,.14);color:#E5B83D;border:1px solid rgba(229,184,61,.4);border-radius:999px;padding:2px 9px">今日热榜 TOP1 · 13 源聚合</span>
+                  <div style="font-size:23px;font-weight:800;margin-top:9px;letter-spacing:.04em">剑来</div>
+                  <div style="font-size:12px;opacity:.75;margin-top:5px">烽火戏诸侯 · 玄幻 · 连载 · 326 万字</div>
+                  <div style="font-size:12px;opacity:.88;margin-top:9px;line-height:1.6;max-width:420px">一把剑，一座浩然天下，一处江湖庙堂。少年负剑远行，从骊珠洞天走向自己的大道。</div>
+                </div>
+                <div style="display:flex;gap:10px;margin-right:96px">
+                  <span class="btn" style="background:#fff;color:#1F4A38;height:36px">立即阅读</span>
+                  <span class="btn" style="border:1px solid rgba(255,255,255,.5);color:#fff;height:36px">加入书架</span>
+                </div>
+                <svg class="xm" width="128" height="128" viewBox="0 0 64 64" style="position:absolute;right:-16px;bottom:-26px;opacity:.24"><use href="#mascot"/></svg>
+              </div>
+              <div class="dcard" style="flex:1;overflow:hidden">
+                <div class="dsec">热榜速览 <span style="font-size:11px;color:var(--fg3);font-weight:400">13 源聚合 · 更多 ›</span></div>
+                <div style="display:flex;gap:26px">
+                  <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk1">1</span><span style="flex:1;font-size:13px;font-weight:600">剑来</span><span style="font-size:11px;color:var(--red);font-weight:700">12.4万</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk2">2</span><span style="flex:1;font-size:13px;font-weight:600">斗破苍穹</span><span style="font-size:11px;color:var(--red);font-weight:700">11.8万</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk3">3</span><span style="flex:1;font-size:13px;font-weight:600">诡秘之主</span><span style="font-size:11px;color:var(--red);font-weight:700">10.2万</span></div>
+                  </div>
+                  <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk4">4</span><span style="flex:1;font-size:13px;font-weight:600">雪中悍刀行</span><span style="font-size:11px;color:var(--fg3)">11.2万</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk4">5</span><span style="flex:1;font-size:13px;font-weight:600">凡人修仙传</span><span style="font-size:11px;color:var(--fg3)">9.8万</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:7px 0"><span class="rk rk4">6</span><span style="flex:1;font-size:13px;font-weight:600">夜的命名术</span><span style="font-size:11px;color:var(--fg3)">8.6万</span></div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="dsec">今日推荐 <span style="font-size:11px;color:var(--green);font-weight:400">换一批 ↻</span></div>
+                <div style="display:flex;gap:16px">
+                  <div style="flex:1"><div class="cover cv11" style="height:126px;width:100%"><i>圣墟</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">圣墟</div></div>
+                  <div style="flex:1"><div class="cover cv13" style="height:126px;width:100%"><i>全球高武</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">全球高武</div></div>
+                  <div style="flex:1"><div class="cover cv15" style="height:126px;width:100%"><i>绍宋</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">绍宋</div></div>
+                  <div style="flex:1"><div class="cover cv3" style="height:126px;width:100%"><i>凡人</i></div><div style="font-size:12px;font-weight:600;margin-top:6px">凡人修仙传</div></div>
+                </div>
+              </div>
+            </div>
+            <aside class="dside">
+              <div class="dcard">
+                <div class="dsec">继续阅读</div>
+                <div style="display:flex;gap:12px;align-items:center">
+                  <div class="cover cv2" style="width:46px;height:64px"><i>斗破苍穹</i></div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13.5px;font-weight:700">斗破苍穹</div>
+                    <div style="font-size:11px;color:var(--fg3);margin-top:3px">第 128 章 · 三年之约</div>
+                    <div class="prog" style="margin-top:8px"><i style="width:42%"></i></div>
+                  </div>
+                </div>
+                <div class="btn p" style="width:100%;margin-top:13px;height:34px">继续阅读</div>
+              </div>
+              <div class="dcard" style="flex:1;overflow:hidden">
+                <div class="dsec">榜单速览 <span style="font-size:11px;color:var(--fg3);font-weight:400">去排行 ›</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 0"><span class="rk rk1">1</span><span style="flex:1;font-size:12.5px">斗破苍穹</span><span class="src">速读谷</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 0"><span class="rk rk2">2</span><span style="flex:1;font-size:12.5px">剑来</span><span class="src">顶点小说</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 0"><span class="rk rk3">3</span><span style="flex:1;font-size:12.5px">诡秘之主</span><span class="src">黄金屋</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 0"><span class="rk rk4">4</span><span style="flex:1;font-size:12.5px">雪中悍刀行</span><span class="src">52 书库</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:6px 0"><span class="rk rk4">5</span><span style="flex:1;font-size:12.5px">凡人修仙传</span><span class="src">神文小说</span></div>
+              </div>
+              <div class="dcard" style="display:flex;gap:12px;align-items:center;background:linear-gradient(120deg,#E7F1E2,#F4F9F0);border-color:#D8E6D2">
+                <svg class="xm" width="46" height="46" viewBox="0 0 64 64"><use href="#mascot"/></svg>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:12px;background:#fff;border:1px solid var(--hair);border-radius:12px;padding:7px 11px;line-height:1.5;color:var(--fg2)">读到第 128 章啦，这段真精彩！</div>
+                  <div style="font-size:10.5px;color:var(--fg3);margin-top:6px">小墨 · 纸兽期 · 陪伴 42 天</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </div>
+    <figcaption style="width:1180px;max-width:97vw"><b>11 · Windows 宽屏首页 · 三栏布局</b><span>自绘标题栏（可拖动 / 缩放）；NavigationRail 常驻可展开；主区推荐 + 右栏「继续阅读 / 榜单速览 / 小墨」；横幅右侧小墨水印。</span></figcaption>
+  </figure>
+  <figure style="width:auto">
+    <div class="desktop">
+      <div class="dbar">
+        <div class="dl"><svg class="xm" width="18" height="18" viewBox="0 0 64 64"><use href="#mascot"/></svg>爽阅<span class="sep"></span><span class="pg">阅读 · 剑来</span></div>
+        <div class="wbtns"><span class="wbtn">—</span><span class="wbtn">▢</span><span class="wbtn close">✕</span></div>
+      </div>
+      <div class="dbody">
+        <aside class="drail">
+          <span class="ri"><svg class="ic"><use href="#i-home"/></svg>首页</span>
+          <span class="ri"><svg class="ic"><use href="#i-rank"/></svg>排行</span>
+          <span class="ri on"><svg class="ic"><use href="#i-shelf"/></svg>书架</span>
+          <span class="ri"><svg class="ic"><use href="#i-user"/></svg>我的</span>
+        </aside>
+        <main class="dmain" style="background:#F7F0E1">
+          <div class="dtop" style="background:#F7F0E1;border-bottom:1px solid #EAE0C9">
+            <span style="font-size:12.5px;color:#6E6552">剑来 · 第 1021 章 拼死一搏</span>
+            <span style="flex:1"></span>
+            <span style="font-size:11.5px;color:#8B8371">23:41 · 第 128/1024 页 · 电量 82%</span>
+            <svg class="xm" width="16" height="16" viewBox="0 0 64 64"><use href="#mascot"/></svg>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:1;overflow:hidden;padding:36px 46px;display:flex;justify-content:center">
+              <div style="max-width:600px;font-family:var(--serif);font-size:15px;line-height:2.15;color:#2E2A22">
+                <div style="text-align:center;font-size:19px;font-weight:700;margin-bottom:20px">第 1021 章 拼死一搏</div>
+                <p style="text-indent:2em">夜色沿着屋檐低垂下来，长街尽头的灯火被风揉碎，洒在青石板上，忽明忽暗。</p>
+                <p style="text-indent:2em;margin-top:7px">少年立在街心，缓缓吐出一口气，指尖按在剑柄上，指节因为用力而微微发白。他知道，今夜这一战，避无可避。</p>
+                <p style="text-indent:2em;margin-top:7px">对面的人影终于动了。没有一句多余的话，只有一道快得几乎看不见的寒光，撕开了夜色。</p>
+                <p style="text-indent:2em;margin-top:7px">剑光相撞的刹那，整条街的灯影一齐摇晃。少年的手腕沉稳得像一座山，剑势一转，硬生生把那道寒光压了下去。</p>
+                <p style="text-indent:2em;margin-top:7px">“好。”黑暗里传来一声低低的赞许。仅一个字，却让少年背后的汗毛尽数竖起。</p>
+              </div>
+            </div>
+            <aside style="width:272px;flex:none;background:var(--card);border-left:1px solid var(--hair);display:flex;flex-direction:column;overflow:hidden">
+              <div style="padding:14px 18px 10px;border-bottom:1px solid var(--hair2);display:flex;align-items:center;justify-content:space-between">
+                <b style="font-size:14px">目录</b>
+                <span style="font-size:11px;color:var(--fg3)">共 1024 章 · 正序</span>
+              </div>
+              <div style="flex:1;overflow:hidden;padding:6px 10px">
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1024 章 大骊风云</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1023 章 落子无悔</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1022 章 山外来客</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;font-weight:700;background:#E9F2E6;color:var(--green);display:flex;justify-content:space-between"><span>第 1021 章 拼死一搏</span><span style="font-size:10px;font-weight:400">在读</span></div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1020 章 月下叩关</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1019 章 长街听雨</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1018 章 灯下故人</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1017 章 两不相欠</div>
+                <div style="padding:9px 8px;border-radius:9px;font-size:12.5px;color:var(--fg2)">第 1016 章 风雪夜归</div>
+              </div>
+            </aside>
+          </div>
+          <div style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:34px;background:rgba(38,32,20,.88);color:#F2EDE0;border-radius:16px;padding:11px 34px;box-shadow:0 12px 32px rgba(50,42,20,.3)">
+            <span style="display:flex;align-items:center;gap:7px;font-size:12px"><svg class="ic" style="width:16px;height:16px"><use href="#i-list"/></svg>目录</span>
+            <span style="display:flex;align-items:center;gap:7px;font-size:12px"><svg class="ic" style="width:16px;height:16px"><use href="#i-swap"/></svg>换源</span>
+            <span style="display:flex;align-items:center;gap:7px;font-size:12px"><svg class="ic" style="width:16px;height:16px"><use href="#i-headset"/></svg>听书</span>
+            <span style="display:flex;align-items:center;gap:7px;font-size:12px"><svg class="ic" style="width:16px;height:16px"><use href="#i-set"/></svg>设置</span>
+          </div>
+        </main>
+      </div>
+    </div>
+    <figcaption style="width:1180px;max-width:97vw"><b>12 · Windows 宽屏阅读器</b><span>正文居中列（米黄背景）+ 右侧目录抽屉（当前章高亮）；底部悬浮工具条含换源；顶部页脚信息与手机端一致。</span></figcaption>
+  </figure>
+  </div>
+</section>
+<footer style="margin-top:64px;border-top:1px solid #1B2A31;padding-top:28px;color:#8DA0A5;font-size:12.5px;line-height:2">
+  <b style="color:#BCD2CB;font-size:14px">说明</b>
+  <ul style="margin:10px 0 0 18px">
+    <li>逻辑基准：安卓 390 × 844；桌面断点 720 —— 窄窗自动降级为移动布局，Windows 自绘标题栏可拖动 / 缩放。</li>
+    <li>色彩、字号、圆角均取自《设计方案》§5 设计规范；6 档阅读背景与爽阅完全一致（纸白 / 米黄 / 护眼绿 / 浅灰 / 夜间 / 纯黑）。</li>
+    <li>小墨为 SVG 复刻示意（水滴头 / 页角耳 / 额头朱印），正式实现直接启用爽阅现有桌宠系统（四形态养成）。</li>
+    <li>内置书源 13 个，全部为手写 Dart 原生适配、随包内置：搜索 / 详情 / 目录 / 正文全链路直连站点，不依赖任何外部脚本。</li>
+    <li>榜单、热度、章节名为示意占位；真实数据以各书源返回为准，无数据字段一律隐藏，不造假。</li>
+    <li>本文件为高保真静态原型，交互仅为示意；动效与翻页手感以 M3 里程碑真机验收为准。</li>
+  </ul>
+</footer>
+</div>
+</body>
+</html>

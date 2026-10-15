@@ -1,0 +1,33 @@
+{
+ "_comment": "内置书源资产：26 个旧「阅读 3.0」导入源已全部移除 —— 可在 sources/legacy-26-sources.json 找到原始定义。可原生采集的站点（鬼吹灯/抖音小说/伪速读谷/若雨中文）已改为手写 Dart 适配器（lib/sources/ 下），其余站点 JS 加密/Cloudflare 拦截/整站失效，无法采集故移除。legacyBuiltinUrls 用于让旧版本升级上来的本地导入条目自动清掉，导入区回到默认为空。",
+ "version": 2,
+ "sources": [],
+ "legacyBuiltinUrls": [
+  "https://api-bc.wtzw.com/#qimao-aggregate-md3",
+  "https://www.qidian.com/#on-toc-v2",
+  "https://api5-normal-sinfonlinec.fqnovel.com",
+  "http://www.kkbiquge.net",
+  "https://wap.longshuwu.com",
+  "https://www.zzbook.net",
+  "https://www.zuizhong.net/",
+  "http://www.3yt.info",
+  "https://www.zjread.cc",
+  "https://www.uushuk.com",
+  "https://www.shuhaoxs.com/",
+  "https://www.dwxwc.com",
+  "https://fanqienovel.com##漫画版",
+  "http://www.gdbzkz.com",
+  "https://trxs.cc",
+  "https://www.douyinxs.com",
+  "https://book.washai.net",
+  "https://www.sudugu.cc",
+  "https://www.mowan.lol",
+  "https://www.deqixs.cc",
+  "https://www.pilishuwu.com",
+  "https://www.szndz.com",
+  "https://www.deqixss.com/",
+  "https://www.banshanren.com",
+  "https://www.74xswz.com",
+  "https://www.gushizu.com"
+ ]
+}
