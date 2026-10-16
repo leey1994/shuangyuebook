@@ -20,6 +20,8 @@ import 'package:shuangyue/store.dart';
 import 'package:shuangyue/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'source_fetch_page.dart';
+
 /// 书源管理页。
 ///
 /// [store] 省略时用全局 [SourceStore.shared]（main.dart 启动时创建并已加载）。
@@ -712,6 +714,19 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _importFromUrl();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.travel_explore),
+              title: const Text('从网络获取并测试'),
+              subtitle: const Text('下载公开书源合集，全链路测试后一键导入可用源'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => SourceFetchPage(store: _store),
+                  ),
+                );
               },
             ),
           ],

@@ -65,29 +65,125 @@ class OnlineBookService {
       return (v == null || v.isEmpty) ? null : v;
     }
 
-    var chapters = source.tocRule == null
-        ? const <Chapter>[]
-        : parseChapters(engine, source.tocRule!, bookUrl);
+    // bookInfo.init 常做变量预置（`@put:{...}`，供后续字段与目录地址模板引用）
+    final init = info?.init?.trim();
+    if (init != null && init.isNotEmpty) g(init);
 
-    if (chapters.isEmpty) {
-      final tocUrlRule = g(info?.tocUrl);
-      if (tocUrlRule != null && tocUrlRule != bookUrl) {
-        final tocHtml = await _getHtml(source, tocUrlRule);
-        final tocEngine = AnalyzeRule(tocHtml, baseUrl: source.bookSourceUrl);
-        chapters = parseChapters(tocEngine, source.tocRule!, tocUrlRule);
+    final bookVars = <String, dynamic>{'bookUrl': bookUrl};
+    engine.vars['book'] = bookVars;
+
+    final name = g(info?.name);
+    if (name != null) {
+      bookVars['name'] = name;
+      bookVars['title'] = name;
+    }
+    final author = g(info?.author);
+    if (author != null) bookVars['author'] = author;
+    final intro = g(info?.intro);
+    final kind = g(info?.kind);
+    if (kind != null) bookVars['kind'] = kind;
+    final lastChapter = g(info?.lastChapter);
+    final updateTime = g(info?.updateTime);
+    final coverUrl = g(info?.coverUrl);
+
+    // 目录：先试详情页同页解析；空则按 tocUrl 规则（最后求值，模板可引用上面变量）
+    var chapters = <Chapter>[];
+    var tocEngine = engine;
+    var tocPageUrl = bookUrl;
+    final tocRule = source.tocRule;
+    if (tocRule != null) {
+      chapters = parseChapters(engine, tocRule, bookUrl);
+      if (chapters.isEmpty) {
+        final tocUrlRule = g(info?.tocUrl);
+        if (tocUrlRule != null && tocUrlRule != bookUrl) {
+          final resolved = resolveUrl(tocUrlRule, source.bookSourceUrl);
+          if (resolved.isNotEmpty) {
+            try {
+              final tocHtml = await _getHtml(source, resolved);
+              tocEngine = AnalyzeRule(
+                tocHtml,
+                baseUrl: source.bookSourceUrl,
+                vars: {'book': bookVars},
+              );
+              tocPageUrl = resolved;
+              chapters = parseChapters(tocEngine, tocRule, resolved);
+            } catch (_) {
+              // 目录页抓取失败：保留详情页已解析结果（可能为空）
+            }
+          }
+        }
+      }
+      // 目录分页（nextTocUrl）：逐页追加（最多 10 页，防死循环）
+      if (chapters.isNotEmpty) {
+        chapters = await _followNextToc(
+          source,
+          tocEngine,
+          tocRule,
+          initial: chapters,
+          firstPageUrl: tocPageUrl,
+        );
       }
     }
 
     return OnlineBookInfo(
-      name: g(info?.name),
-      author: g(info?.author),
-      intro: g(info?.intro),
-      coverUrl: g(info?.coverUrl),
-      kind: g(info?.kind),
-      lastChapter: g(info?.lastChapter),
-      updateTime: g(info?.updateTime),
+      name: name,
+      author: author,
+      intro: intro,
+      coverUrl: coverUrl,
+      kind: kind,
+      lastChapter: lastChapter,
+      updateTime: updateTime,
       chapters: chapters,
     );
+  }
+
+  /// 跟随 `nextTocUrl` 抓取后续目录页并追加章节（按 URL 去重）。
+  Future<List<Chapter>> _followNextToc(
+    BookSource source,
+    AnalyzeRule engine,
+    TocRule rule, {
+    required List<Chapter> initial,
+    required String firstPageUrl,
+  }) async {
+    final nextRule = rule.nextTocUrl?.trim() ?? '';
+    if (nextRule.isEmpty) return initial;
+    final out = List<Chapter>.from(initial);
+    final seen = out.map((c) => c.url).toSet();
+    final visited = <String>{firstPageUrl};
+    var curEngine = engine;
+    for (var page = 0; page < 10; page++) {
+      List<String> nexts;
+      try {
+        nexts = curEngine
+            .getStrings(nextRule)
+            .map((u) => u.trim())
+            .where((u) => u.isNotEmpty)
+            .toList();
+      } catch (_) {
+        break;
+      }
+      if (nexts.isEmpty) break;
+      final next = resolveUrl(nexts.first, source.bookSourceUrl);
+      if (next.isEmpty || !visited.add(next)) break;
+      String html;
+      try {
+        html = await _getHtml(source, next);
+      } catch (_) {
+        break;
+      }
+      final nextEngine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+      final more = parseChapters(nextEngine, rule, next);
+      var added = 0;
+      for (final c in more) {
+        if (seen.add(c.url)) {
+          out.add(c);
+          added++;
+        }
+      }
+      if (added == 0) break;
+      curEngine = nextEngine;
+    }
+    return out;
   }
 
   /// 解析目录：chapterList 产出「条目」，逐条取章节名 / 章节链接。
@@ -141,25 +237,76 @@ class OnlineBookService {
   /// 书源 `webView=true` 时走隐藏 WebView（可配 `gatewayPath` 网关重写）；
   /// 否则直接 HTTP 抓取 + ruleContent 解析（普通静态站点）。
   ///
+  /// [book] 为可选的上下文变量（`{'name': …, 'author': …, 'durChapterTitle': …}`），
+  /// 供 `{{book.name}}` 模板与 `replaceRegex` 净化规则使用。
+  ///
   /// 隐藏 WebView 只在 Android 存在：Windows 端没有 webview_flutter 的
   /// Windows 实现，这里直接降级为普通 HTTP 抓取（能拿到多少算多少），
   /// 而不是抛「平台不支持」把整本书打不开。
-  Future<String> fetchChapterText(BookSource source, String chapterUrl) async {
+  Future<String> fetchChapterText(
+    BookSource source,
+    String chapterUrl, {
+    Map<String, dynamic>? book,
+  }) async {
+    final vars = <String, dynamic>{
+      if (book != null) 'book': book,
+    };
     if (_flag(source.extra['webView']) && WebViewEngine.supported) {
       final target = webViewChapterUrl(source, chapterUrl);
       final text = await WebViewEngine.instance.fetchRenderedText(
         url: target,
         cssSelectors: contentSelectors(source),
       );
-      return cleanChapterText(text);
+      return _applyReplace(source, cleanChapterText(text), vars);
     }
 
-    final html = await _getHtml(source, chapterUrl);
-    final engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
     final raw = source.contentRule?.content ?? '';
     if (raw.trim().isEmpty) return '';
+
+    final html = await _getHtml(source, chapterUrl);
+    var engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl, vars: vars);
     // 正文通常是多段：取规则命中的**全部**结果并按段拼回（getString 只会取第一段）
-    return cleanChapterText(engine.getStrings(raw).join('\n'));
+    var text = cleanChapterText(engine.getStrings(raw).join('\n'));
+
+    // 正文分页（nextContentUrl）：追加后续页（最多 10 页，防死循环）。
+    final nextRule = source.contentRule?.nextContentUrl?.trim() ?? '';
+    if (nextRule.isNotEmpty && text.isNotEmpty) {
+      final visited = <String>{chapterUrl};
+      for (var i = 0; i < 10; i++) {
+        final nexts = engine
+            .getStrings(nextRule)
+            .map((u) => u.trim())
+            .where((u) => u.isNotEmpty)
+            .toList();
+        if (nexts.isEmpty) break;
+        final next = resolveUrl(nexts.first, source.bookSourceUrl);
+        if (next.isEmpty || !visited.add(next)) break;
+        String nextHtml;
+        try {
+          nextHtml = await _getHtml(source, next);
+        } catch (_) {
+          break;
+        }
+        engine = AnalyzeRule(nextHtml, baseUrl: source.bookSourceUrl, vars: vars);
+        final more = cleanChapterText(engine.getStrings(raw).join('\n'));
+        if (more.isEmpty) break;
+        text = '$text\n$more';
+      }
+    }
+
+    return _applyReplace(source, text, vars);
+  }
+
+  /// 应用 `ruleContent.replaceRegex` 净化（模板先按上下文变量渲染）。
+  String _applyReplace(
+    BookSource source,
+    String text,
+    Map<String, dynamic> vars,
+  ) {
+    final rr = source.contentRule?.replaceRegex;
+    if (rr == null || rr.trim().isEmpty || text.isEmpty) return text;
+    final engine = AnalyzeRule(null, baseUrl: source.bookSourceUrl, vars: vars);
+    return engine.applyReplaceRegex(text, rr);
   }
 
   /// 章节页在隐藏 WebView 中打开的地址（应用 gatewayPath 网关重写）。

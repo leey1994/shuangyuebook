@@ -116,4 +116,26 @@ abstract final class RuleAnalyzer {
   /// 规范空白：折叠连续空白为单个空格并去首尾（用于把 HTML 文本变干净）。
   static String collapseSpaces(String s) =>
       s.replaceAll(RegExp(r'[\s\u00A0]+'), ' ').trim();
+
+  /// 清理书源主地址：部分源的 `bookSourceUrl` 带 `##分组` / `#备注` 尾缀
+  /// （如 `https://www.qidian.com##分类`），直接参与相对地址解析会破坏基准地址。
+  static String cleanBaseUrl(String base) {
+    var b = base.trim();
+    if (b.isEmpty) return b;
+    final h = b.indexOf('#');
+    if (h >= 0) {
+      final head = b.substring(0, h).trim();
+      if (head.isNotEmpty) b = head;
+    }
+    return b;
+  }
+
+  /// 剥离尾随 `@js:…` 脚本段（无 JS 引擎：保留脚本前的中间结果做尽力降级）。
+  ///
+  /// 整条规则就是 `@js:` 脚本（位置 0）时不剥离，交由上层按「不支持」显式处理。
+  static String stripTrailingJs(String rule) {
+    final i = rule.toLowerCase().lastIndexOf('@js:');
+    if (i <= 0) return rule;
+    return rule.substring(0, i);
+  }
 }

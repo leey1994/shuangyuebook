@@ -5,7 +5,10 @@
 //   //a//b                  后代查找（任意深度）
 //   *                       任意元素
 //   [@attr] [@attr='v'] [@attr="v"]   属性断言
-//   [N] [last()]            位置筛选（1 起，作用于同父分组）
+//   [N] [last()]            位置筛选（1 起，作用于同父分组；数字优先于标签名）
+//   [text()='v']            文本等值断言（trim 比较）
+//   [contains(text(),'v')] [contains(@attr,'v')]   子串断言
+//   [tag]                   子元素存在断言（如 `//li[span]/a`）
 //   @attr                   取属性（最终步）
 //   text()                  取文本（最终步）
 //
@@ -46,6 +49,11 @@ class _Pred {
   String? value;
   int? index;
   bool isLast = false;
+  String? textEq; // [text()='值']
+  String? textContains; // [contains(text(),'值')]
+  String? attrContainsName; // [contains(@attr,'值')]
+  String? attrContainsVal;
+  String? childExists; // [tag]：存在该子元素
 }
 
 List<_Step>? _parseSteps(String expr) {
@@ -157,6 +165,30 @@ _Pred _parsePred(String inner) {
     p.value = v;
     return p;
   }
+  // [text()='值'] / [text()="值"]
+  final tEq = RegExp(r'''^text\(\)\s*=\s*"([^"]*)"$''').firstMatch(inner) ??
+      RegExp(r"^text\(\)\s*=\s*'([^']*)'$").firstMatch(inner);
+  if (tEq != null) {
+    p.textEq = tEq.group(1)!.trim();
+    return p;
+  }
+  // [contains(text(),'值')]
+  final tCon = RegExp(
+    r'''^contains\(\s*text\(\)\s*,\s*(?:"([^"]*)"|'([^']*)')\s*\)$''',
+  ).firstMatch(inner);
+  if (tCon != null) {
+    p.textContains = (tCon.group(1) ?? tCon.group(2) ?? '').trim();
+    return p;
+  }
+  // [contains(@attr,'值')]
+  final aCon = RegExp(
+    r'''^contains\(\s*@([\w:-]+)\s*,\s*(?:"([^"]*)"|'([^']*)')\s*\)$''',
+  ).firstMatch(inner);
+  if (aCon != null) {
+    p.attrContainsName = aCon.group(1);
+    p.attrContainsVal = aCon.group(2) ?? aCon.group(3) ?? '';
+    return p;
+  }
   if (inner == 'last()') {
     p.isLast = true;
     return p;
@@ -164,6 +196,11 @@ _Pred _parsePred(String inner) {
   final n = int.tryParse(inner);
   if (n != null) {
     p.index = n;
+    return p;
+  }
+  // [tag]：存在该子元素（如 `//li[span]/a`；数字下标已先行处理）
+  if (RegExp(r'^[\w:-]+$').hasMatch(inner)) {
+    p.childExists = inner;
     return p;
   }
   // 不支持的谓词：当作“保留全部”的空操作（宽松兜底）
@@ -266,10 +303,34 @@ List<XmlElement> _applyPreds(List<XmlElement> nodes, _Step step) {
       list = _pickByPosition(list, p.index! - 1, fromEnd: false);
     } else if (p.isLast) {
       list = _pickByPosition(list, 0, fromEnd: true);
+    } else if (p.textEq != null) {
+      list = list.where((el) => _nodeText(el) == p.textEq).toList();
+    } else if (p.textContains != null) {
+      list = list
+          .where((el) => _nodeText(el).contains(p.textContains!))
+          .toList();
+    } else if (p.attrContainsName != null) {
+      list = list
+          .where(
+            (el) => (el.getAttribute(p.attrContainsName!) ?? '')
+                .contains(p.attrContainsVal!),
+          )
+          .toList();
+    } else if (p.childExists != null) {
+      list = list
+          .where(
+            (el) => el.childElements
+                .any((c) => c.name.local == p.childExists),
+          )
+          .toList();
     }
   }
   return list;
 }
+
+/// 元素文本（折叠空白；用于 text() 谓词比较）。
+String _nodeText(XmlElement el) =>
+    el.innerText.trim().replaceAll(RegExp(r'\s+'), ' ');
 
 List<XmlElement> _pickByPosition(
   List<XmlElement> nodes,

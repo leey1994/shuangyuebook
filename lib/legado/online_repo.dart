@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:xml/xml.dart' as xml;
 
@@ -116,6 +117,27 @@ class SourceExploreResult {
 ///
 /// 多分类之间用换行分隔；标题与地址用 `::` 分隔（也兼容 `,`）。
 ///
+/// 搜索结果解析明细：把「静默 0 结果」变成可解释的失败原因。
+class SearchParseResult {
+  const SearchParseResult(
+    this.books, {
+    this.rows = 0,
+    this.noName = 0,
+    this.noUrl = 0,
+  });
+
+  final List<SearchBook> books;
+
+  /// bookList 规则命中的行数。
+  final int rows;
+
+  /// 书名规则解析失败被跳过的行数。
+  final int noName;
+
+  /// 书籍页链接规则解析失败被跳过的行数（多数是依赖 JS 的 bookUrl）。
+  final int noUrl;
+}
+
 /// 多源搜索聚合器。
 class OnlineRepo {
   OnlineRepo({
@@ -194,6 +216,15 @@ class OnlineRepo {
         'key': key,
         'page': page,
       });
+      // 纯 JS 构建的搜索入口（整段 @js: / <js> 且没有可直接使用的明文地址）：
+      // 明确报错，而不是拿一段脚本文本去请求换来含糊的「无效的地址」。
+      final lowUrl = req.url.toLowerCase();
+      if (lowUrl.contains('<js') || lowUrl.contains('@js:')) {
+        throw const FormatException('搜索入口由 JS 脚本构建（当前引擎不支持，可手动替换搜索地址）');
+      }
+      if (req.url.trim().isEmpty) {
+        throw const FormatException('搜索地址渲染为空（searchUrl 可能由 JS 表达式构建）');
+      }
       final headers = _mergeHeaders(source, req.options);
       final method = (req.options['method']?.toString() ?? 'GET').toUpperCase();
       final charset = req.options['charset']?.toString();
@@ -204,8 +235,10 @@ class OnlineRepo {
 
       SourceResponse resp;
       if (method == 'POST') {
-        final bodyTpl = req.options['body']?.toString() ?? '';
-        final body = renderUrlTemplate(bodyTpl, {'key': key, 'page': page});
+        final bodyRaw = req.options['body'];
+        final body = bodyRaw == null
+            ? ''
+            : (bodyRaw is String ? bodyRaw : jsonEncode(bodyRaw));
         resp = await _client.post(
           req.url,
           headers: headers,
@@ -224,10 +257,20 @@ class OnlineRepo {
       if (!resp.ok) {
         throw SourceHttpException('HTTP ${resp.statusCode}');
       }
-      final books = parseSearchPage(source, resp.body);
+      final parsed = parseSearchPageDetailed(source, resp.body);
+      if (parsed.books.isEmpty && parsed.rows > 0) {
+        final reason = parsed.noUrl > 0
+            ? '${parsed.noUrl} 条结果无法解析书籍链接（bookUrl 规则可能依赖 JS 脚本）'
+            : '${parsed.rows} 条结果无法解析书名（规则与页面不匹配）';
+        return SourceSearchResult(
+          source: source,
+          error: reason,
+          elapsedMs: elapsed(),
+        );
+      }
       return SourceSearchResult(
         source: source,
-        books: books,
+        books: parsed.books,
         elapsedMs: elapsed(),
       );
     } on SourceHttpException catch (e) {
@@ -251,49 +294,79 @@ class OnlineRepo {
     }
   }
 
-  /// 解析搜索结果页 → [SearchBook] 列表。
-  List<SearchBook> parseSearchPage(BookSource source, String body) {
+  /// 解析搜索结果页 → [SearchBook] 列表（旧签名，明细见 [parseSearchPageDetailed]）。
+  List<SearchBook> parseSearchPage(BookSource source, String body) =>
+      parseSearchPageDetailed(source, body).books;
+
+  /// 解析搜索结果页，同时给出被跳过条目的计数（用于失败归因）。
+  SearchParseResult parseSearchPageDetailed(BookSource source, String body) {
     final rule = source.searchRule;
-    if (rule == null) return const [];
+    if (rule == null) return const SearchParseResult([]);
     final listRule = (rule.bookList ?? '').trim();
-    if (listRule.isEmpty) return const [];
+    if (listRule.isEmpty) return const SearchParseResult([]);
 
     final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
     final items = engine.getRawList(listRule);
     final books = <SearchBook>[];
+    var rows = 0;
+    var noName = 0;
+    var noUrl = 0;
     for (final item in items) {
       // 只处理可继续求值的上下文：DOM 元素 / XML 节点 / JSON 对象
       if (!(item is dom.Element || item is xml.XmlElement || item is Map)) {
         continue;
       }
+      rows++;
+      // bookUrl 放到最后求值：部分源的链接模板依赖其它字段（如 `{{book.kind}}`），
+      // 先把已解析字段累积进 `book` 变量，再解析链接（对齐阅读的行为）。
+      final bookVars = <String, dynamic>{};
+      engine.vars['book'] = bookVars;
       final name = _field(engine, rule.name, item);
-      if (name == null || name.isEmpty) continue;
-      // 没有书籍页地址的条目点开必炸（JS-only 规则在非 Android 端解析不出地址）——直接丢弃
+      if (name == null || name.isEmpty) {
+        noName++;
+        continue;
+      }
+      bookVars['name'] = name;
+      final author = _field(engine, rule.author, item);
+      final kind = _field(engine, rule.kind, item);
+      final intro = _field(engine, rule.intro, item);
+      final lastChapter = _field(engine, rule.lastChapter, item);
+      final updateTime = _field(engine, rule.updateTime, item);
+      final wordCount = _field(engine, rule.wordCount, item);
+      if (author != null) bookVars['author'] = author;
+      if (kind != null) bookVars['kind'] = kind;
+      if (intro != null) bookVars['intro'] = intro;
+      final coverRaw = _field(engine, rule.coverUrl, item);
+
+      // 没有书籍页地址的条目点开必炸（JS-only 规则在非 Android 端解析不出地址）——直接丢弃，
+      // 但计数用于把「0 结果」解释成「N 条结果链接解析失败（bookUrl 依赖 JS）」。
       final bookUrlRaw = _field(engine, rule.bookUrl, item);
       final bookUrl = bookUrlRaw == null
           ? ''
           : resolveUrl(bookUrlRaw, source.bookSourceUrl);
-      if (bookUrl.isEmpty) continue;
-      final coverRaw = _field(engine, rule.coverUrl, item);
+      if (bookUrl.isEmpty) {
+        noUrl++;
+        continue;
+      }
       books.add(
         SearchBook(
           origin: source.bookSourceUrl,
           originName: source.bookSourceName,
           name: name,
-          author: _field(engine, rule.author, item),
-          kind: _field(engine, rule.kind, item),
-          intro: _field(engine, rule.intro, item),
+          author: author,
+          kind: kind,
+          intro: intro,
           coverUrl: coverRaw == null
               ? null
               : resolveUrl(coverRaw, source.bookSourceUrl),
           bookUrl: bookUrl,
-          latestChapterTitle: _field(engine, rule.lastChapter, item),
-          time: _field(engine, rule.updateTime, item),
-          wordCount: _field(engine, rule.wordCount, item),
+          latestChapterTitle: lastChapter,
+          time: updateTime,
+          wordCount: wordCount,
         ),
       );
     }
-    return books;
+    return SearchParseResult(books, rows: rows, noName: noName, noUrl: noUrl);
   }
 
   String? _field(AnalyzeRule engine, String? rule, Object item) {
@@ -414,7 +487,7 @@ class OnlineRepo {
     ExploreCategory category, {
     int page = 1,
   }) async {
-    final url = _renderExploreUrl(category.url, source.bookSourceUrl, page);
+    final url = renderExploreUrl(category.url, source.bookSourceUrl, page);
     final headers = _mergeHeaders(source, const {});
     await _gateFor(source).waitSlot();
     final resp = await _client.get(
@@ -426,11 +499,14 @@ class OnlineRepo {
     return parseExplorePage(source, resp.body);
   }
 
-  /// 把分类地址渲染为可请求的绝对地址（补全相对路径 + `{{page}}` 占位）。
-  static String _renderExploreUrl(String raw, String base, int page) {
+  /// 把分类地址渲染为可请求的绝对地址（补全相对路径 + `{{page}}` / `{page}` 占位）。
+  @visibleForTesting
+  static String renderExploreUrl(String raw, String base, int page) {
     var s = raw.trim();
-    // 分页占位（Legado 支持 {{page}} / {page}）
-    s = s.replaceAll('{{page}}', '$page').replaceAll('{page}', '$page');
+    // 先渲染 {{page}}（模板引擎，含算术），再回落旧式单花括号 {page}：
+    // 顺序不能反——先替换 `{page}` 会把 `{{page}}` 破坏成 `{N}`。
+    s = renderUrlTemplate(s, {'page': page});
+    s = s.replaceAll('{page}', '$page');
     return resolveUrl(s, base);
   }
 
@@ -455,32 +531,39 @@ class OnlineRepo {
       }
       final name = _field(engine, _exploreField(rule, 'name'), item);
       if (name == null || name.isEmpty) continue;
-      // 同上：解析不出书籍页地址的条目一律不进榜（否则点开就是「无效的地址」）
+      final bookVars = <String, dynamic>{'name': name};
+      engine.vars['book'] = bookVars;
+      final author = _field(engine, _exploreField(rule, 'author'), item);
+      final kind = _field(engine, _exploreField(rule, 'kind'), item);
+      final intro = _field(engine, _exploreField(rule, 'intro'), item);
+      final lastChapter = _field(engine, _exploreField(rule, 'lastChapter'), item);
+      final updateTime = _field(engine, _exploreField(rule, 'updateTime'), item);
+      final wordCount = _field(engine, _exploreField(rule, 'wordCount'), item);
+      if (author != null) bookVars['author'] = author;
+      if (kind != null) bookVars['kind'] = kind;
+      final coverRaw = _field(engine, _exploreField(rule, 'coverUrl'), item);
+      // 同上：解析不出书籍页地址的条目一律不进榜（否则点开就是「无效的地址」）。
+      // bookUrl 最后求值，便于模板引用已解析字段（{{book.kind}} 等）。
       final bookUrlRaw = _field(engine, _exploreField(rule, 'bookUrl'), item);
       final bookUrl = bookUrlRaw == null
           ? ''
           : resolveUrl(bookUrlRaw, source.bookSourceUrl);
       if (bookUrl.isEmpty) continue;
-      final coverRaw = _field(engine, _exploreField(rule, 'coverUrl'), item);
       books.add(
         SearchBook(
           origin: source.bookSourceUrl,
           originName: source.bookSourceName,
           name: name,
-          author: _field(engine, _exploreField(rule, 'author'), item),
-          kind: _field(engine, _exploreField(rule, 'kind'), item),
-          intro: _field(engine, _exploreField(rule, 'intro'), item),
+          author: author,
+          kind: kind,
+          intro: intro,
           coverUrl: coverRaw == null
               ? null
               : resolveUrl(coverRaw, source.bookSourceUrl),
           bookUrl: bookUrl,
-          latestChapterTitle: _field(
-            engine,
-            _exploreField(rule, 'lastChapter'),
-            item,
-          ),
-          time: _field(engine, _exploreField(rule, 'updateTime'), item),
-          wordCount: _field(engine, _exploreField(rule, 'wordCount'), item),
+          latestChapterTitle: lastChapter,
+          time: updateTime,
+          wordCount: wordCount,
         ),
       );
     }

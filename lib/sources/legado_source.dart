@@ -151,7 +151,18 @@ class LegadoSource extends NovelSource {
   /// 正文 ← ruleContent；书源标记 webView 时走隐藏浏览器（仅 Android）。
   @override
   Future<List<String>> fetchChapter(BookDetail detail, Chapter chapter) async {
-    final text = await _svc.fetchChapterText(source, chapter.url);
+    final b = detail.book;
+    final text = await _svc.fetchChapterText(
+      source,
+      chapter.url,
+      book: {
+        'name': b.title,
+        'author': b.author,
+        'bookUrl': b.url,
+        'durChapterTitle': chapter.title,
+        'chapterTitle': chapter.title,
+      },
+    );
     return cleanParas(text.split('\n'));
   }
 

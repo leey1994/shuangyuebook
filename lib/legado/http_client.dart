@@ -132,22 +132,24 @@ class SourceHttpClient {
         if (cookie != null) {
           h['Cookie'] = cookie;
         }
+        final bodyBytes = body == null ? null : _encodeBody(body, charset);
+        // 书源的 POST 大多只写 `,{"method":"POST","body":...}` 不给 Content-Type，
+        // PHP 站没有表单头会解析不到参数（实测抖音/速读谷收不到关键词）→ 默认补齐。
+        if (bodyBytes != null && !_hasHeader(h, 'content-type')) {
+          h['content-type'] = _formContentType(charset);
+        }
+        _sanitizeHeaders(h);
         http.Response resp;
         final t = timeout ?? defaultTimeout;
         if (method == 'POST') {
-          resp = await _client
-              .post(
-                uri,
-                headers: h,
-                body: body == null ? null : utf8.encode(body),
-              )
-              .timeout(t);
+          resp =
+              await _client.post(uri, headers: h, body: bodyBytes).timeout(t);
         } else if (method == 'GET') {
           resp = await _client.get(uri, headers: h).timeout(t);
         } else {
           final req = http.Request(method, uri);
           req.headers.addAll(h);
-          if (body != null) req.bodyBytes = utf8.encode(body);
+          if (bodyBytes != null) req.bodyBytes = bodyBytes;
           resp = await http.Response.fromStream(
             await _client.send(req).timeout(t),
           );
@@ -182,6 +184,41 @@ class SourceHttpClient {
   }
 
   bool get _ownsClient => !identical(_client, sharedClient);
+}
+
+/// 请求体编码：`charset` 为 GBK 系时按 GBK 编码（老 PHP 站常见），否则 UTF-8。
+List<int> _encodeBody(String body, String? charset) {
+  final cs = charset?.trim().toLowerCase() ?? '';
+  if (cs.contains('gb')) {
+    try {
+      return gbk.encode(body);
+    } catch (_) {
+      // 含 GBK 无法表示的字符（emoji 等）→ 退回 UTF-8
+    }
+  }
+  return utf8.encode(body);
+}
+
+String _formContentType(String? charset) {
+  final cs = charset?.trim() ?? '';
+  return cs.isEmpty
+      ? 'application/x-www-form-urlencoded'
+      : 'application/x-www-form-urlencoded; charset=$cs';
+}
+
+bool _hasHeader(Map<String, String> headers, String name) =>
+    headers.keys.any((k) => k.toLowerCase() == name);
+
+final _headerNameRe = RegExp(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$");
+
+/// 清洗请求头：丢弃非 RFC 7230 token 的名字（实测有书源写了 U+2011 连字符的
+/// `User‑Agent`，http 包会直接抛「无效的请求头」）与含换行的值（防注入）。
+void _sanitizeHeaders(Map<String, String> headers) {
+  headers.removeWhere((k, v) => !_headerNameRe.hasMatch(k) || v.contains('\n'));
+  for (final k in headers.keys.toList()) {
+    final v = headers[k]!;
+    if (v.contains('\r')) headers[k] = v.replaceAll('\r', ' ');
+  }
 }
 
 /// 解析 `concurrentRate`：`N/M`（M 秒 N 次）或 `N`（每秒 N 次）。

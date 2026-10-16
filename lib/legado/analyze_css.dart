@@ -4,7 +4,12 @@
 //   `class.book-list@tag.li`           在 .book-list 内选 li（返回元素）
 //   `class.book-list@tag.li@tag.a@href` 逐级深入，最后取 href 属性
 //   `id.content@text`                  取 #content 的文本
-//   `class.novel.0@text`               取第 0 个匹配（支持 `.N` / `N` 索引）
+//   `class.novel.0@text`               取第 0 个匹配（支持 `.N` / `N` / 负索引）
+//   `tbody tr!0`                       排除第 0 个（`!0:2:4` 多排除）
+//   `tag.tr[1:20]` / `a[0,2]` / `li[3]`  切片 / 多下标 / 单下标
+//   `li:lt(5)` `td:gt(2)` `a:eq(1)`     jsoup 风格位置伪类
+//   `li:first-of-type` `p:nth-of-type(2)` / `li:has(a)`  类型位置与包含过滤
+//   `[property~=category|status]`       jsoup 风格属性正则（含正则特征时）
 //   `@css:` 前缀由上层引擎剥离
 //
 // 兼容旧写法：`tag.li` → `li`、`class.xx` → `.xx`、`id.xx` → `#xx`。
@@ -15,7 +20,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'rule_analyzer.dart';
 
 /// 阶段类型。
-enum CssStageType { selector, position, extractor }
+enum CssStageType { selector, position, extractor, range }
 
 /// 单个阶段。
 class CssStage {
@@ -25,40 +30,76 @@ class CssStage {
   final String value;
 }
 
+/// 尾部排除后缀：`!0` `!0:2:4` `!1,3`。
+final RegExp _excludeSuffix = RegExp(r'!\s*(\d+(?:\s*[:,\s]\s*\d+)*)$');
+
+/// 尾部切片/下标后缀：`[1:20]` `[3:]` `[:5]` `[0,2]` `[3]`。
+final RegExp _sliceSuffix =
+    RegExp(r'\[(\s*-?\d*\s*:\s*-?\d*\s*|-?\d+\s*(?:,\s*-?\d+\s*)+|-?\d+)\]$');
+
 /// 把规则拆分为阶段列表（`@` 分隔）。解析失败时返回空列表。
 List<CssStage> parseCssStages(String rule) {
   final parts = rule.split('@');
   final stages = <CssStage>[];
-  for (var raw in parts) {
-    final p = raw.trim();
+  for (final raw in parts) {
+    var p = raw.trim();
     if (p.isEmpty) continue;
-    if (_isIndex(p)) {
-      stages.add(CssStage(CssStageType.position, _indexValue(p).toString()));
-    } else if (_suffixIndex.hasMatch(p) &&
-        !RegExp(r'^[A-Za-z_][\w:-]*$').hasMatch(p)) {
-      // 形如 `class.item.0` / `.item.1` 的“选择器 + 索引”合并写法
-      final m = _suffixIndex.firstMatch(p)!;
-      stages.add(
-        CssStage(CssStageType.selector, _normalizeSelector(m.group(1)!)),
-      );
-      stages.add(CssStage(CssStageType.position, m.group(2)!));
-    } else if (_isExtractor(p)) {
-      stages.add(CssStage(CssStageType.extractor, p));
-    } else {
-      stages.add(CssStage(CssStageType.selector, _normalizeSelector(p)));
+    // 先剥离尾部「排除 / 切片 / 下标」后缀（可叠加），阶段顺序与书写顺序一致。
+    final suffixes = <String>[];
+    while (p.isNotEmpty) {
+      final excl = _excludeSuffix.firstMatch(p);
+      if (excl != null && excl.start > 0) {
+        suffixes.insert(0, '!${excl.group(1)}');
+        p = p.substring(0, excl.start).trim();
+        continue;
+      }
+      final slice = _sliceSuffix.firstMatch(p);
+      if (slice != null && slice.start > 0) {
+        suffixes.insert(0, slice.group(1)!);
+        p = p.substring(0, slice.start).trim();
+        continue;
+      }
+      break;
+    }
+    if (p.isNotEmpty) {
+      final isFirst = stages.isEmpty;
+      if (_isIndex(p)) {
+        stages.add(CssStage(CssStageType.position, _indexValue(p).toString()));
+      } else if (_suffixIndex.hasMatch(p) &&
+          !RegExp(r'^[A-Za-z_][\w:-]*$').hasMatch(p)) {
+        // 形如 `class.item.0` / `.item.1` / `tr.-2` 的“选择器 + 索引”合并写法
+        final m = _suffixIndex.firstMatch(p)!;
+        stages.add(
+          CssStage(CssStageType.selector, _normalizeSelector(m.group(1)!)),
+        );
+        stages.add(CssStage(CssStageType.position, m.group(2)!));
+      } else if (isFirst ? _extractorKeywords.contains(p) : _isExtractor(p)) {
+        stages.add(CssStage(CssStageType.extractor, p));
+      } else {
+        // 首段一律按选择器理解（除非是 text/html 等关键字）：`a@href` /
+        // `h3@text` 这类单段标签是阅读源最常见写法，不能因为长得像属性名就被
+        // 当成属性提取（修前 `a@href` 命中 0 → 整行静默丢弃）。
+        stages.add(CssStage(CssStageType.selector, _normalizeSelector(p)));
+      }
+    }
+    for (final s in suffixes) {
+      stages.add(CssStage(CssStageType.range, s));
     }
   }
   return stages;
 }
 
 bool _isIndex(String p) =>
-    RegExp(r'^\d+$').hasMatch(p) || RegExp(r'^\.\d+$').hasMatch(p);
+    RegExp(r'^-?\d+$').hasMatch(p) || RegExp(r'^\.-?\d+$').hasMatch(p);
 
-final _suffixIndex = RegExp(r'^(.+)\.(\d+)$');
+final _suffixIndex = RegExp(r'^(.+)\.(-?\d+)$');
 
 int _indexValue(String p) => int.parse(p.startsWith('.') ? p.substring(1) : p);
 
 const _extractorKeywords = {'text', 'textNodes', 'ownText', 'html', 'all'};
+
+/// 属性名形态：字母/下划线开头，允许数字、连字符、冒号（如 data-src、xlink:href）。
+final _attrNameRe = RegExp(r'^[A-Za-z_][\w:-]*$');
 
 bool _isExtractor(String p) {
   if (_extractorKeywords.contains(p)) return true;
@@ -77,13 +118,42 @@ String _normalizeSelector(String p) {
 dom.Document parseHtml(String html) => html_parser.parse(html);
 
 /// 在上下文节点（Document 或 Element）内执行 CSS 元素选择。
+///
+/// package:html/csslib 不支持的常见形态由本函数降级实现：
+/// - 尾部 `:has(inner)`：先按 `sel` 选择，再按「存在后代匹配 inner」过滤；
+/// - 尾部 jsoup 位置伪类 `:lt(n)` `:gt(n)` `:eq(n)`；
+/// - 类型位置 `:nth-of-type(n)` `:first-of-type` `:last-of-type`；
+/// - `[attr~=a|b]` 形态的属性正则（含正则特征时接管）。
 List<dom.Element> selectElements(dom.Node context, String selector) {
+  final s = selector.trim();
+  if (s.isEmpty) return const [];
+  final filter = _splitTrailingFilter(s);
+  if (filter != null) {
+    return _applyListFilter(selectElements(context, filter.$1), filter.$2);
+  }
+  final has = _splitTrailingHas(s);
+  if (has != null) {
+    return [
+      for (final e in selectElements(context, has.$1))
+        if (e.querySelector(has.$2) != null) e,
+    ];
+  }
+  final attrRe = _splitAttrRegex(s);
+  if (attrRe != null) {
+    final base = selectElements(context, attrRe.$1);
+    final re = _safeRegExp(attrRe.$3);
+    if (re == null) return base;
+    return [
+      for (final e in base)
+        if (re.hasMatch(e.attributes[attrRe.$2] ?? '')) e,
+    ];
+  }
   try {
     if (context is dom.Document) {
-      return context.querySelectorAll(selector);
+      return context.querySelectorAll(s);
     }
     if (context is dom.Element) {
-      return context.querySelectorAll(selector);
+      return context.querySelectorAll(s);
     }
     return const [];
   } catch (_) {
@@ -92,6 +162,138 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
   }
 }
 
+// ---------- 尾部过滤伪类 ----------
+
+final RegExp _filterSuffix = RegExp(
+    r':(lt|gt|eq|nth-of-type|first-of-type|last-of-type)\s*(?:\(([^()]*)\))?\s*$');
+
+(String, (String, String?))? _splitTrailingFilter(String s) {
+  final m = _filterSuffix.firstMatch(s);
+  if (m == null) return null;
+  final name = m.group(1)!;
+  final arg = m.group(2)?.trim();
+  if (name == 'lt' || name == 'gt' || name == 'eq' || name == 'nth-of-type') {
+    if (arg == null || arg.isEmpty) return null;
+  }
+  final base = s.substring(0, m.start).trim();
+  if (base.isEmpty) return null;
+  return (base, (name, arg));
+}
+
+List<dom.Element> _applyListFilter(List<dom.Element> list, (String, String?) f) {
+  switch (f.$1) {
+    case 'lt':
+      final n = int.tryParse(f.$2 ?? '') ?? 0;
+      final out = <dom.Element>[];
+      for (var i = 0; i < list.length && i < n; i++) {
+        out.add(list[i]);
+      }
+      return out;
+    case 'gt':
+      final n = int.tryParse(f.$2 ?? '') ?? 0;
+      final out = <dom.Element>[];
+      for (var i = n + 1; i < list.length; i++) {
+        out.add(list[i]);
+      }
+      return out;
+    case 'eq':
+      final n = int.tryParse(f.$2 ?? '') ?? 0;
+      return (n >= 0 && n < list.length) ? [list[n]] : const [];
+    case 'nth-of-type':
+      return [for (final e in list) if (_matchNthOfType(e, f.$2!)) e];
+    case 'first-of-type':
+      return [for (final e in list) if (_typePosition(e) == 1) e];
+    case 'last-of-type':
+      return [
+        for (final e in list)
+          if (_typePosition(e) == _typePosition(e, total: true)) e,
+      ];
+  }
+  return list;
+}
+
+/// 元素在「同父同名元素」中的位置（1 起）；[total] 为 true 时返回总数。
+int _typePosition(dom.Element el, {bool total = false}) {
+  final parent = el.parent;
+  if (parent == null) return 1;
+  final name = el.localName;
+  var pos = 0;
+  for (final c in parent.children) {
+    if (c.localName == name) {
+      pos++;
+      if (!total && identical(c, el)) return pos;
+    }
+  }
+  return total ? pos : (pos == 0 ? 1 : pos);
+}
+
+bool _matchNthOfType(dom.Element el, String spec) {
+  final pos = _typePosition(el);
+  final t = spec.trim().toLowerCase();
+  if (t == 'odd') return pos % 2 == 1;
+  if (t == 'even') return pos % 2 == 0;
+  final n = int.tryParse(t);
+  if (n != null) return pos == n;
+  final m = RegExp(r'^([+-]?\d*)n\s*([+-]\s*\d+)?$').firstMatch(t);
+  if (m == null) return false;
+  var a = m.group(1) ?? '';
+  final b = int.tryParse((m.group(2) ?? '0').replaceAll(' ', '')) ?? 0;
+  final aVal = a.isEmpty || a == '+' ? 1 : (a == '-' ? -1 : int.parse(a));
+  if (aVal == 0) return pos == b;
+  final k = (pos - b) / aVal;
+  return k >= 0 && k == k.floorToDouble();
+}
+
+// ---------- `:has` / `~=` ----------
+
+/// 拆分尾部 `sel:has(inner)`；复杂形态（嵌套括号 / 逗号列表 / 子代 `>`）返回 null，
+/// 走原逻辑失败为原语义。
+(String, String)? _splitTrailingHas(String selector) {
+  final s = selector.trim();
+  if (!s.endsWith(')')) return null;
+  final i = s.lastIndexOf(':has(');
+  if (i <= 0) return null;
+  final inner = s.substring(i + 5, s.length - 1).trim();
+  if (inner.isEmpty ||
+      inner.contains('(') ||
+      inner.contains(')') ||
+      inner.contains(',') ||
+      inner.contains(':') ||
+      inner.contains('>')) {
+    return null;
+  }
+  final base = s.substring(0, i).trim();
+  if (base.isEmpty || base.contains(',')) return null;
+  return (base, inner);
+}
+
+/// 拆分 jsoup 风格 `[attr~=regex]`（仅当值含正则特征时接管；普通词匹配交给 csslib）。
+(String, String, String)? _splitAttrRegex(String selector) {
+  final ms = RegExp(r'\[([\w:-]+)\s*~=\s*([^\[\]]+)\]').allMatches(selector);
+  if (ms.isEmpty) return null;
+  final m = ms.last;
+  final pattern = m.group(2)!.trim();
+  if (!pattern.contains('|') &&
+      !pattern.contains('*') &&
+      !pattern.contains('^') &&
+      !pattern.contains(r'$') &&
+      !pattern.contains('(')) {
+    return null;
+  }
+  final base = (selector.substring(0, m.start) + selector.substring(m.end)).trim();
+  return (base.isEmpty ? '*' : base, m.group(1)!, pattern);
+}
+
+RegExp? _safeRegExp(String p) {
+  try {
+    return RegExp(p);
+  } catch (_) {
+    return null;
+  }
+}
+
+// ---------- 阶段求值 ----------
+
 /// 按阶段求值。
 ///
 /// [context] 为文档或元素；返回：
@@ -99,25 +301,90 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
 /// - 已到提取器：`List<String>`
 List<Object> evalCss(dom.Node context, List<CssStage> stages) {
   var current = <dom.Node>[context];
-  for (final stage in stages) {
+  for (var i = 0; i < stages.length; i++) {
+    final stage = stages[i];
     switch (stage.type) {
       case CssStageType.selector:
         final next = <dom.Node>[];
         for (final node in current) {
           next.addAll(selectElements(node, stage.value));
         }
+        // 首段是「纯属性名」形态且一个标签都没选到时，退回取当前节点的同名属性：
+        // 大量书源的 chapterUrl 直接写 `href`（要的是属性，不是 <href> 标签）。
+        if (next.isEmpty &&
+            i == 0 &&
+            _attrNameRe.hasMatch(stage.value) &&
+            context is dom.Element) {
+          final v = context.attributes[stage.value];
+          if (v != null && v.trim().isNotEmpty) return [v.trim()];
+        }
         current = next;
       case CssStageType.position:
-        final idx = int.tryParse(stage.value) ?? 0;
+        final idx0 = int.tryParse(stage.value) ?? 0;
+        final idx = idx0 < 0 ? current.length + idx0 : idx0;
         current = (idx >= 0 && idx < current.length)
             ? [current[idx]]
             : const <dom.Node>[];
+      case CssStageType.range:
+        current = _applyRange(current, stage.value);
       case CssStageType.extractor:
         return _extract(current, stage.value);
     }
     if (current.isEmpty) return const <Object>[];
   }
   return List<Object>.from(current);
+}
+
+List<dom.Node> _applyRange(List<dom.Node> cur, String spec) {
+  if (cur.isEmpty) return cur;
+  final s = spec.trim();
+  if (s.startsWith('!')) {
+    final excl = _parseIndexSet(s.substring(1), cur.length);
+    if (excl.isEmpty) return cur;
+    final keep = <dom.Node>[];
+    for (var i = 0; i < cur.length; i++) {
+      if (!excl.contains(i)) keep.add(cur[i]);
+    }
+    return keep;
+  }
+  if (s.contains(':') && !s.contains(',')) {
+    final pair = s.split(':');
+    var from = pair[0].trim().isEmpty ? 0 : int.tryParse(pair[0].trim()) ?? 0;
+    var to = (pair.length > 1 && pair[1].trim().isNotEmpty)
+        ? int.tryParse(pair[1].trim()) ?? cur.length
+        : cur.length;
+    if (from < 0) from += cur.length;
+    if (to < 0) to += cur.length;
+    from = from.clamp(0, cur.length);
+    to = to.clamp(0, cur.length);
+    if (from >= to) return const [];
+    return cur.sublist(from, to);
+  }
+  if (s.contains(',')) {
+    final out = <dom.Node>[];
+    for (final t in s.split(',')) {
+      final i0 = int.tryParse(t.trim());
+      if (i0 == null) continue;
+      final i = i0 < 0 ? cur.length + i0 : i0;
+      if (i >= 0 && i < cur.length) out.add(cur[i]);
+    }
+    return out;
+  }
+  final i0 = int.tryParse(s);
+  if (i0 == null) return cur;
+  final i = i0 < 0 ? cur.length + i0 : i0;
+  return (i >= 0 && i < cur.length) ? [cur[i]] : const [];
+}
+
+Set<int> _parseIndexSet(String s, int len) {
+  final out = <int>{};
+  for (final t in s.split(RegExp(r'[:,\s]+'))) {
+    final v = int.tryParse(t.trim());
+    if (v == null) continue;
+    final i = v < 0 ? len + v : v;
+    if (i >= 0 && i < len) out.add(i);
+  }
+  return out;
 }
 
 List<String> _extract(List<dom.Node> nodes, String extractor) {
