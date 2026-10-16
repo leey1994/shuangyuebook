@@ -265,30 +265,47 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   /// 来源筛选：全部 + 每个源（已返回的打 ✓）。
+  ///
+  /// 药丸分两行铺开、整体横向滑动 —— 导入的书源一多，
+  /// 单行横排根本看不全（69 个源排一行要划半天）。
   Widget _sourceChips(ThemeData theme) {
     final sources = collectSources();
+    final chips = <Widget>[
+      PillChip('全部来源',
+          selected: _filter == null,
+          onTap: () => setState(() => _filter = null)),
+      for (final s in sources)
+        PillChip(
+          '${s.name}${_returned.contains(s.id) ? ' ✓' : ''}',
+          selected: _filter == s.id,
+          onTap: () => setState(() => _filter = _filter == s.id ? null : s.id),
+        ),
+    ];
+    // 按原顺序切两半：第一行是「全部来源 + 前一半」，第二行是后半，
+    // 两行共享一个横向滚动条（内置源照旧排在最前，位置不变）。
+    final half = (chips.length + 1) ~/ 2;
+    Widget row(List<Widget> items) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final c in items)
+              Padding(padding: const EdgeInsets.only(right: 8), child: c),
+          ],
+        );
     return SizedBox(
-      height: 45,
-      child: ListView(
+      height: 80,
+      child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(16, 7, 16, 9),
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: PillChip('全部来源',
-                selected: _filter == null,
-                onTap: () => setState(() => _filter = null)),
-          ),
-          for (final s in sources)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: PillChip(
-                '${s.name}${_returned.contains(s.id) ? ' ✓' : ''}',
-                selected: _filter == s.id,
-                onTap: () => setState(() => _filter = _filter == s.id ? null : s.id),
-              ),
-            ),
-        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            row(chips.take(half).toList()),
+            const SizedBox(height: 6),
+            row(chips.skip(half).toList()),
+          ],
+        ),
       ),
     );
   }

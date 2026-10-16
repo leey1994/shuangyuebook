@@ -318,36 +318,6 @@ class _LocalImportPageState extends State<LocalImportPage> {
   }
 }
 
-/// 常见书籍目录（Android 外部存储 / Windows 用户目录）。
-///
-/// Android 上需要「所有文件访问」权限才能列这些目录；拿不到时列表为空，
-/// 用户仍可通过「上一级」从可读目录进入。
-List<String> defaultScanRoots() {
-  final home =
-      Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '';
-  if (Platform.isWindows) {
-    return [
-      if (home.isNotEmpty) home,
-      ..._windowsBookDirs(home),
-    ];
-  }
-  return const [
-    '/storage/emulated/0',
-    '/storage/emulated/0/Books',
-    '/storage/emulated/0/Download',
-    '/storage/emulated/0/Documents',
-  ];
-}
-
-List<String> _windowsBookDirs(String home) {
-  if (home.isEmpty) return const [];
-  return [
-    '$home\\Books',
-    '$home\\Downloads',
-    '$home\\Documents',
-  ];
-}
-
 /// 主题一致性辅助：导入页的强调色取全局主题主色。
 Color importAccent(BuildContext context) =>
     AppThemes.material(Theme.of(context).brightness == Brightness.dark

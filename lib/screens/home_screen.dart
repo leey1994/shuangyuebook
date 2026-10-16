@@ -1,8 +1,8 @@
 // 首页：全源实时聚合推荐（横幅 / 分类快捷 / 热榜速览 / 今日推荐）。
 //
-// 与旧「发现页」的区别：内容全部来自内置 35 源实时聚合，先到先上屏
-// （不等最慢的源）；下拉刷新整批作废重拉。宽屏（Windows）为主区 + 右栏
-// 三栏布局，窄屏为单列。
+// 与旧「发现页」的区别：内容来自全部可用源（内置 + 已启用导入源）
+// 实时聚合，先到先上屏（不等最慢的源）；下拉刷新整批作废重拉。
+// 宽屏（Windows）为主区 + 右栏三栏布局，窄屏为单列。
 import 'dart:async';
 import 'dart:math';
 
@@ -60,13 +60,22 @@ class _HomeScreenState extends State<HomeScreen>
     // 勾选推荐来源是「首页自己」的事：只听这一个信号，
     // 书架进度之类的无关通知不触发重新拉网。
     AppStore.I.recommendChanged.addListener(_onRecommendChanged);
+    // 书源仓库变化（导入 / 启用 / 删除）也要刷新：
+    // 搜索栏的「N 源聚合」和推荐流都以它为口径，否则导入完
+    // 书源首页数字纹丝不动，像没导进去。
+    SourceStore.shared?.addListener(_onSourcesChanged);
     _load();
   }
 
   @override
   void dispose() {
     AppStore.I.recommendChanged.removeListener(_onRecommendChanged);
+    SourceStore.shared?.removeListener(_onSourcesChanged);
     super.dispose();
+  }
+
+  void _onSourcesChanged() {
+    if (mounted) _load();
   }
 
   void _onRecommendChanged() {

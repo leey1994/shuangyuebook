@@ -21,6 +21,7 @@ import 'package:shuangyue/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'source_fetch_page.dart';
+import 'source_file_pick_page.dart';
 
 /// 书源管理页。
 ///
@@ -701,7 +702,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             ListTile(
               leading: const Icon(Icons.insert_drive_file),
               title: const Text('从文件导入'),
-              subtitle: const Text('填写书源 JSON 文件的完整路径'),
+              subtitle: const Text('浏览手机 / 电脑上的 JSON 文件'),
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _importFromFile();
@@ -742,17 +743,17 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     }
     _snack(r.summary);
     PetStore.I.emit(PetAction.sourceImport);
-    // 刚导入的书源很可能是一堆失效的老收藏，导入后立刻批量验活：
-    // 搜不出东西的直接移除，并把「删了什么、为什么」告诉用户。
+    // 刚导入的书源很可能是一堆失效的老收藏，导入后立刻批量验活。
+    // 但删不删由用户拍板：瞬时网络抖动也会让好源搜不出东西，
+    // 宁可多留一个废源，也别把用户刚导入的源悄悄删了。
     unawaited(_verifyAfterImport());
   }
 
-  /// 导入后批量检测：删掉搜不出东西的书源，并给出可读的结论。
+  /// 导入后批量检测：先给出完整结论，未通过的源由用户决定去留。
   Future<void> _verifyAfterImport() async {
     if (!mounted) return;
     _snack('正在检测书源可用性…');
     final report = await SourceHealthStore.I.run(
-      removeFailed: true,
       concurrency: AppStore.I.checkConcurrency,
       onProgress: (done, total) {
         if (mounted && (done == total || done % 5 == 0)) {
@@ -768,62 +769,85 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       return;
     }
     PetStore.I.emit(PetAction.sourceFailed);
-    await _showRemovedDialog(report);
+    await _showFailedDialog(report, allowRemove: true);
     if (mounted) setState(() {});
   }
 
-  /// 列出被移除的书源与原因。
-  Future<void> _showRemovedDialog(SourceCheckReport report) => showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('已移除 ${report.removed.length} 个不可用书源'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(report.summary),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final f in report.failed)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                f.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 13),
+  /// 列出检测不通过的书源与原因；[allowRemove] 时提供「移除未通过」操作。
+  ///
+  /// 返回后用户若选了移除，才真正从仓库删除并提示数量。
+  Future<void> _showFailedDialog(
+    SourceCheckReport report, {
+    required bool allowRemove,
+  }) async {
+    final failed = report.failed;
+    if (failed.isEmpty) return;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${failed.length} 个书源未通过检测'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(report.summary),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final f in failed)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              f.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13),
+                            ),
+                            Text(
+                              f.error ?? '不可用',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(ctx).colorScheme.error,
                               ),
-                              Text(
-                                f.error ?? '不可用',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(ctx).colorScheme.error,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          actions: [
+        ),
+        actions: [
+          if (allowRemove) ...[
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
+              onPressed: () => Navigator.pop(ctx, 'keep'),
+              child: const Text('全部保留'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'remove'),
+              child: const Text('移除未通过'),
+            ),
+          ] else
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('知道了'),
             ),
-          ],
-        ),
-      );
+        ],
+      ),
+    );
+    if (action != 'remove') return;
+    final removed = _store.removeMany(failed.map((f) => f.url));
+    await _store.flush();
+    if (mounted) _snack('已移除 $removed 个未通过的书源');
+  }
 
   /// 手动体检：只标记不删除，用户可自行决定停用哪些。
   Future<void> _manualCheck() async {
@@ -837,7 +861,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       },
     );
     if (!mounted) return;
-    await _showRemovedDialog(report);
+    if (report.hasFailure) {
+      await _showFailedDialog(report, allowRemove: false);
+    } else {
+      _snack(report.summary);
+    }
     if (mounted) setState(() {});
   }
 
@@ -884,7 +912,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   Future<void> _importFromFile() async {
-    final path = await _prompt('从文件导入', '书源 JSON 文件的完整路径', confirm: '导入');
+    // 打开内置文件浏览器选文件（跟本地书导入同一套目录逻辑）；
+    // 浏览器里留了「手输路径」给读不了目录的场景兜底。
+    final path = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const SourceFilePickPage()),
+    );
     if (path == null || path.isEmpty || !mounted) return;
     _report(await _store.importFromFile(path));
   }

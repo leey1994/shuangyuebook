@@ -30,8 +30,15 @@ class BookDetailScreen extends StatefulWidget {
 
 class _BookDetailScreenState extends State<BookDetailScreen> {
   late NovelSource _src;
+
+  /// 当前展示的书：自动换源成功后指向新来源的条目
+  /// （[widget.book] 只是打开时传入的那一个）。
+  late Book _book;
   BookDetail? _detail;
   Object? _error;
+
+  /// 加载失败后自动换源的进行中提示。
+  String? _autoMsg;
   bool _loadingMore = false;
 
   // 离线下载状态
@@ -47,7 +54,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _src = sourceById(widget.book.sourceId) ?? allSources.first;
+    _book = widget.book;
+    _src = sourceById(_book.sourceId) ?? allSources.first;
     _load();
     unawaited(_countSources());
   }
@@ -56,32 +64,98 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     setState(() {
       _error = null;
       _detail = null;
+      _autoMsg = null;
     });
     try {
-      final d = await _src.fetchDetail(widget.book);
+      final d = await _src.fetchDetail(_book);
       if (mounted) setState(() => _detail = d);
-      AppStore.I.setChapterCount(widget.book.url, d.chapters.length);
+      AppStore.I.setChapterCount(_book.url, d.chapters.length);
     } catch (e) {
       // 离线兜底：用本地缓存的目录
-      final cached = await AppStore.I.cachedDetail(widget.book);
+      final cached = await AppStore.I.cachedDetail(_book);
       if (!mounted) return;
       if (cached != null) {
         setState(() => _detail = cached);
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('网络不可用，已显示离线目录')));
       } else {
-        setState(() => _error = e);
+        // 别的源收录过同名书就自动切过去，一个都打不开才落回错误页
+        await _autoSwitch(e);
       }
     }
   }
 
+  /// 当前来源打不开（404 / 解析失败）时，自动换到其它能打开的源。
+  ///
+  /// 用全部可用源按书名搜一遍 —— 和 [_countSources] 共用 FeedCache
+  /// 缓存键，多数情况直接命中，几乎不重复拉网；并发搜完按
+  /// collectSources 的顺序挨个试（固化源在前，默认先试稳的），
+  /// 第一个能拉到目录的就切过去并提示用户。
+  Future<void> _autoSwitch(Object error) async {
+    final title = _book.title;
+    final key = bookKeyOf(_book);
+    final current = _src.id;
+    setState(() => _autoMsg = '当前来源打不开，正在试其它来源…');
+    final found = <(NovelSource, Book)>[];
+    await Future.wait(collectSources()
+        .where((s) => s.id != current)
+        .map((s) async {
+      try {
+        final r = await FeedCache.reach(
+          FeedCache.key(['search', s.id, title]),
+          () => s.search(title),
+        );
+        for (final b in r) {
+          if (bookKeyOf(b) == key) {
+            found.add((s, b));
+            break;
+          }
+        }
+      } catch (_) {
+        // 这个源搜不动就跳过，不影响其它候选
+      }
+    }));
+    if (!mounted) return;
+    // 并发返回顺序不定：按 collectSources 的登记顺序重排后再试
+    final order = <String, int>{};
+    final all = collectSources();
+    for (var i = 0; i < all.length; i++) {
+      order[all[i].id] = i;
+    }
+    found.sort((a, b) =>
+        (order[a.$1.id] ?? 1 << 20).compareTo(order[b.$1.id] ?? 1 << 20));
+    for (final (s, b) in found.take(6)) {
+      try {
+        final d = await s.fetchDetail(b);
+        if (!mounted) return;
+        setState(() {
+          _src = s;
+          _book = b;
+          _detail = d;
+          _autoMsg = null;
+        });
+        AppStore.I.setChapterCount(b.url, d.chapters.length);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('原来源打不开，已自动切换到「${s.name}」')));
+        return;
+      } catch (_) {
+        // 换下一个候选
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _autoMsg = null;
+      _error = error; // 全都不行：还原错误页（重试 / 手动换源仍在）
+    });
+  }
+
   /// 后台数一数有多少书源同时收录了这本书（同名合并口径）。
   Future<void> _countSources() async {
-    final key = bookKeyOf(widget.book);
-    final title = widget.book.title;
+    final key = bookKeyOf(_book);
+    final title = _book.title;
     var count = 1; // 当前来源
     await Future.wait(collectSources()
-        .where((s) => s.id != widget.book.sourceId)
+        .where((s) => s.id != _src.id)
         .map((s) async {
       try {
         final r = await FeedCache.reach(
@@ -109,7 +183,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     setState(() => _loadingMore = true);
     try {
       final more =
-          await _src.fetchDetail(widget.book, nextUrl: d.nextChaptersUrl);
+          await _src.fetchDetail(_book, nextUrl: d.nextChaptersUrl);
       if (!mounted) return; // 拉取期间退出详情页：迟到结果丢弃
       final seen = d.chapters.map((c) => c.url).toSet();
       final merged = [...d.chapters];
@@ -123,7 +197,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           nextChaptersUrl: more.nextChaptersUrl,
         );
       });
-      AppStore.I.setChapterCount(widget.book.url, merged.length);
+      AppStore.I.setChapterCount(_book.url, merged.length);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -181,7 +255,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   }
 
   void _share() {
-    final b = _detail?.book ?? widget.book;
+    final b = _detail?.book ?? _book;
     final line = [
       '《${b.title}》',
       if (b.author?.isNotEmpty ?? false) b.author!,
@@ -193,7 +267,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   }
 
   void _openMoreSheet() {
-    final b = _detail?.book ?? widget.book;
+    final b = _detail?.book ?? _book;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -256,7 +330,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
 
   void _switchSource() {
     // 详情没拉到也能换源（错误页用）：退回打开时的 book
-    final d = _detail?.book ?? widget.book;
+    final d = _detail?.book ?? _book;
     showSourceSwitch(
       context,
       d,
@@ -344,7 +418,22 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     final theme = Theme.of(context);
     final body = d == null
         ? (_error == null
-            ? const Center(child: CircularProgressIndicator())
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    if (_autoMsg != null) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        _autoMsg!,
+                        style: TextStyle(
+                            fontSize: 12.5, color: Brand.fg3(context)),
+                      ),
+                    ],
+                  ],
+                ),
+              )
             : Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -746,10 +835,10 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   }
 
   int _startIndex() {
-    final e = AppStore.I.shelfEntry(_detail?.book.url ?? widget.book.url) ??
+    final e = AppStore.I.shelfEntry(_detail?.book.url ?? _book.url) ??
         AppStore.I.history.firstWhere(
-            (x) => x.book.url == (_detail?.book.url ?? widget.book.url),
-            orElse: () => ShelfEntry(book: widget.book));
+            (x) => x.book.url == (_detail?.book.url ?? _book.url),
+            orElse: () => ShelfEntry(book: _book));
     final n = _detail?.chapters.length ?? 0;
     if (n == 0) return 0;
     return e.chapterIndex.clamp(0, n - 1).toInt();
