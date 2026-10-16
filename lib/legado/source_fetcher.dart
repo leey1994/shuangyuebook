@@ -15,14 +15,36 @@ class SourceCollectionPreset {
   final String url;
 }
 
+/// 全部预设于 2026-10-16 在移动网络（手机端）实测直连可下：最快 0.3s、
+/// 最慢 5.6s、最大 2.7MB。原「大辉狼精选集」已移除：good.json 达 16MB，
+/// 唯一镜像 jsdelivr 在境内被拦（秒断），换什么线路都撑不过下载超时。
 const List<SourceCollectionPreset> kSourceCollectionPresets = [
   SourceCollectionPreset(
     'yiove 书源库 · 1-80',
     'https://shuyuan-api.yiove.com/import/book-sources/1-80',
   ),
   SourceCollectionPreset(
-    '大辉狼精选集 good.json',
-    'https://cdn.jsdelivr.net/gh/shidahuilang/shuyuan-bak@main/good.json',
+    'yiove 稳定合集',
+    'https://shuyuan-api.yiove.com/import/book-source-collection/'
+        'eaedccd4-1252-4962-a565-c7a342f95f90',
+  ),
+  SourceCollectionPreset(
+    'Xiu 精品书源',
+    'https://cdn.jsdmirror.com/gh/XIU2/Yuedu/shuyuan',
+  ),
+  SourceCollectionPreset(
+    '一程书源合集',
+    'https://cdn.mgz.la/shuyuan/'
+        '250701%E6%9C%80%E5%90%8E%E4%B8%80%E7%89%88%E4%B8%80%E7%A8%8B.json',
+  ),
+  SourceCollectionPreset(
+    '破冰书源',
+    'https://legado.miaogongzi.org/'
+        '%E9%98%85%E8%AF%BB%E4%B9%A6%E6%BA%90/sy.json',
+  ),
+  SourceCollectionPreset(
+    '关耳女频',
+    'https://cdn.mgz.la/shuyuan/guaner25.02.03.txt',
   ),
 ];
 
