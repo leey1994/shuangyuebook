@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'package:fast_gbk/fast_gbk.dart';
 
 import 'analyze_template.dart';
+import 'js_engine.dart';
 import 'rule_analyzer.dart';
 
 /// 模板解析结果：纯 URL 模板 + 请求选项。
@@ -147,13 +148,24 @@ String _renderJsonQuoted(String s, Map<String, dynamic> vars) {
 /// 渲染模板变量（URL 语境：按 charset 百分号编码）。
 ///
 /// [vars] 至少应包含 `key` 与 `page`；`searchKey` / `keyword` 会映射到 `key`。
+/// [js] 提供时，子集无法求值的 `{{…}}` 走真实 JS（对齐 legado 的 evalJS）。
 String renderUrlTemplate(
   String template,
   Map<String, dynamic> vars, {
   String? charset,
+  JsEnv? js,
 }) {
   if (template.isEmpty) return template;
-  final eng = TemplateEngine(vars: vars, encoder: _encoderFor(charset));
+  final eng = TemplateEngine(
+    vars: vars,
+    encoder: _encoderFor(charset),
+    jsEval: (js != null && JsBridge.available)
+        ? (expr, _) => JsBridge.evalCode(
+              expr,
+              env: js.copyWith(vars: {...?js.vars, ...vars}),
+            )
+        : null,
+  );
   return eng.render(template, encodeValues: true);
 }
 
@@ -200,23 +212,33 @@ String resolveUrl(String url, String baseUrl) {
 /// 一步到位：解析 + 渲染 + 补全。
 ///
 /// [baseUrl] 通常是书源的 `bookSourceUrl`。
+/// [js] 提供且引擎可用时：JS 段真执行、`{{…}}` 支持 JS 兜底、页列表 `<a,b,c>` 生效。
 /// 选项中的 body/headers 也一并处理：
 /// - body 模板按「原始值」渲染（JSON 请求体不能百分号编码）；
 /// - headers 若为 JSON 字符串则解码为 Map。
 UrlTemplate buildRequest(
   String rawTemplate,
   String baseUrl,
-  Map<String, dynamic> vars,
-) {
-  var s = _stripJsPrelude(rawTemplate.trim());
-  // 尾随 `@js:…`（对 URL 做签名/时间戳等变换）：无法执行 → 用脚本前的地址尽力请求
-  s = RuleAnalyzer.stripTrailingJs(s);
+  Map<String, dynamic> vars, {
+  JsEnv? js,
+}) {
+  var s = rawTemplate.trim();
+  if (RuleAnalyzer.hasJs(s) && js != null && JsBridge.available) {
+    // P0：执行 JS 段（对齐 legado AnalyzeUrl.analyzeJs）
+    s = _evalJsBlocks(s, js, vars);
+  } else {
+    // 无引擎降级：剥离前置 <js> 块；尾随 @js: 丢弃（用于脚本前的地址尽力请求）
+    s = _stripJsPrelude(s);
+    s = RuleAnalyzer.stripTrailingJs(s);
+  }
   final split = _splitOptions(s, vars);
   final t = _withLegacyOptions(UrlTemplate(split.$1, split.$2));
   final options = Map<String, dynamic>.from(t.options);
   final charset = options['charset']?.toString();
-  final rendered = renderUrlTemplate(t.url, vars, charset: charset);
-  final url = resolveUrl(rendered, baseUrl);
+  final rendered = renderUrlTemplate(t.url, vars, charset: charset, js: js);
+  // P0：阅读页列表 `<url1,url2,…>`（legado pagePattern；{{}} 替换后按 page 选取）
+  var url = _applyPageList(rendered, vars['page']);
+  url = resolveUrl(url, baseUrl);
   if (options.containsKey('body')) {
     options['body'] = _renderBody(options['body'], vars);
   }
@@ -230,6 +252,41 @@ UrlTemplate buildRequest(
     }
   }
   return UrlTemplate(url, options);
+}
+
+/// 执行 URL 模板中的 JS 段（对齐 legado `AnalyzeUrl.analyzeJs`）：
+/// `result` 初值 = 整串；文本段 `text.replace("@result", result)`（无占位则整体替换）；
+/// JS 段 `evalJS(code, result)`，脚本返回串作为新的 `result`。
+String _evalJsBlocks(String input, JsEnv js, Map<String, dynamic> vars) {
+  final segs = RuleAnalyzer.splitJs(input);
+  if (!segs.any((s) => s.isJs)) return input;
+  final env = js.copyWith(vars: {...?js.vars, ...vars});
+  var result = input;
+  for (final seg in segs) {
+    if (seg.isJs) {
+      result = JsBridge.evalCode(seg.text, env: env, input: result) ?? '';
+    } else {
+      final t = seg.text.trim();
+      if (t.isNotEmpty) result = t.replaceAll('@result', result);
+    }
+  }
+  return result;
+}
+
+/// 页列表 `<url1,url2,…>`：按 `page` 选第 page 项（越界取末项）。
+///
+/// page 非法（null / 非数字）时原样返回（legado：page 为空则不替换）。
+String _applyPageList(String s, dynamic page) {
+  if (!s.contains('<') || page is! num) return s;
+  final p = page.toInt();
+  return s.replaceAllMapped(RegExp(r'<(.*?)>', dotAll: true), (m) {
+    final items = m.group(1)!.split(',').map((e) => e.trim()).toList();
+    if (items.isEmpty) return '';
+    var idx = p - 1;
+    if (idx < 0) idx = 0;
+    if (idx >= items.length) idx = items.length - 1;
+    return items[idx];
+  });
 }
 
 dynamic _renderBody(dynamic body, Map<String, dynamic> vars) {

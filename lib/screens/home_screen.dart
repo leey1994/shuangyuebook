@@ -44,6 +44,9 @@ class _HomeScreenState extends State<HomeScreen>
   final Map<String, List<Book>> _bySource = {};
   List<Book> _rec = [];
   List<AggRankEntry> _hot = [];
+
+  /// 推荐流来源筛选（null = 全部）——交互对齐搜索页的来源药丸。
+  String? _filter;
   int _done = 0;
   int _total = 0;
   int _gen = 0;
@@ -231,9 +234,57 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// 横幅书目：热榜有货用热榜（章首即「今日热榜 TOP N」），否则用推荐流。
-  List<Book> get _bannerBooks => _hot.isNotEmpty
-      ? _hot.take(5).map((e) => e.book).toList()
-      : _rec.take(5).toList();
+  List<Book> get _bannerBooks {
+    final rec = _filteredRec;
+    return _hot.isNotEmpty
+        ? _hot.take(5).map((e) => e.book).toList()
+        : rec.take(5).toList();
+  }
+
+  /// 推荐流按选中源过滤（null = 全部）。
+  List<Book> get _filteredRec =>
+      _filter == null ? _rec : (_bySource[_filter] ?? const []);
+
+  /// 来源筛选药丸行（与搜索页同款交互）。
+  Widget _sourceChipsRow(ThemeData theme) {
+    final sources = _homeSources();
+    if (sources.length <= 1) return const SizedBox.shrink();
+    final chips = <Widget>[
+      PillChip('全部来源',
+          selected: _filter == null,
+          onTap: () => setState(() => _filter = null)),
+      for (final s in sources)
+        PillChip(
+          '${s.name}${_bySource.containsKey(s.id) ? ' ✓' : ''}',
+          selected: _filter == s.id,
+          onTap: () =>
+              setState(() => _filter = _filter == s.id ? null : s.id),
+        ),
+    ];
+    Widget row(List<Widget> items) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final c in items)
+              Padding(padding: const EdgeInsets.only(right: 8), child: c),
+          ],
+        );
+    final half = (chips.length + 1) ~/ 2;
+    return SizedBox(
+      height: 80,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 7, 16, 9),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            row(chips.sublist(0, half.clamp(0, chips.length))),
+            row(chips.sublist(half.clamp(0, chips.length))),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -284,7 +335,8 @@ class _HomeScreenState extends State<HomeScreen>
                   for (var i = 0; i < _hot.take(3).length; i++)
                     _hotRow(_hot[i], i + 1, theme),
                 ],
-                if (_rec.isNotEmpty) ...[
+                if (_filteredRec.isNotEmpty) ...[
+                  _sourceChipsRow(theme),
                   SectionHead('今日推荐',
                       action: '换一批',
                       actionIcon: const Icon(Icons.refresh,
@@ -381,7 +433,8 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: 18),
             if (_hot.isNotEmpty) _hotCard(theme),
             const SizedBox(height: 18),
-            if (_rec.isNotEmpty) ...[
+            if (_filteredRec.isNotEmpty) ...[
+              _sourceChipsRow(theme),
               SectionHead('今日推荐',
                   padding: const EdgeInsets.fromLTRB(0, 0, 0, 10),
                   action: '换一批',
@@ -556,11 +609,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _recGrid(ThemeData theme, {required bool narrow}) {
+    final rec = _filteredRec;
     // 推荐池去掉已在横幅露脸的书，不足 6 本就不再剔除（宁可爱重复也要有内容）
-    final pool = _rec.length > 6
-        ? _rec.where((b) => !_bannerBooks.any((x) => x.url == b.url)).toList()
-        : _rec;
-    final src = pool.length >= 6 ? pool : _rec;
+    final pool = rec.length > 6
+        ? rec.where((b) => !_bannerBooks.any((x) => x.url == b.url)).toList()
+        : rec;
+    final src = pool.length >= 6 ? pool : rec;
     if (src.isEmpty) return const SizedBox.shrink();
     final start = (_batch * 6) % src.length;
     final items = [for (var i = 0; i < 6 && i < src.length; i++) src[(start + i) % src.length]];

@@ -38,7 +38,21 @@ class PageSnapPhysics extends ScrollPhysics {
     ScrollMetrics position,
     double velocity,
   ) {
-    // 越界且没有回归趋势：交给父级物理（回弹逻辑）
+    // 越界回弹：父链没有物理时 super 返回 null → 页面会**停在越界的
+    // 半屏位置**（「卡住半屏，等会在跳到全屏」的来源）。自己回弹到边界。
+    final bool overMin =
+        position.pixels < position.minScrollExtent - 0.01;
+    final bool overMax =
+        position.pixels > position.maxScrollExtent + 0.01;
+    if (overMin || overMax) {
+      final double vp = position.viewportDimension;
+      if (vp <= 0) return null;
+      return PageSnapSimulation(
+        from: position.pixels,
+        to: overMin ? position.minScrollExtent : position.maxScrollExtent,
+        pageExtent: vp,
+      );
+    }
     if ((velocity <= 0.0 && position.pixels <= position.minScrollExtent) ||
         (velocity >= 0.0 && position.pixels >= position.maxScrollExtent)) {
       return super.createBallisticSimulation(position, velocity);

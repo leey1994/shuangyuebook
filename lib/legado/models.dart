@@ -430,6 +430,16 @@ class BookSource {
   /// 请求头（原样保存；可能是 JSON 字符串）。
   final String? header;
 
+  /// 书源级 JS 库（legado `jsLib`；以 extra 承载，运行时同源只求值一次）。
+  String? get jsLib {
+    final v = extra['jsLib'];
+    if (v is String) {
+      final t = v.trim();
+      return t.isEmpty ? null : t;
+    }
+    return null;
+  }
+
   final String? loginUrl;
   final String? loginUi;
   final String? loginCheckJs;

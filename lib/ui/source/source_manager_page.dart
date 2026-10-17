@@ -709,6 +709,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('内置精选书源'),
+              subtitle: const Text('离线内置书源包（无需联网），导入后可在本页单独删除'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _importBuiltin();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.link),
               title: const Text('从订阅链接导入'),
               subtitle: const Text('用网络地址获取书源 JSON'),
@@ -919,6 +928,21 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
     if (path == null || path.isEmpty || !mounted) return;
     _report(await _store.importFromFile(path));
+  }
+
+  /// 导入随包内置的精选书源（离线资产）。
+  ///
+  /// 与其它导入完全同路径：导入后就是普通导入源，可单条删除 / 批量删除。
+  Future<void> _importBuiltin() async {
+    try {
+      final text = await rootBundle.loadString(
+        'assets/sources/curated_sources.json',
+      );
+      if (!mounted) return;
+      _report(_store.importFromText(text));
+    } catch (e) {
+      _snack('内置书源读取失败：$e');
+    }
   }
 
   Future<void> _importFromUrl() async {

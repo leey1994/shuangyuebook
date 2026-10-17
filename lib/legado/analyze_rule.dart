@@ -18,6 +18,7 @@ import 'analyze_json.dart';
 import 'analyze_regex.dart';
 import 'analyze_template.dart';
 import 'analyze_xpath.dart';
+import 'js_engine.dart';
 import 'rule_analyzer.dart';
 
 /// HTML → XML 宽松解析（容错常见的不合法写法，供 XPath 使用）。
@@ -29,17 +30,34 @@ xml.XmlDocument? parseXmlLoose(String html) {
     // 继续尝试清洗
   }
   var s = html;
-  // 自闭合常见的空元素
+  // 注释与 DOCTYPE（XML 注释不允许 `--`；DTD 声明对包内解析器也无意义）
+  s = s.replaceAll(RegExp(r'<!--[\s\S]*?-->'), '');
+  s = s.replaceAll(RegExp(r'<!DOCTYPE[^>]*>', caseSensitive: false), '');
+  // script/style 内容常含裸 `<`、`&&`：包 CDATA（内含 `]]>` 时先拆开）
   s = s.replaceAllMapped(
-    RegExp(r'<(br|hr|img|input|meta|link)([^<>]*?)(/?)>', caseSensitive: false),
+    RegExp(r'(<(?:script|style)\b[^>]*>)([\s\S]*?)(</(?:script|style)>)',
+        caseSensitive: false),
     (m) {
-      final name = m.group(1)!;
-      final attrs = m.group(2) ?? '';
-      final slash = m.group(3) ?? '';
-      if (slash.isNotEmpty) return m.group(0)!;
-      return '<$name$attrs/>';
+      final body = (m.group(2) ?? '').replaceAll(']]>', ']] >');
+      return '${m.group(1)}<![CDATA[$body]]>${m.group(3)}';
     },
   );
+  // 自闭合空元素（HTML void 表）
+  s = s.replaceAllMapped(
+    RegExp(
+        r'<(br|hr|img|input|meta|link|area|base|col|embed|param|source|track|wbr)([^<>]*?)(/?)>',
+        caseSensitive: false),
+    (m) {
+      if ((m.group(3) ?? '').isNotEmpty) return m.group(0)!;
+      final attrs = m.group(2) ?? '';
+      if (attrs.trimRight().endsWith('/')) return m.group(0)!;
+      return '<${m.group(1)}$attrs/>';
+    },
+  );
+  // 常见 HTML 命名实体 → 直出字符（XML 只预定义五个实体）
+  s = s.replaceAllMapped(RegExp(r'&([a-zA-Z][a-zA-Z0-9]*);'), (m) {
+    return _htmlEntities[(m.group(1) ?? '').toLowerCase()] ?? m.group(0)!;
+  });
   // 裸 & 转义
   s = s.replaceAll(
     RegExp(r'&(?!(#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)'),
@@ -48,13 +66,87 @@ xml.XmlDocument? parseXmlLoose(String html) {
   try {
     return xml.XmlDocument.parse(s);
   } catch (_) {
-    return null;
+    // 兜底：容错 HTML DOM → 规范 XML（把 HTML5 宽松解析的容错全部吸收）
+    try {
+      return xml.XmlDocument.parse(serializeDomToXml(parseHtml(html)));
+    } catch (_) {
+      return null;
+    }
   }
 }
 
+/// HTML 空元素标签（XML 序列化时自闭合）。
+const _voidTags = {
+  'br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base',
+  'col', 'embed', 'param', 'source', 'track', 'wbr',
+};
+
+/// 常见 HTML 命名实体映射（避免 XML 解析器拒绝未定义实体）。
+const _htmlEntities = {
+  'nbsp': '\u00a0', 'ldquo': '\u201c', 'rdquo': '\u201d', 'lsquo': '\u2018',
+  'rsquo': '\u2019', 'middot': '\u00b7', 'hellip': '\u2026', 'mdash': '\u2014',
+  'ndash': '\u2013', 'times': '\u00d7', 'divide': '\u00f7', 'laquo': '\u00ab',
+  'raquo': '\u00bb', 'copy': '\u00a9', 'reg': '\u00ae', 'trade': '\u2122',
+  'bull': '\u2022', 'sect': '\u00a7', 'deg': '\u00b0', 'plusmn': '\u00b1',
+  'sup2': '\u00b2', 'sup3': '\u00b3', 'euro': '\u20ac', 'pound': '\u00a3',
+  'yen': '\u00a5', 'cent': '\u00a2', 'larr': '\u2190', 'rarr': '\u2192',
+  'uarr': '\u2191', 'darr': '\u2193', 'infin': '\u221e', 'prime': '\u2032',
+};
+
+/// 把容错解析出的 HTML DOM 序列化为规范 XML（XPath 兜底路径）。
+String serializeDomToXml(dom.Node root) {
+  final b = StringBuffer();
+  void write(dom.Node n) {
+    if (n is dom.Element) {
+      final tag = (n.localName ?? 'div').toLowerCase();
+      b.write('<$tag');
+      n.attributes.forEach((k, v) {
+        b.write(' ${k.toString().toLowerCase()}="${_xmlAttrEscape(v)}"');
+      });
+      if (_voidTags.contains(tag)) {
+        b.write('/>');
+        return;
+      }
+      b.write('>');
+      if (tag == 'script' || tag == 'style') {
+        b.write('<![CDATA[');
+        for (final c in n.nodes) {
+          if (c is dom.Text) b.write(c.text.replaceAll(']]>', ']] >'));
+        }
+        b.write(']]>');
+      } else {
+        for (final c in n.nodes) {
+          write(c);
+        }
+      }
+      b.write('</$tag>');
+    } else if (n is dom.Text) {
+      b.write(n.text
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;'));
+    } else if (n is dom.Document || n is dom.DocumentFragment) {
+      for (final c in n.nodes) {
+        write(c);
+      }
+    }
+    // 注释等其它节点丢弃
+  }
+
+  write(root);
+  return b.toString();
+}
+
+String _xmlAttrEscape(String s) => s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+
 /// 规则求值器。
 class AnalyzeRule {
-  AnalyzeRule(this.document, {String baseUrl = '', Map<String, dynamic>? vars})
+  AnalyzeRule(this.document,
+      {String baseUrl = '', Map<String, dynamic>? vars, this.js})
       : baseUrl = RuleAnalyzer.cleanBaseUrl(baseUrl),
         vars = vars ?? <String, dynamic>{};
 
@@ -67,6 +159,9 @@ class AnalyzeRule {
   /// 调用方注入的上下文变量（如 `key` / `page` / `book`）。可在生命周期内补充。
   final Map<String, dynamic> vars;
 
+  /// P0：书源 JS 环境（会话 / 书源上下文由服务层注入；为空时 JS 段按旧行为降级）。
+  final JsEnv? js;
+
   /// `@put:` 注解写入的变量（`@get:` / `{{var}}` 读取）。
   final Map<String, String> _stored = {};
 
@@ -76,14 +171,69 @@ class AnalyzeRule {
   bool _xmlTried = false;
   xml.XmlDocument? _xmlDoc;
 
+  /// init 求值结果（对齐 legado `AnalyzeRule.setContent(结果)` 的 content 覆盖）：
+  /// JSON 对象（Map/List）保持原型；字符串整体作为新文档文本。
+  dynamic _override;
+
+  /// 文本形态的 content（init 覆盖为字符串时为覆盖值本身）。
+  String? get _srcText => _override is String ? _override as String : document;
+
+  /// init 覆盖的对象根。
+  dynamic get _overrideRoot =>
+      (_override is Map || _override is List) ? _override : null;
+
+  /// JSON 求值根：init 对象覆盖优先，否则文档 JSON。
+  dynamic get _jsonRoot => _overrideRoot ?? jsonDoc;
+
+  /// 对齐 legado `AnalyzeRule.setContent(结果)`：把 init 结果设为后续规则的
+  /// content（JSON 保持对象原型；字符串整体作为新文档文本）。
+  void setContentObject(Object? obj) {
+    if (obj == null) return;
+    _override = obj;
+    _htmlDoc = null;
+    _jsonTried = false;
+    _jsonDoc = null;
+    _xmlTried = false;
+    _xmlDoc = null;
+  }
+
+  /// 对齐 legado `AnalyzeRule.getElement`（init 语义）：求值规则并返回「对象」
+  /// 结果——JSON 模式返回对象原型（Map/List/标量），JS 段返回脚本值；
+  /// CSS/XPath 元素集不在此序列化（现网无依赖该行为的失败源）。
+  Object? getRawElement(String ruleStr) {
+    final r0 = ruleStr.trim();
+    if (r0.isEmpty) return null;
+    if (RuleAnalyzer.hasJs(r0)) return _evalJsSegmentsRaw(r0, null);
+    final r = preprocess(r0);
+    if (r.isEmpty) return null;
+    final (mode, base) = RuleAnalyzer.parsePrefix(r);
+    if (base.isEmpty) return null;
+    var m = mode;
+    if (m == RuleMode.auto) {
+      m = (r.startsWith(r'$.') ||
+              r.startsWith(r'$[') ||
+              r.startsWith(r'$..') ||
+              _jsonRoot != null)
+          ? RuleMode.json
+          : RuleMode.css;
+    }
+    if (m != RuleMode.json) return null;
+    final root = _jsonRoot;
+    if (root == null) return null;
+    final res = jsonSelect(root, r);
+    if (res.isEmpty) return null;
+    if (res.length == 1) return res.first;
+    return res;
+  }
+
   /// 惰性解析 HTML。
-  dom.Document get htmlDoc => _htmlDoc ??= parseHtml(document ?? '');
+  dom.Document get htmlDoc => _htmlDoc ??= parseHtml(_srcText ?? '');
 
   /// 惰性解析 JSON（文档不是 JSON 时返回 null）。
   dynamic get jsonDoc {
     if (!_jsonTried) {
       _jsonTried = true;
-      final d = (document ?? '').trim();
+      final d = (_srcText ?? '').trim();
       if (d.startsWith('{') || d.startsWith('[')) {
         try {
           _jsonDoc = jsonDecode(d);
@@ -99,7 +249,7 @@ class AnalyzeRule {
   xml.XmlDocument? get xmlDoc {
     if (!_xmlTried) {
       _xmlTried = true;
-      _xmlDoc = parseXmlLoose(document ?? '');
+      _xmlDoc = parseXmlLoose(_srcText ?? '');
     }
     return _xmlDoc;
   }
@@ -107,17 +257,24 @@ class AnalyzeRule {
   // ---------- 对外 API ----------
 
   /// 取单个字符串结果（`||` 兜底取第一个非空）。
-  String? getString(String rule, {Object? ctx}) {
+  String? getString(String rule, {Object? ctx, bool isUrl = false}) {
+    if (RuleAnalyzer.hasJs(rule)) {
+      return _evalJsSegmentsString(rule, ctx);
+    }
+    return _getStringNoJs(rule, ctx: ctx, firstOnly: isUrl);
+  }
+
+  /// 不含 JS 段的常规求值（JS 桥回调复用此入口，避免重入引擎）。
+  String? _getStringNoJs(String rule, {Object? ctx, bool firstOnly = false}) {
     final hadTpl = rule.contains('{{') || rule.contains(r'{$');
     rule = preprocess(rule, ctx: ctx);
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
-      final parts = RuleAnalyzer.splitConcat(alt);
-      final buf = <String>[];
-      for (final piece in parts) {
-        final v = _evalStringPiece(piece, ctx);
-        if (v != null && v.isNotEmpty) buf.add(v);
+      final merged = _combinedStrings(alt, ctx);
+      // isUrl（legado `getString(rule, isUrl=true)` → AnalyzeByJSoup.getString0）：
+      // URL 类字段只取首个匹配，不做多值拼接。
+      if (merged.isNotEmpty) {
+        return firstOnly ? merged.first : merged.join('\n');
       }
-      if (buf.isNotEmpty) return buf.join('\n');
     }
     // 兜底：模板渲染结果本身即规则值。
     // 真实源里 kind/lastChapter/updateTime/intro 等大量字段是纯模板
@@ -127,6 +284,95 @@ class AnalyzeRule {
       if (v != null) return v;
     }
     return null;
+  }
+
+  /// JS 段线程求值（对齐 legado `splitSourceRule` + `evalJS` 的 result 线程）：
+  /// 首个 JS 段的 `result` = 文档原文（legado: `result = content`）；
+  /// 文本段走常规流水线；JS 段结果作为之后段的输入（`sel@js:code` 即 CSS→JS）。
+  String? _evalJsSegmentsString(String rule, Object? ctx) {
+    final v = _evalJsSegmentsRaw(rule, ctx);
+    final s = v?.toString();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  /// 同上，但保留脚本最终值的原型（init 语义需要 Map/List 不被字符串化）。
+  Object? _evalJsSegmentsRaw(String rule, Object? ctx) {
+    final segs = RuleAnalyzer.splitJs(rule);
+    if (!JsBridge.available) return _legacyJsDegrade(segs, ctx);
+    // JSON 元素原件传给脚本（对齐 legado：result 为对象，而非字符串化的 JSON）
+    Object? cur = (ctx is Map || ctx is List)
+        ? ctx
+        : (ctx != null ? _jsResultOf(ctx) : (_override ?? _srcText));
+    var curCtx = ctx;
+    var hasText = false;
+    for (final seg in segs) {
+      if (seg.isJs) {
+        // legado：JS 源码里的 `{{...}}` 模板先按当前条目渲染（晋江系
+        // `num='第{{$.chapterid}}章'` 内嵌在字符串字面量里）。
+        var src = seg.text;
+        if (src.contains('{{')) {
+          src = _templates().render(src, encodeValues: false, ctx: curCtx);
+        }
+        final v = JsBridge.evalCode(src, env: _envWith(curCtx), input: cur);
+        if (v == null) {
+          // 脚本报错但有前置文本结论：退回旧降级（宁可用地址也不整链丢空）
+          if (JsBridge.lastError != null && hasText) {
+            final s0 = cur?.toString();
+            if (s0 != null && s0.isNotEmpty) return s0;
+          }
+          return null; // 脚本失败：整链中止（legado: result ?: continue）
+        }
+        cur = v;
+        curCtx = v;
+      } else {
+        final v = _getStringNoJs(seg.text, ctx: curCtx);
+        if (v != null && v.isNotEmpty) {
+          hasText = true;
+          cur = v;
+          curCtx = v;
+        }
+      }
+    }
+    return cur;
+  }
+
+  /// 无引擎降级：保留 JS 段之前文本段的结论（旧行为）。
+  String? _legacyJsDegrade(List<JsSegment> segs, Object? ctx) {
+    String? out;
+    for (final seg in segs) {
+      if (seg.isJs) continue;
+      final v = _getStringNoJs(seg.text, ctx: ctx);
+      if (v != null && v.isNotEmpty) out = v;
+    }
+    return out;
+  }
+
+  /// 为 JS 求值构造带上下文的派生环境（挂钩子；钩子走 no-JS 入口防重入）。
+  JsEnv _envWith(Object? ctx) {
+    final b = js;
+    return JsEnv(
+      scopeKey: b?.scopeKey ?? (baseUrl.isEmpty ? '#default' : baseUrl),
+      sourceUrl: b?.sourceUrl ?? baseUrl,
+      baseUrl: b?.baseUrl ?? baseUrl,
+      sourceName: b?.sourceName ?? '',
+      sourceHeader: b?.sourceHeader,
+      jsLib: b?.jsLib,
+      book: b?.book ??
+          (vars['book'] is Map
+              ? Map<String, dynamic>.from(vars['book'] as Map)
+              : null),
+      chapter: b?.chapter ??
+          (vars['chapter'] is Map
+              ? Map<String, dynamic>.from(vars['chapter'] as Map)
+              : null),
+      title: b?.title ?? (vars['title'] is String ? vars['title'] as String : null),
+      nextChapterUrl: b?.nextChapterUrl,
+      session: b?.session,
+      vars: Map<String, dynamic>.from(vars),
+      getString: (r) => _getStringNoJs(r, ctx: ctx),
+      getElement: (r) => _getStringNoJs(r, ctx: ctx),
+      getCookie: b?.getCookie,
+    );
   }
 
   /// 模板渲染后的字面值兜底（应用 `##` 替换链；整条 JS 规则除外）。
@@ -144,14 +390,15 @@ class AnalyzeRule {
 
   /// 取字符串列表（`||` 兜底取第一个非空列表）。
   List<String> getStrings(String rule, {Object? ctx}) {
+    if (RuleAnalyzer.hasJs(rule)) {
+      final s = _evalJsSegmentsString(rule, ctx);
+      if (s == null || s.isEmpty) return const [];
+      return s.split('\n');
+    }
     final hadTpl = rule.contains('{{') || rule.contains(r'{$');
     rule = preprocess(rule, ctx: ctx);
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
-      final parts = RuleAnalyzer.splitConcat(alt);
-      final out = <String>[];
-      for (final piece in parts) {
-        out.addAll(_evalStringListPiece(piece, ctx));
-      }
+      final out = _combinedStrings(alt, ctx);
       if (out.isNotEmpty) return out;
     }
     if (hadTpl) {
@@ -163,9 +410,14 @@ class AnalyzeRule {
 
   /// 取元素列表（用于 bookList 这类“再迭代”的规则；CSS / XPath 皆可）。
   List<Object> getElements(String rule, {Object? ctx}) {
+    if (RuleAnalyzer.hasJs(rule)) {
+      final s = _evalJsSegmentsString(rule, ctx);
+      if (s == null || s.isEmpty) return const [];
+      return s.split('\n');
+    }
     rule = preprocess(rule, ctx: ctx);
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
-      final raw = _evalPiece(alt, ctx);
+      final raw = _combinedRaw(alt, ctx);
       final els =
           raw.where((o) => o is dom.Element || o is xml.XmlElement).toList();
       if (els.isNotEmpty) return els;
@@ -175,22 +427,51 @@ class AnalyzeRule {
 
   /// 取原始结果列表（保留原型：DOM 元素 / XML 节点 / JSON 值 / 字符串）。
   List<Object> getRawList(String rule, {Object? ctx}) {
+    if (RuleAnalyzer.hasJs(rule)) {
+      return _rawItemsOf(_evalJsSegmentsRaw(rule, ctx));
+    }
     rule = preprocess(rule, ctx: ctx);
     for (final alt in RuleAnalyzer.splitAlternatives(rule)) {
-      final raw = _evalPiece(alt, ctx);
+      final raw = _combinedRaw(alt, ctx);
       if (raw.isNotEmpty) return raw;
     }
     return const [];
   }
 
+  /// JS 列表规则结果 → 条目列表：JSON 数组/对象还原为 Map 条目
+  /// （对齐 legado：JS 对象列表逐项 `setContent(item)` 后按裸键取属性）。
+  List<Object> _rawItemsOf(Object? v) {
+    if (v is List) return List<Object>.from(v);
+    if (v is Map) return [v];
+    final s = v?.toString() ?? '';
+    if (s.isEmpty) return const [];
+    final t = s.trim();
+    if (t.startsWith('[') || t.startsWith('{')) {
+      try {
+        final d = jsonDecode(t);
+        if (d is List) return List<Object>.from(d);
+        if (d is Map) return [d];
+      } catch (_) {}
+    }
+    return s.split('\n');
+  }
+
   // ---------- 预处理（@put / @get / {{}} 模板） ----------
 
   TemplateEngine _templates() => TemplateEngine(
-        vars: vars,
+        // JS `java.put` 写入的会话变量并入查找源（legado：java.put/get 与
+        // `@get:/{{var}}` 同源——book/source 变量表；如得间 `bid` 由目录地址
+        // 脚本写入、章网址模板 `@get:{bid}` 读取）。
+        vars: {...?js?.session?.vars, ...vars},
         store: _stored,
         baseUrl: baseUrl,
-        jsonRoot: jsonDoc,
+        jsonRoot: _jsonRoot,
         evalRule: (r, c) => _evalStringPiece(r, c),
+        // legado：`{{}}` 内容非规则时按 JS 求值，`result` 绑定 = 链上当前结果
+        // （如搜索 bookUrl 的 `...?bookid={{result}}` 紧随 `<js>` 段）。
+        jsEval: JsBridge.available
+            ? (expr, c) => JsBridge.evalCode(expr, env: _envWith(c), input: c)
+            : null,
       );
 
   /// 规则前置处理：
@@ -212,7 +493,12 @@ class AnalyzeRule {
     }
     if (r.contains('@get:')) {
       r = r.replaceAllMapped(RegExp(r'@get:\s*\{([^{}]*)\}'), (m) {
-        final v = _templates().lookup(m.group(1)!.trim());
+        final k = m.group(1)!.trim();
+        // legado：`@get:{k}` 读 put 变量袋（ruleData.variableMap）优先于
+        // 绑定注入（`book` 可同时是绑定对象与 put 键，两命名空间同名不互扰）。
+        final bucket = _stored[k] ?? js?.session?.vars[k];
+        if (bucket != null) return bucket;
+        final v = _templates().lookup(k);
         return v == null ? '' : v.toString();
       });
     }
@@ -233,6 +519,10 @@ class AnalyzeRule {
       if (_quoted(v)) v = v.substring(1, v.length - 1);
       if (k.isEmpty) continue;
       _stored[k] = getString(v, ctx: ctx) ?? '';
+      // legado put/get 同桶（java.put 与 @put 同 ruleData）——镜像进会话变量，
+      // 会话变量再由服务层按书快照/回注，实现跨阶段（搜索→详情）`@get:`。
+      final s = js?.session;
+      if (s != null) s.vars[k] = _stored[k]!;
     }
   }
 
@@ -288,15 +578,23 @@ class AnalyzeRule {
 
   // ---------- 内部求值 ----------
 
-  List<Object> _evalPiece(String piece, Object? ctx) {
+  List<Object> _evalPiece(String piece, Object? ctx, {bool elementsMode = false}) {
     final parts = RuleAnalyzer.splitReplaces(piece);
     final (mode, base) = RuleAnalyzer.parsePrefix(parts.base);
     List<Object> res;
     if (base.isEmpty) {
-      final t = _ctxText(ctx);
+      // 空 base（如 `##p##r###`）：对齐 legado —— result 保持为 content 本身，
+      // 链正则作用于 `result.toString()`（元素 = outerHtml）。
+      final t = _ctxOuter(ctx);
       res = t == null ? const [] : [t];
+    } else if (ctx is Map && mode == RuleMode.auto && _bareKeyRe.hasMatch(base)) {
+      // legado：content 为 JS 对象（NativeObject）时，单参数规则 = 键值直接访问
+      // （如 SF 轻小说 m 站 `chapterName: k` / `chapterUrl: v`）。
+      final v = ctx[base];
+      final s = v == null ? null : jsonValueToString(v);
+      res = (s == null || s.isEmpty) ? const [] : [s];
     } else {
-      res = _evalBase(base, mode, ctx);
+      res = _evalBase(base, mode, ctx, elementsMode: elementsMode);
     }
     if (parts.chains.isEmpty) return res;
     return res
@@ -321,7 +619,39 @@ class AnalyzeRule {
     return out;
   }
 
-  List<Object> _evalBase(String rule, RuleMode mode, Object? ctx) {
+  /// `&&`（串接）/`%%`（拉链）组合求值：返回合并后的字符串列表。
+  /// 对齐 legado：`%%` 按第 0 列表长度轮转、逐列表取同下标项。
+  List<String> _combinedStrings(String alt, Object? ctx) {
+    final comb = RuleAnalyzer.splitCombine(alt);
+    if (comb == null) return _evalStringListPiece(alt, ctx);
+    final lists = [for (final p in comb.$2) _evalStringListPiece(p, ctx)];
+    return comb.$1 == '%%' ? _zip(lists) : [for (final l in lists) ...l];
+  }
+
+  /// 同上，保留原型（DOM 元素 / XML 节点 / JSON 值 / 字符串）。
+  List<Object> _combinedRaw(String alt, Object? ctx) {
+    final comb = RuleAnalyzer.splitCombine(alt);
+    if (comb == null) return _evalPiece(alt, ctx, elementsMode: true);
+    final lists = [
+      for (final p in comb.$2) _evalPiece(p, ctx, elementsMode: true),
+    ];
+    return comb.$1 == '%%' ? _zip(lists) : [for (final l in lists) ...l];
+  }
+
+  /// round-robin 拉链合并（legado `%%` 语义）。
+  static List<T> _zip<T>(List<List<T>> lists) {
+    if (lists.isEmpty) return const [];
+    final out = <T>[];
+    for (var i = 0; i < lists[0].length; i++) {
+      for (final l in lists) {
+        if (i < l.length) out.add(l[i]);
+      }
+    }
+    return out;
+  }
+
+  List<Object> _evalBase(String rule, RuleMode mode, Object? ctx,
+      {bool elementsMode = false}) {
     var m = mode;
     if (m == RuleMode.auto) {
       if (rule.startsWith(r'$.') ||
@@ -339,7 +669,7 @@ class AnalyzeRule {
           xmlDoc != null &&
           (rule.contains('[') || rule.contains('@'))) {
         m = RuleMode.xpath;
-      } else if (jsonDoc != null) {
+      } else if (jsonDoc != null || _overrideRoot != null) {
         m = RuleMode.json;
       } else if (looksLikeRegex(rule)) {
         m = RuleMode.regex;
@@ -349,8 +679,12 @@ class AnalyzeRule {
     }
     switch (m) {
       case RuleMode.css:
+        if (ctx is xml.XmlElement) {
+          final shim = _xmlCssShim(ctx, rule, elementsMode);
+          if (shim != null) return shim;
+        }
         final node = _ctxDomNode(ctx);
-        return evalCss(node, parseCssStages(rule));
+        return evalCss(node, parseCssStages(rule, elementsMode: elementsMode));
       case RuleMode.json:
         final root = _ctxJson(ctx);
         if (root == null) return const [];
@@ -360,11 +694,16 @@ class AnalyzeRule {
         if (doc == null) return const [];
         final xmlCtx = _ctxXml(ctx) ?? doc;
         final r = evalXPath(xmlCtx, rule);
+        // 列表场景保留元素原型：逐条规则（chapterName/chapterUrl）需要对元素再做
+        // 二级求值（对齐 legado：XPath 与 CSS 共用同一批 jsoup 节点）。
+        if (elementsMode && r.elements.isNotEmpty) {
+          return List<Object>.from(r.elements);
+        }
         return r.strings.isEmpty
             ? List<Object>.from(r.elements)
             : List<Object>.from(r.strings);
       case RuleMode.regex:
-        final text = _ctxText(ctx) ?? document ?? '';
+        final text = _ctxText(ctx) ?? _srcText ?? '';
         return regexExtract(text, rule);
       case RuleMode.auto:
         return const [];
@@ -380,7 +719,7 @@ class AnalyzeRule {
 
   dynamic _ctxJson(Object? ctx) {
     if (ctx is Map || ctx is List) return ctx;
-    return jsonDoc;
+    return _jsonRoot;
   }
 
   xml.XmlNode? _ctxXml(Object? ctx) {
@@ -401,6 +740,77 @@ class AnalyzeRule {
     }
     if (ctx is num || ctx is bool) return ctx.toString();
     return null;
+  }
+
+  /// 空 base 链的输入：元素 → outerHtml（对齐 legado：`result.toString()`，
+  /// 即 jsoup Element.toString()=outerHtml）；字符串 → 自身；无 ctx → 整页。
+  String? _ctxOuter(Object? ctx) {
+    if (ctx == null) return _srcText;
+    if (ctx is String) return ctx;
+    if (ctx is dom.Element) return ctx.outerHtml;
+    if (ctx is xml.XmlElement) return ctx.toXmlString();
+    if (ctx is Map || ctx is List) return jsonValueToString(ctx);
+    if (ctx is num || ctx is bool) return ctx.toString();
+    return ctx.toString();
+  }
+
+  static const _shimExtractors = {'text', 'all', 'html', 'owntext', 'textnodes'};
+
+  /// 裸键规则（`k` / `v` / `text`）：JS 对象 content 上的直接键访问用。
+  static final RegExp _bareKeyRe = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+  /// XPath 元素上下文上的 CSS 层规则（裸属性名 / 提取器关键字）。
+  ///
+  /// 对齐 legado：XPath 与 CSS 共用同一批 jsoup 节点，`chapterUrl: href`、
+  /// `chapterName: text` 这类逐条规则对 XPath 元素同样成立。
+  /// 返回 null 表示不走 shim（继续按原 CSS 路径求值）。
+  List<Object>? _xmlCssShim(xml.XmlElement el, String rule, bool elementsMode) {
+    final r = rule.trim();
+    final low = r.toLowerCase();
+    if (!elementsMode && _shimExtractors.contains(low)) {
+      switch (low) {
+        case 'text':
+        case 'all':
+          final t = RuleAnalyzer.collapseSpaces(el.innerText);
+          return t.isEmpty ? const [] : [t];
+        case 'textnodes':
+          final out = <String>[];
+          for (final n in el.children) {
+            if (n is xml.XmlText) {
+              final t = RuleAnalyzer.collapseSpaces(n.value);
+              if (t.isNotEmpty) out.add(t);
+            }
+          }
+          return out;
+        case 'owntext':
+          final buf = StringBuffer();
+          for (final n in el.children) {
+            if (n is xml.XmlText) buf.write(n.value);
+          }
+          final t = RuleAnalyzer.collapseSpaces(buf.toString());
+          return t.isEmpty ? const [] : [t];
+        case 'html':
+          final t = el.innerXml.trim();
+          return t.isEmpty ? const [] : [t];
+      }
+    }
+    if (RegExp(r'^[A-Za-z_][\w:-]*$').hasMatch(r)) {
+      final v = el.getAttribute(r);
+      if (v != null && v.trim().isNotEmpty) return [v.trim()];
+    }
+    return null;
+  }
+
+  /// JS `result` 绑定：元素 → outerHtml（对齐 legado：jsoup `Element.toString()`
+  /// 即 outerHtml，源脚本常用 `String(result).match(/>(.*?)</)` 取文本）；
+  /// 其余 → 文本（空时退回整页 document）。
+  Object? _jsResultOf(Object ctx) {
+    if (ctx is dom.Element) {
+      final h = ctx.outerHtml;
+      return h.isEmpty ? _srcText : h;
+    }
+    if (ctx is xml.XmlElement) return ctx.toXmlString();
+    return _toStr(ctx) ?? _srcText;
   }
 
   String? _toStr(Object o) {

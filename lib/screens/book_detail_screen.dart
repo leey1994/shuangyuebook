@@ -388,21 +388,36 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView.builder(
+                  child: Builder(builder: (c) {
+                    // EPUB 多级目录：卷行加粗，子级按层级缩进
+                    final depths =
+                        d.chapters.map((e) => e.depth ?? 0).toList();
+                    final layered = depths.any((v) => v > 0);
+                    return ListView.builder(
                     itemCount: n,
                     itemBuilder: (c, i) {
                       final idx = _tocAsc ? i : n - 1 - i;
+                      final depth = layered ? depths[idx] : 0;
                       return ListTile(
                         dense: true,
+                        contentPadding: EdgeInsets.only(
+                            left: 20.0 + depth * 18.0, right: 20.0),
                         title: Text(d.chapters[idx].title,
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: depth == 0 && layered
+                                  ? FontWeight.w700
+                                  : null,
+                            )),
                         onTap: () {
                           Navigator.of(ctx).pop();
                           _openReader(idx);
                         },
                       );
                     },
-                  ),
+                    );
+                  }),
                 ),
               ],
             );

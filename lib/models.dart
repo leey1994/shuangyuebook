@@ -52,11 +52,18 @@ class Book {
 class Chapter {
   final String title;
   final String url;
-  const Chapter({required this.title, required this.url});
 
-  Map<String, dynamic> toJson() => {'title': title, 'url': url};
-  factory Chapter.fromJson(Map<String, dynamic> j) =>
-      Chapter(title: j['title'] as String, url: j['url'] as String);
+  /// EPUB 多级目录层级：null=平铺（在线源），0=卷，>0=章/小节。
+  final int? depth;
+  const Chapter({required this.title, required this.url, this.depth});
+
+  Map<String, dynamic> toJson() =>
+      {'title': title, 'url': url, if (depth != null) 'depth': depth};
+  factory Chapter.fromJson(Map<String, dynamic> j) => Chapter(
+        title: j['title'] as String,
+        url: j['url'] as String,
+        depth: j['depth'] as int?,
+      );
 }
 
 class BookDetail {

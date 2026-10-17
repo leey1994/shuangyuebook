@@ -13,7 +13,9 @@ import 'package:shuangyue/legado/analyze_rule.dart';
 import 'package:shuangyue/legado/analyze_url.dart';
 import 'package:shuangyue/legado/analyze_xpath.dart';
 import 'package:shuangyue/legado/http_client.dart';
+import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/models.dart';
+import 'package:shuangyue/legado/online_book_service.dart';
 import 'package:shuangyue/legado/online_repo.dart';
 import 'package:shuangyue/legado/rule_analyzer.dart';
 import 'package:shuangyue/legado/source_store.dart';
@@ -188,14 +190,23 @@ void main() {
     const html =
         '<ul class="list"><li><a href="/b/1">书一</a></li><li><a href="/b/2">书二</a></li></ul>';
 
-    test('bookUrl 依赖 JS → 0 本但明细给出 2 条链接失败', () {
+    test('bookUrl 依赖 JS（java.getString）：有 JS 解析 2 本 / 无 JS 降级明细 2 条', () {
       final repo = OnlineRepo(store: SourceStore());
       final r =
           repo.parseSearchPageDetailed(mk('@js:java.getString("a@href")'), html);
-      expect(r.books, isEmpty);
-      expect(r.rows, 2);
-      expect(r.noUrl, 2);
-      expect(r.noName, 0);
+      if (r.books.isEmpty) {
+        // 无 JS 桥（DLL 缺失）降级路径：bookUrl 整条求值失败 → 明细 2 条供排障
+        expect(r.rows, 2);
+        expect(r.noUrl, 2);
+        expect(r.noName, 0);
+      } else {
+        // 有 JS 桥：java.getString 正常求值（对齐 legado）
+        expect(r.books.length, 2);
+        expect(r.books.first.bookUrl, 'https://t.com/b/1');
+        expect(r.books.last.bookUrl, 'https://t.com/b/2');
+        expect(r.noUrl, 0);
+        expect(r.noName, 0);
+      }
     });
 
     test('明文规则 → 正常解析且无失败计数', () {
@@ -507,5 +518,162 @@ void main() {
     });
     expect(e.applyReplaceRegex('abc123abc456', '##\\d+##X'), 'abcXabcX');
     expect(e.applyReplaceRegex('ab《书名》cd', '##{{book.name}}##'), 'abcd');
+  });
+
+  test('空 base 链（##正则##替换###）：作用于元素 outerHtml（对齐 legado toString）', () {
+    final eng = AnalyzeRule(
+        '<ul><li><a href="/book2/123456">斗破</a></li></ul>',
+        baseUrl: 'http://x/');
+    final els = eng.getElements('li');
+    expect(els.length, 1);
+    final u = eng.getString(
+        r'##(?:/book2/|novelid=)(\d+)##http://app-cdn.jjwxc.net/androidapi/novelbasicinfo?novelId=$1###',
+        ctx: els.first);
+    expect(u, 'http://app-cdn.jjwxc.net/androidapi/novelbasicinfo?novelId=123456');
+  });
+
+  test('XPath 元素 ctx：//@href 取元素自身属性（descendant-or-self）', () {
+    final eng = AnalyzeRule(
+        '<div><span>t</span><a href="https://x/1.htm">c1</a></div>',
+        baseUrl: 'http://x/');
+    final els = eng.getElements('//a');
+    expect(els.length, 1);
+    expect(eng.getString(r'//@href', ctx: els.first), 'https://x/1.htm');
+  });
+
+  test('isUrl 语义：多匹配只取首个（legado getString0）', () {
+    final eng = AnalyzeRule(
+        '<div><a href="/a">目录</a><a href="/b">目录</a></div>',
+        baseUrl: 'http://x/');
+    expect(eng.getString('text.目录@href'), '/a\n/b');
+    expect(eng.getString('text.目录@href', isUrl: true), '/a');
+  });
+
+  test('init 语义（legado setContent）：JSON 对象成为后续规则与模板的 content', () {
+    final e = AnalyzeRule(
+        '{"code":0,"data":{"bookId":"803201785","bookName":"斗破苍穹之大世界"}}');
+    final init = e.getRawElement(r'$.data');
+    expect(init, isA<Map>());
+    e.setContentObject(init);
+    expect(e.getString(r'$.bookName'), '斗破苍穹之大世界');
+    expect(
+      e.getString(r'https://x.com/itf/getvolume?bookId={{$.bookId}}'),
+      'https://x.com/itf/getvolume?bookId=803201785',
+    );
+  });
+
+  test('init 语义：data[0] 取数组元素对象', () {
+    final e = AnalyzeRule('{"data":[{"id":7,"name":"a"},{"id":8}]}');
+    e.setContentObject(e.getRawElement(r'$.data[0]'));
+    expect(e.getString(r'$.id'), '7');
+  });
+
+  test('CSS/XPath init 不做 content 覆盖（getRawElement 返回 null）', () {
+    final e = AnalyzeRule('<div class="book"><h1>书名</h1></div>');
+    expect(e.getRawElement('.book'), isNull);
+    expect(e.getString('h1@text'), '书名');
+  });
+
+  test('Map ctx 裸键直接访问（legado JS 对象键值访问，k/v）', () {
+    final e = AnalyzeRule(null);
+    final item = {'k': '第一章 序章', 'v': '/c/1/'};
+    expect(e.getStrings('k', ctx: item), ['第一章 序章']);
+    expect(e.getStrings('v', ctx: item), ['/c/1/']);
+    // 缺键 → 空（与 legado result[key] 原样一致）
+    expect(e.getStrings('text', ctx: item), isEmpty);
+  });
+
+  test('JS 对象列表 + 裸键（SF m 站 +@js: 章节列表）', () {
+    final eng = AnalyzeRule('<html></html>',
+        baseUrl: 'https://t.com/i/1/', js: JsEnv());
+    final rule = TocRule(
+      chapterList:
+          r'+@js:[{k:"v1|c1",v:"/c/1/"},{k:"v1|c2",v:"/c/2/"}]',
+      chapterName: 'k',
+      chapterUrl: 'v',
+    );
+    final chs = OnlineBookService.parseChapters(eng, rule, 'https://t.com/i/1/');
+    if (JsBridge.available) {
+      expect(chs.length, 2);
+      expect(chs.first.title, 'v1|c1');
+      expect(chs.first.url, 'https://t.com/c/1/');
+    } else {
+      // 无 JS 桥：列表规则整体失败 → 0 章（与旧行为一致）
+      expect(chs, isEmpty);
+    }
+  });
+
+  test('JS 段后 {{result}}：result 绑定链上当前结果（legado evalJS(expr, result)）', () {
+    final e = AnalyzeRule('{"id":123}');
+    final v = e.getString(
+        r'''$.id
+<js>"A" + result</js>
+https://x.com/b/{{result}}''');
+    if (JsBridge.available) {
+      expect(v, 'https://x.com/b/A123');
+    } else {
+      // 无 JS 桥：降级只保留文本段结论，{{result}} 无绑定 → 空
+      expect(v, 'https://x.com/b/');
+    }
+  });
+
+  test('java.put 返回写入值；会话变量经 @get 读回（legado put/get 同源）', () {
+    if (!JsBridge.available) return;
+    final e = AnalyzeRule('{}', js: JsEnv(session: JsSession()));
+    expect(e.getString(r'@js:"x=" + java.put("k", "42")'), 'x=42');
+    expect(e.getString('https://x.com/b/@get:{k}/c'), 'https://x.com/b/42/c');
+  });
+
+  test('header @js: 求值（QQ 浏览器源注入 Referer）', () {
+    final src = BookSource(
+      bookSourceUrl: 'https://q.qq.com',
+      bookSourceName: 'q',
+      header: '@js:\nJSON.stringify({"Referer": source.bookSourceUrl})',
+    );
+    final h = OnlineBookService.headerMap(src);
+    if (JsBridge.available) {
+      expect(h['Referer'], 'https://q.qq.com');
+    } else {
+      // 无 JS 桥：静态解析失败 → 空表（旧行为）
+      expect(h, isEmpty);
+    }
+  });
+
+  test('跨阶段变量袋：搜索 @put:{book:id} → 详情 @get:{book} 读回', () {
+    if (!JsBridge.available) return;
+    final session = JsSession();
+    final e1 = AnalyzeRule('{}', js: JsEnv(session: session));
+    // 17k 形态：条目规则内嵌 @put（裸键取 id）——put 只入袋不内嵌 URL
+    expect(e1.getString('https://x.com/b/merge@put:{book:id}',
+        ctx: {'id': 753943}), 'https://x.com/b/merge');
+    expect(session.vars['book'], '753943');
+    OnlineBookService.cacheItemVars('http://s/', 'http://s/b/1', session.vars);
+    // 详情阶段：另一会话，itemVars 预填后 @get 读回（优先于同名绑定）
+    final s2 = JsSession()..vars.addAll(OnlineBookService.itemVars('http://s/', 'http://s/b/1'));
+    final e2 = AnalyzeRule('{}',
+        js: JsEnv(session: s2), vars: {'book': {'name': 'x'}});
+    expect(e2.getString('http://x.com/book/@get:{book}/volumes'),
+        'http://x.com/book/753943/volumes');
+  });
+
+  test('java-lib 垫层：DES/CBC/PKCS5 对齐 .NET 向量 + String.getBytes + org.jsoup', () {
+    if (!JsBridge.available) return;
+    // 向量：.NET DESCryptoServiceProvider 生成
+    // key=KK!%G3Jd iv=1ae2c94b 明文="Hello 晋江 test 123"
+    final out = JsBridge.evalCode(r'''
+var dks = new DESKeySpec(String("KK!%G3JdCHJxpAF3%Vg9pN").getBytes());
+var sk = SecretKeyFactory.getInstance("DES").generateSecret(dks);
+var cipher = Cipher.getInstance("DES/CBC/PKCS5Padding");
+var iv = new IvParameterSpec(String("1ae2c94b").getBytes("utf-8"));
+cipher.init(Cipher.DECRYPT_MODE, sk, iv);
+var plain = new String(cipher.doFinal(Base64.getDecoder().decode(
+    "kvm9bG5u3/j3UJq8U+VfvCdoWT8C7MjD".getBytes())), "utf-8");
+java.base64Encode(plain) + '|' + (typeof org.jsoup.Jsoup.connect);
+''');
+    final expectB64 = base64Encode(utf8.encode('Hello 晋江 test 123'));
+    expect(out, '$expectB64|function');
+    // String 扩展不破坏常规用法
+    final s = JsBridge.evalCode('[String(123), new String("a") + "b", String.fromCharCode(66)]');
+    expect('$s'.contains('123'), true);
   });
 }

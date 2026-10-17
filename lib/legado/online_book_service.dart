@@ -15,7 +15,9 @@ import '../models.dart';
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
 import 'http_client.dart';
+import 'js_engine.dart';
 import 'models.dart';
+import 'rule_analyzer.dart';
 import 'webview_engine.dart';
 
 /// 详情页解析结果。
@@ -50,12 +52,67 @@ class OnlineBookService {
 
   static const Duration _httpTimeout = Duration(seconds: 20);
 
+  /// P0：书源 JS 环境（同一次操作共享 [session]；jsLib/header/来源绑定齐备）。
+  static JsEnv jsEnvFor(
+    BookSource source,
+    JsSession session, {
+    Map<String, dynamic>? book,
+    String? title,
+    String? nextChapterUrl,
+  }) =>
+      JsEnv(
+        scopeKey: source.bookSourceUrl,
+        sourceUrl: source.bookSourceUrl,
+        sourceName: source.bookSourceName,
+        sourceHeader: source.header,
+        jsLib: source.jsLib,
+        session: session,
+        book: book,
+        title: title,
+        nextChapterUrl: nextChapterUrl,
+      );
+
+  /// 挂起补网：抓取目标写入会话缓存后重跑脚本。
+  Future<void> _resolveSuspend(
+    BookSource source,
+    JsSession session,
+    JsSuspendException e,
+  ) async {
+    if (e.kind == 'webview') {
+      // WebView 渲染规则为 P2：先以空响应继续，避免死循环
+      session.webViewCache[e.target] = '';
+      return;
+    }
+    try {
+      session.ajaxCache[e.target] = await _getHtml(source, e.target);
+    } catch (_) {
+      session.ajaxCache[e.target] = '';
+    }
+  }
+
   // ---------- 详情 / 目录 ----------
 
   /// 抓取详情页并解析（含目录；目录为空且有 tocUrl 规则时单独请求）。
   Future<OnlineBookInfo> fetchInfo(BookSource source, String bookUrl) async {
+    final session = JsSession();
+    return runWithJsSession(
+      session,
+      () => _fetchInfoInner(source, bookUrl, session),
+      (e) => _resolveSuspend(source, session, e),
+    );
+  }
+
+  Future<OnlineBookInfo> _fetchInfoInner(
+    BookSource source,
+    String bookUrl,
+    JsSession session,
+  ) async {
+    // legado book.variableMap：搜索阶段 `@put:{k:rule}` 写入的变量在此读回，
+    // 供 init/字段/tocUrl 模板的 `@get:{k}`（17k: `@get:{book}` → 书籍 id）。
+    session.vars.addAll(itemVars(source.bookSourceUrl, bookUrl));
     final html = await _getHtml(source, bookUrl);
-    final engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(html,
+        baseUrl: bookUrl, js: jsEnvFor(source, session));
     final info = source.bookInfoRule;
 
     String? g(String? rule) {
@@ -65,9 +122,15 @@ class OnlineBookService {
       return (v == null || v.isEmpty) ? null : v;
     }
 
-    // bookInfo.init 常做变量预置（`@put:{...}`，供后续字段与目录地址模板引用）
+    // bookInfo.init 常做变量预置（`@put:{...}`），或整体切换后续解析根
+    // （legado BookInfo：`analyzeRule.setContent(analyzeRule.getElement(init))`
+    // ——如 `$.data` / `$.data.bookInfo`，之后的字段规则与 tocUrl 模板都在
+    // init 结果上求值）。
     final init = info?.init?.trim();
-    if (init != null && init.isNotEmpty) g(init);
+    if (init != null && init.isNotEmpty) {
+      final initResult = engine.getRawElement(init);
+      if (initResult != null) engine.setContentObject(initResult);
+    }
 
     final bookVars = <String, dynamic>{'bookUrl': bookUrl};
     engine.vars['book'] = bookVars;
@@ -94,19 +157,27 @@ class OnlineBookService {
     if (tocRule != null) {
       chapters = parseChapters(engine, tocRule, bookUrl);
       if (chapters.isEmpty) {
-        final tocUrlRule = g(info?.tocUrl);
-        if (tocUrlRule != null && tocUrlRule != bookUrl) {
-          final resolved = resolveUrl(tocUrlRule, source.bookSourceUrl);
+        // 对齐 legado BookInfo：tocUrl 用 isUrl 语义（取首匹配，不拼接），
+        // 且相对地址按「详情页地址」解析（baseUrl = 书页，而非书源地址）。
+        final tocUrlR = info?.tocUrl?.trim() ?? '';
+        final tocUrlRule = tocUrlR.isEmpty
+            ? null
+            : engine.getString(tocUrlR, isUrl: true);
+        if (tocUrlRule != null && tocUrlRule.isNotEmpty && tocUrlRule != bookUrl) {
+          final resolved = resolveUrl(tocUrlRule, bookUrl);
           if (resolved.isNotEmpty) {
             try {
               final tocHtml = await _getHtml(source, resolved);
               tocEngine = AnalyzeRule(
                 tocHtml,
-                baseUrl: source.bookSourceUrl,
+                baseUrl: resolved,
                 vars: {'book': bookVars},
+                js: jsEnvFor(source, session, book: bookVars),
               );
               tocPageUrl = resolved;
               chapters = parseChapters(tocEngine, tocRule, resolved);
+            } on JsSuspendException {
+              rethrow;
             } catch (_) {
               // 目录页抓取失败：保留详情页已解析结果（可能为空）
             }
@@ -121,6 +192,7 @@ class OnlineBookService {
           tocRule,
           initial: chapters,
           firstPageUrl: tocPageUrl,
+          session: session,
         );
       }
     }
@@ -144,6 +216,7 @@ class OnlineBookService {
     TocRule rule, {
     required List<Chapter> initial,
     required String firstPageUrl,
+    required JsSession session,
   }) async {
     final nextRule = rule.nextTocUrl?.trim() ?? '';
     if (nextRule.isEmpty) return initial;
@@ -159,19 +232,35 @@ class OnlineBookService {
             .map((u) => u.trim())
             .where((u) => u.isNotEmpty)
             .toList();
+      } on JsSuspendException {
+        rethrow;
       } catch (_) {
         break;
       }
       if (nexts.isEmpty) break;
-      final next = resolveUrl(nexts.first, source.bookSourceUrl);
-      if (next.isEmpty || !visited.add(next)) break;
+      // 按顺序挑第一个「没去过」的候选：下拉框式目录页（一个 select 里列出
+      // 全部分页地址、首页同时也是当前页）第一项往往是当前页/已访问页，
+      // 直接取 nexts.first 会在第二页原地打转。
+      var next = '';
+      for (final u in nexts) {
+        final r = resolveUrl(u, source.bookSourceUrl);
+        if (r.isNotEmpty && !visited.contains(r)) {
+          next = r;
+          break;
+        }
+      }
+      if (next.isEmpty) break;
+      visited.add(next);
       String html;
       try {
         html = await _getHtml(source, next);
+      } on JsSuspendException {
+        rethrow;
       } catch (_) {
         break;
       }
-      final nextEngine = AnalyzeRule(html, baseUrl: source.bookSourceUrl);
+      final nextEngine = AnalyzeRule(html,
+          baseUrl: next, js: jsEnvFor(source, session));
       final more = parseChapters(nextEngine, rule, next);
       var added = 0;
       for (final c in more) {
@@ -195,8 +284,17 @@ class OnlineBookService {
     TocRule rule,
     String baseUrl,
   ) {
-    final listRule = rule.chapterList?.trim() ?? '';
+    var listRule = rule.chapterList?.trim() ?? '';
     if (listRule.isEmpty) return const [];
+    // legado BookChapterList：`-` 前缀 = 倒序，`+` 前缀 = 保留正序（仅剥前缀）。
+    var reverse = false;
+    if (listRule.startsWith('-')) {
+      reverse = true;
+      listRule = listRule.substring(1);
+    }
+    if (listRule.startsWith('+')) {
+      listRule = listRule.substring(1);
+    }
     final nameRule = rule.chapterName?.trim() ?? '';
     final urlRule = (rule.chapterUrl?.trim().isNotEmpty ?? false)
         ? rule.chapterUrl!.trim()
@@ -208,6 +306,10 @@ class OnlineBookService {
       final titles = nameRule.isEmpty
           ? const <String>[]
           : engine.getStrings(nameRule, ctx: item);
+      // 对齐 legado：逐项把当前章节挂到 chapter 绑定，chapterUrl 脚本可读 chapter.title
+      engine.vars['chapter'] = <String, dynamic>{
+        'title': titles.isEmpty ? '' : titles.first.trim(),
+      };
       final hrefs = engine.getStrings(urlRule, ctx: item);
       final n = titles.length < hrefs.length ? titles.length : hrefs.length;
       for (var i = 0; i < n; i++) {
@@ -221,13 +323,14 @@ class OnlineBookService {
             lower.startsWith('tel:')) {
           continue;
         }
-        final href = resolveUrl(rawHref, baseUrl);
+        final (target, suffix) = splitUrlSuffix(rawHref);
+        final href = resolveUrl(target, baseUrl) + suffix;
         if (href.isEmpty) continue;
         if (!seen.add(href)) continue;
         out.add(Chapter(title: title, url: href));
       }
     }
-    return out;
+    return reverse ? out.reversed.toList() : out;
   }
 
   // ---------- 正文 ----------
@@ -248,23 +351,50 @@ class OnlineBookService {
     String chapterUrl, {
     Map<String, dynamic>? book,
   }) async {
+    final session = JsSession();
+    return runWithJsSession(
+      session,
+      () => _fetchChapterTextInner(source, chapterUrl, book, session),
+      (e) => _resolveSuspend(source, session, e),
+    );
+  }
+
+  Future<String> _fetchChapterTextInner(
+    BookSource source,
+    String chapterUrl,
+    Map<String, dynamic>? book,
+    JsSession session,
+  ) async {
     final vars = <String, dynamic>{
       if (book != null) 'book': book,
     };
+    // java.getString/getElement：晋江系正文脚本在 `<js>` 内回读规则
+    // （`java.getElement("$.content")` / `java.getString("$.sayBody")`）。
+    late AnalyzeRule engine;
+    final env =
+        jsEnvFor(source, session, book: book).copyWith(getString: (r) {
+      try {
+        return engine.getString(r);
+      } catch (_) {
+        return null;
+      }
+    });
     if (_flag(source.extra['webView']) && WebViewEngine.supported) {
-      final target = webViewChapterUrl(source, chapterUrl);
+      // 章网址可能带请求选项尾缀（塔读 `,{"webView":true}`）——WebView 只能加纯地址。
+      final target = webViewChapterUrl(source, splitUrlSuffix(chapterUrl).$1);
       final text = await WebViewEngine.instance.fetchRenderedText(
         url: target,
         cssSelectors: contentSelectors(source),
       );
-      return _applyReplace(source, cleanChapterText(text), vars);
+      return _applyReplace(source, cleanChapterText(text), vars, js: env);
     }
 
     final raw = source.contentRule?.content ?? '';
     if (raw.trim().isEmpty) return '';
 
     final html = await _getHtml(source, chapterUrl);
-    var engine = AnalyzeRule(html, baseUrl: source.bookSourceUrl, vars: vars);
+    engine =
+        AnalyzeRule(html, baseUrl: chapterUrl, vars: vars, js: env);
     // 正文通常是多段：取规则命中的**全部**结果并按段拼回（getString 只会取第一段）
     var text = cleanChapterText(engine.getStrings(raw).join('\n'));
 
@@ -287,7 +417,8 @@ class OnlineBookService {
         } catch (_) {
           break;
         }
-        engine = AnalyzeRule(nextHtml, baseUrl: source.bookSourceUrl, vars: vars);
+        engine = AnalyzeRule(nextHtml,
+            baseUrl: next, vars: vars, js: env);
         final more = cleanChapterText(engine.getStrings(raw).join('\n'));
         if (more.isEmpty) break;
         text = '$text\n$more';
@@ -301,11 +432,13 @@ class OnlineBookService {
   String _applyReplace(
     BookSource source,
     String text,
-    Map<String, dynamic> vars,
-  ) {
+    Map<String, dynamic> vars, {
+    JsEnv? js,
+  }) {
     final rr = source.contentRule?.replaceRegex;
     if (rr == null || rr.trim().isEmpty || text.isEmpty) return text;
-    final engine = AnalyzeRule(null, baseUrl: source.bookSourceUrl, vars: vars);
+    final engine =
+        AnalyzeRule(null, baseUrl: source.bookSourceUrl, vars: vars, js: js);
     return engine.applyReplaceRegex(text, rr);
   }
 
@@ -363,6 +496,8 @@ class OnlineBookService {
     '『加入书签』',
     '点此报错',
     '加入书签',
+    '添加书签',
+    '推荐给朋友',
     '最新章节',
     // 站点转载声明（常见于抓取失败的整页文本里）
     '转载作品',
@@ -418,10 +553,40 @@ class OnlineBookService {
 
   static final RegExp _trailingCode = RegExp(r'\s*\d{1,3}w\d{1,3}-\d{1,6}\s*$');
 
+  /// 整行只有一条 URL（站点尾巴水印）。
+  static final RegExp _urlOnlyLine = RegExp(r'^https?://\S+$');
+
   /// 清洗：去空行 / 水印行 / 导航行 / 行尾编号，保留段首全角缩进。
+  ///
+  /// 输入可能是 `@html` 规则吐出的整段 HTML（段落用 `<br>` 分隔、实体未解码、
+  /// 水印和正文常在同一行）——先做 HTML 归一化再按行过滤，否则水印词会把
+  /// 整段正文一起连坐丢弃（唐三中文等站点即此坑）。
   static String cleanChapterText(String raw) {
     if (raw.isEmpty) return '';
-    final text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    var text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    if (text.contains('<')) {
+      // 段落标记 → 换行；其余标签摘除；常见实体解码（先摘标签再解实体，
+      // 避免把 `&lt;script&gt;` 变成真标签再被摘掉）。
+      text = text
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</p\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</div\s*>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<[^<>]{1,200}>'), '')
+          .replaceAll('&nbsp;', ' ')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#39;', "'")
+          .replaceAll('&ldquo;', '“')
+          .replaceAll('&rdquo;', '”')
+          .replaceAll('&hellip;', '…')
+          .replaceAll('&mdash;', '—')
+          .replaceAll('&amp;', '&');
+      text = text.replaceAllMapped(
+        RegExp(r'&#(\d{2,6});'),
+        (m) => String.fromCharCode(int.tryParse(m.group(1)!) ?? 32),
+      );
+    }
     final out = <String>[];
     for (final line in text.split('\n')) {
       var l = line.trimRight();
@@ -436,6 +601,7 @@ class OnlineBookService {
       }
       if (skip) continue;
       if (_junkExact.hasMatch(l)) continue;
+      if (l.length < 160 && _urlOnlyLine.hasMatch(l)) continue;
       // 站点阅读器的工具条（“字体：大 中 小 护眼 关灯”）——整行特征明显
       if (l.contains('护眼') && l.contains('关灯')) continue;
       // 导航短行兜底：短、无标点、且命中栏目词 → 视为菜单残留
@@ -450,34 +616,111 @@ class OnlineBookService {
 
   // ---------- 内部工具 ----------
 
+  /// 拆 `url,{...}` 请求选项尾缀（保留原文，选项语义如 webView 为 P2）。
+  static (String, String) splitUrlSuffix(String s) {
+    final t = s.trimRight();
+    final i = t.lastIndexOf(',{');
+    if (i > 0 && t.endsWith('}')) {
+      return (t.substring(0, i).trim(), t.substring(i));
+    }
+    return (t, '');
+  }
+
+  /// 跨阶段书级变量袋（legado `book.variableMap` 的内存近似）：
+  /// 搜索条目求值时 `@put:{k:rule}` 的产出按 bookUrl 快照，
+  /// 详情阶段 `@get:{k}` 从这里读回（17k：搜索 `@put:{book:id}` →
+  /// 详情 `http://api.17k.com/book/@get:{book}/volumes`）。
+  /// ponytail: 简单 FIFO 淘汰 + 进程内存（重启丢弃），legado 是落库持久。
+  static final Map<String, Map<String, String>> _itemVars = {};
+
+  /// 搜索条目收口：把当前会话变量挂到该书（`bookUrl` 必须先就绪）。
+  static void cacheItemVars(
+      String sourceUrl, String bookUrl, Map<String, String> vars) {
+    if (sourceUrl.isEmpty || bookUrl.isEmpty) return;
+    if (_itemVars.length > 400) _itemVars.remove(_itemVars.keys.first);
+    _itemVars['$sourceUrl\u0000$bookUrl'] = Map.of(vars);
+  }
+
+  /// 详情/目录阶段读回该书在搜索阶段写入的变量。
+  static Map<String, String> itemVars(String sourceUrl, String bookUrl) =>
+      _itemVars['$sourceUrl\u0000$bookUrl'] ?? const {};
+
   Future<String> _getHtml(BookSource source, String url) async {
-    final resp = await _client.get(
-      url,
-      headers: headerMap(source),
-      timeout: _httpTimeout,
-      retries: 1,
-    );
+    // `,{...}` 请求选项尾缀走 analyze_url 的正规解析管线（宽松 JSON：
+    // 单引号/尾逗号/未加引号模板值都能吃；不渲染——保存值已渲染）。
+    final t = parseUrlTemplate(url);
+    var headers = headerMap(source);
+    var method = 'GET';
+    String? body;
+    String? charset;
+    if (t.options.isNotEmpty) {
+      // 请求选项（legado AnalyzeUrl）：body 有值且未写 method → POST。
+      final m = (t.options['method'] ?? '').toString().toUpperCase();
+      if (m == 'POST' || t.options['body'] != null) {
+        method = m.isEmpty ? 'POST' : m;
+        final b = t.options['body'];
+        body = b is String ? b : jsonEncode(b);
+        final Map? oh = t.options['headers'] as Map?;
+        if (oh != null && oh.isNotEmpty) {
+          headers = {
+            ...headers,
+            for (final e in oh.entries)
+              e.key.toString(): e.value.toString().trim(),
+          };
+        }
+        charset = t.options['charset']?.toString();
+      }
+    }
+    final SourceResponse resp;
+    if (method == 'POST') {
+      resp = await _client.post(
+        t.url,
+        headers: headers,
+        body: body,
+        charset: charset,
+        timeout: _httpTimeout,
+        retries: 1,
+      );
+    } else {
+      resp = await _client.get(
+        t.url,
+        headers: headers,
+        charset: charset,
+        timeout: _httpTimeout,
+        retries: 1,
+      );
+    }
     if (!resp.ok) {
       throw SourceHttpException('HTTP ${resp.statusCode}');
     }
     return resp.body;
   }
 
-  /// 书源 header（JSON 字符串）→ 请求头。
+  /// 书源 header 求值：`@js:`/`<js>` 头先走脚本（legado：header 走规则求值，
+  /// QQ 浏览器源用它注入 Referer/UA/QIMEI），其余按 JSON 宽松解析。
   static Map<String, String> headerMap(BookSource source) {
-    final out = <String, String>{};
-    final raw = source.header;
-    if (raw != null && raw.trim().isNotEmpty) {
+    final raw = (source.header ?? '').trim();
+    if (raw.isEmpty) return const {};
+    final low = raw.toLowerCase();
+    final jsHead = low.startsWith('@js:') ||
+        (low.startsWith('<js>') && low.endsWith('</js>'));
+    if (JsBridge.available && jsHead) {
+      final body = low.startsWith('@js:')
+          ? raw.substring(4)
+          : raw.substring(4, raw.length - 5);
       try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          decoded.forEach((k, v) => out[k.toString()] = v.toString());
+        final out = JsBridge.evalCode(body, env: jsEnvFor(source, JsSession()));
+        if (out != null && out.trim().isNotEmpty) {
+          final m = RuleAnalyzer.parseHeaderJson(out);
+          if (m.isNotEmpty) return m;
         }
       } catch (_) {
-        // 忽略非 JSON 的 header
+        // 脚本失败：退回静态解析（通常为空表）
       }
     }
-    return out;
+    // JS 头且脚本不可用/求值失败：不把脚本文本当 JSON 解析（legado 同为解析失败）。
+    if (jsHead) return const {};
+    return RuleAnalyzer.parseHeaderJson(raw);
   }
 
   static bool _flag(dynamic v) =>

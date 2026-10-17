@@ -23,11 +23,15 @@ class EpubChapter {
     required this.title,
     required this.text,
     this.images = const [],
+    this.depth = 0,
   });
 
   final String href;
   final String title;
   final String text;
+
+  /// 目录层级（来自 nav/NCX 嵌套深度：0=卷，1=章，≥2=小节）。
+  final int depth;
 
   /// 本章引用的插图（资源路径 + 原始字节）。
   ///
@@ -171,8 +175,9 @@ class EpubParser {
       }
     }
 
-    // 3. 目录标题：优先 EPUB3 nav，其次 EPUB2 NCX，再次任意 ncx
+    // 3. 目录标题（带层级）：优先 EPUB3 nav，其次 EPUB2 NCX，再次任意 ncx
     final tocTitles = <String, String>{};
+    final tocDepths = <String, int>{};
     _ManifestItem? navItem;
     for (final item in manifest.values) {
       if (_props(item).contains('nav')) {
@@ -183,14 +188,16 @@ class EpubParser {
     if (navItem != null) {
       final navStr = _readString(archive, navItem.href);
       if (navStr != null) {
-        _collectNavTitles(navStr, _dirName(navItem.href), tocTitles);
+        _collectNavTitles(navStr, _dirName(navItem.href), tocTitles,
+            depths: tocDepths);
       }
     }
     if (tocTitles.isEmpty && tocId != null && manifest.containsKey(tocId)) {
       final ncx = manifest[tocId]!;
       final ncxStr = _readString(archive, ncx.href);
       if (ncxStr != null) {
-        _collectNcxTitles(ncxStr, _dirName(ncx.href), tocTitles);
+        _collectNcxTitles(ncxStr, _dirName(ncx.href), tocTitles,
+            depths: tocDepths);
       }
     }
     if (tocTitles.isEmpty) {
@@ -199,7 +206,8 @@ class EpubParser {
         if (item.mediaType.contains('dtbncx') || lower.endsWith('.ncx')) {
           final s = _readString(archive, item.href);
           if (s != null) {
-            _collectNcxTitles(s, _dirName(item.href), tocTitles);
+            _collectNcxTitles(s, _dirName(item.href), tocTitles,
+                depths: tocDepths);
             if (tocTitles.isNotEmpty) break;
           }
         }
@@ -273,24 +281,32 @@ class EpubParser {
           title: title,
           text: text,
           images: extracted.images,
+          depth: tocDepths[href] ?? _depthFor(tocDepths, href) ?? 0,
         ),
       );
     }
     if (chapters.isEmpty) throw EpubException('没有找到可阅读的章节');
 
-    // 补全未匹配的目录标题（导航 href 带锚点时用前缀匹配）
+    // 补全未匹配的目录标题（导航 href 带锚点时：同文件匹配标题/层级）
     final fixed = <EpubChapter>[];
     for (final ch in chapters) {
       var title = ch.title;
       if (title.startsWith('第 ') && title.endsWith(' 章')) {
         for (final entry in tocTitles.entries) {
-          if (entry.key == ch.href) {
+          if (entry.key.split('#').first == ch.href) {
             title = entry.value;
             break;
           }
         }
       }
-      fixed.add(EpubChapter(href: ch.href, title: title, text: ch.text));
+      fixed.add(EpubChapter(
+        href: ch.href,
+        title: title,
+        text: ch.text,
+        images: ch.images,
+        depth:
+            tocDepths[ch.href] ?? _depthFor(tocDepths, ch.href) ?? ch.depth,
+      ));
     }
 
     return EpubParseResult(
@@ -455,30 +471,95 @@ class EpubParser {
   static void _collectNavTitles(
     String navStr,
     String navDir,
+    Map<String, String> out, {
+    Map<String, int>? depths,
+  }) {
+    _collectNavEntries(navStr, navDir, out, depths ?? <String, int>{});
+  }
+
+  /// nav 解析进 [out ]（href→标题）与 [depths]（href→层级）。
+  ///
+  /// 层级来自 `<ol>` 嵌套深度（EPUB3 nav 的标准树状结构；foliate-js 同口径）。
+  /// 目录深度兜底：条目带锚点（`file.xhtml#frag`）时按「同文件且层级最小」。
+  static int? _depthFor(Map<String, int> depths, String file) {
+    var best = depths[file];
+    for (final e in depths.entries) {
+      if (!e.key.contains('#') || e.key.split('#').first != file) continue;
+      if (best == null || e.value < best) best = e.value;
+    }
+    return best;
+  }
+
+  static void _collectNavEntries(
+    String navStr,
+    String navDir,
     Map<String, String> out,
+    Map<String, int> depths,
   ) {
     final doc = html_parser.parse(navStr);
-    final anchors = <dom.Element>[];
+    void walk(dom.Element ol, int depth) {
+      for (final li in ol.children.where((e) => e.localName == 'li')) {
+        final a = li.children.whereType<dom.Element>().firstWhere(
+              (e) => e.localName == 'a',
+              orElse: () => li,
+            );
+        final href = a.attributes['href'];
+        final title = a.text.trim();
+        if (href != null && href.isNotEmpty && title.isNotEmpty) {
+          final resolved = _resolvePath(navDir, href);
+          if (!out.containsKey(resolved)) {
+            out[resolved] = title;
+            depths[resolved] = depth;
+          }
+        }
+        final nested = li.children.where((e) => e.localName == 'ol');
+        for (final child in nested) {
+          walk(child, depth + 1);
+        }
+      }
+    }
+
+    final tocs = <dom.Element>[];
     for (final nav in doc.querySelectorAll('nav')) {
       final type = nav.attributes['epub:type'] ??
           nav.attributes['type'] ??
           nav.attributes['role'] ??
           '';
-      if (type.contains('toc')) anchors.addAll(nav.querySelectorAll('a'));
+      if (type.contains('toc')) {
+        tocs.addAll(nav.children.where((e) => e.localName == 'ol'));
+      }
     }
-    if (anchors.isEmpty) anchors.addAll(doc.querySelectorAll('a'));
-    for (final a in anchors) {
-      final href = a.attributes['href'];
-      final title = a.text.trim();
-      if (href == null || href.isEmpty || title.isEmpty) continue;
-      out.putIfAbsent(_resolvePath(navDir, href), () => title);
+    if (tocs.isEmpty) {
+      // 无 epub:type 标注：全部直接 li 也按 0 层收平
+      final anchors = doc.querySelectorAll('a');
+      for (final a in anchors) {
+        final href = a.attributes['href'];
+        final title = a.text.trim();
+        if (href == null || href.isEmpty || title.isEmpty) continue;
+        out.putIfAbsent(_resolvePath(navDir, href), () => title);
+      }
+      return;
+    }
+    for (final ol in tocs) {
+      walk(ol, 0);
     }
   }
 
   static void _collectNcxTitles(
     String ncxStr,
     String ncxDir,
+    Map<String, String> out, {
+    Map<String, int>? depths,
+  }) {
+    _collectNcxEntries(ncxStr, ncxDir, out, depths ?? <String, int>{});
+  }
+
+  /// NCX 解析进 [out]（href→标题）与 [depths]（href→层级，navPoint 嵌套深度）。
+  static void _collectNcxEntries(
+    String ncxStr,
+    String ncxDir,
     Map<String, String> out,
+    Map<String, int> depths,
   ) {
     XmlDocument doc;
     try {
@@ -486,20 +567,35 @@ class EpubParser {
     } catch (_) {
       return;
     }
-    for (final np in doc.descendants.whereType<XmlElement>()) {
-      if (np.name.local != 'navPoint') continue;
-      String? title;
-      String? src;
-      for (final d in np.descendants.whereType<XmlElement>()) {
-        if (title == null && d.name.local == 'text') title = d.innerText.trim();
-        if (src == null && d.name.local == 'content') {
-          src = d.getAttribute('src');
+    void walk(XmlElement parent, int depth) {
+      for (final np in parent.children.whereType<XmlElement>()) {
+        if (np.name.local != 'navPoint') continue;
+        String? title;
+        String? src;
+        for (final d in np.descendants.whereType<XmlElement>()) {
+          if (title == null && d.name.local == 'text') {
+            title = d.innerText.trim();
+          }
+          if (src == null && d.name.local == 'content') {
+            src = d.getAttribute('src');
+          }
         }
+        if (title != null && title.isNotEmpty && src != null && src.isNotEmpty) {
+          final resolved = _resolvePath(ncxDir, src);
+          if (!out.containsKey(resolved)) {
+            out[resolved] = title;
+            depths[resolved] = depth;
+          }
+        }
+        walk(np, depth + 1);
       }
-      if (title != null && title.isNotEmpty && src != null && src.isNotEmpty) {
-        final t = title;
-        out.putIfAbsent(_resolvePath(ncxDir, src), () => t);
-      }
+    }
+
+    final navMaps = doc.descendants
+        .whereType<XmlElement>()
+        .where((e) => e.name.local == 'navMap');
+    for (final m in navMaps) {
+      walk(m, 0);
     }
   }
 

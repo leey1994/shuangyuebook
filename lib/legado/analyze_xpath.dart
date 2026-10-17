@@ -216,25 +216,29 @@ XPathResult evalXPath(XmlNode context, String expr) {
 
   var current = <XmlElement>[];
   final first = steps.first;
-  final isAbsolute =
-      expr.trimLeft().startsWith('/') && !expr.trimLeft().startsWith('//');
-  if (isAbsolute || expr.trimLeft().startsWith('//')) {
+  final trimmed = expr.trimLeft();
+  final isAbsolute = trimmed.startsWith('/') && !trimmed.startsWith('//');
+  if (isAbsolute || trimmed.startsWith('//')) {
     final rootEl = context is XmlDocument
         ? context.rootElement
         : (context is XmlElement ? context : context.firstElementChild);
     if (rootEl == null) return const XPathResult.elements([]);
-    if (isAbsolute) {
-      final matches = _matchOn([rootEl], first, includeSelf: true);
-      current = matches;
-    } else {
-      final all = rootEl.descendantElements.toList();
-      final matches = _matchOn(all, first, includeSelf: false);
-      current = matches;
+    // `//` = descendant-or-self（jsoupXpath 相对语义：元素 ctx 含自身；
+    // `//@href` 属性首步必须取得到 ctx 自身的属性）。`/` = 从根元素起。
+    final nodes = isAbsolute
+        ? <XmlElement>[rootEl]
+        : <XmlElement>[rootEl, ...rootEl.descendantElements];
+    if (first.isAttr || first.isText) {
+      return _terminal(nodes, first);
     }
+    current = _matchOn(nodes, first, includeSelf: true);
   } else {
     // 相对路径：对上下文的所有后代做首步匹配（书源里最常见的是 .// 变体）
     final base = context is XmlElement ? context : context.firstElementChild;
     if (base == null) return const XPathResult.elements([]);
+    if (first.isAttr || first.isText) {
+      return _terminal([base], first);
+    }
     final all = base.descendantElements.toList();
     final matches = _matchOn(all, first, includeSelf: false);
     current = matches;

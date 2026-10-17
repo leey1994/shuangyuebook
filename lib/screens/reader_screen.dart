@@ -154,6 +154,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // 阅读时把桌宠钉在顶部窄带：正文要专注，它也不能挡住任何控件
     petPinned.value = true;
     _startClock();
+    _initVolumeKeys();
     unawaited(NativeBridge.setKeepScreenOn(true)); // 阅读时不熄屏
     // 隐藏系统状态栏（时间 / 信号 / 电量），把那条空间让给阅读内容。
     // 退出阅读器时在 dispose 里恢复成 edgeToEdge。
@@ -316,6 +317,14 @@ class _ReaderScreenState extends State<ReaderScreen>
     _clock?.cancel();
     _sleepTimer?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
+    // 音量键控制权交还系统（原生按 active 直拦，必须主动关闭）
+    _volGateSent = null;
+    if (Platform.isAndroid) {
+      try {
+        unawaited(_readerKeys.invokeMethod('setActive', false));
+      } catch (_) {}
+    }
+    _readerKeys.setMethodCallHandler(null);
     PetStore.I.emit(PetAction.exitBook);
     unawaited(NativeBridge.setKeepScreenOn(false)); // 交还系统熄屏控制
     // 顶部窄带底色还给全局主题
@@ -661,6 +670,67 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
+  /// 音量键翻门控状态缓存：native 通道只在变化时才发，避免每次 setState 都跨桥。
+  bool? _volGateSent;
+
+  /// 音量键翻页是否生效：分页模式、不在听书、不在全屏听书页。
+  /// （滚动模式点按即换章，音量键翻「页」没有合理语义，留给系统调音量。）
+  bool get _volumePageOn => _paged && !_speaking && !_ttsPage;
+
+  static const MethodChannel _readerKeys =
+      MethodChannel('dev.reader.novel_reader/reader_keys');
+
+  /// 向原生声明「阅读器在前台 / 音量键当前归我管」。
+  ///
+  /// Android 上部分 ROM 不经 Flutter 键通道派发音量键（社区长期问题），
+  /// 原生 [MainActivity.dispatchKeyEvent] 按 [readerActive] 直接拦 — 这是
+  /// 真机可用路径；Flutter 的 Focus 处理器继续留着：Windows 等桌面端走它。
+  void _syncVolumeGate() {
+    if (!Platform.isAndroid) return;
+    final active = _volumePageOn;
+    if (_volGateSent == active) return;
+    _volGateSent = active;
+    try {
+      _readerKeys.invokeMethod('setActive', active);
+    } catch (_) {
+      // 桥未就绪 / 桌面端没有该通道：忽略，Focus 处理器兜底
+    }
+  }
+
+  void _initVolumeKeys() {
+    if (!Platform.isAndroid) return;
+    _readerKeys.setMethodCallHandler((call) async {
+      if (call.method == 'turn') {
+        // KeyEvent.KEYCODE_VOLUME_UP = 24, KEYCODE_VOLUME_DOWN = 25
+        if (call.arguments == 24) {
+          _goPrev();
+        } else if (call.arguments == 25) {
+          _goNext();
+        }
+      }
+      return null;
+    });
+  }
+
+  /// 音量键翻页：音量下 = 下一页，音量上 = 上一页（桌面端 / Focus 链路）。
+  ///
+  /// 返回 [KeyEventResult.handled] 才能真正吞掉按键（否则系统音量条会跟着
+  /// 弹）；up / repeat 事件也吞 —— 长按不连翻、听书外的场景不漏音量变化。
+  KeyEventResult _onVolumeKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyUpEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final k = event.logicalKey;
+    final isVol = k == LogicalKeyboardKey.audioVolumeUp ||
+        k == LogicalKeyboardKey.audioVolumeDown;
+    if (!isVol) return KeyEventResult.ignored;
+    if (!_volumePageOn) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) {
+      k == LogicalKeyboardKey.audioVolumeDown ? _goNext() : _goPrev();
+    }
+    return KeyEventResult.handled;
+  }
+
   void _jumpChapter(int idx) {
     if (_detail == null) return;
     if (idx < 0 || idx >= _detail!.chapters.length) return;
@@ -733,11 +803,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final c = _colors();
+    // 音量键门控同步：_speaking / _ttsPage / pageMode 任何一变，build 都会路过
+    _syncVolumeGate();
     // 顶部那条预留带（桌宠住的地方）由全局提供，这里不再重复留边距。
     final mq = MediaQuery.of(context);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _systemUiStyle,
-      child: Scaffold(
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: _onVolumeKey,
+        child: Scaffold(
       backgroundColor: c.bg,
       body: Stack(
         children: [
@@ -850,6 +925,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         ],
       ),
     ),
+      ),
     );
   }
 
@@ -998,14 +1074,22 @@ class _ReaderScreenState extends State<ReaderScreen>
         itemBuilder: (ctx, i) {
           final child = _pageBody(pages[i]);
           if (!cover) return child;
-          final cur = _pageCtrl.hasClients && _pageCtrl.page != null
-              ? _pageCtrl.page!
-              : _page.toDouble();
-          return CoverTurnItem(
-            delta: i - cur,
-            width: MediaQuery.sizeOf(ctx).width,
-            shadowWidth: 14,
-            child: child,
+          // delta 必须每帧取控制器实时值：itemBuilder 只在条目首次上屏时
+          // 构建一次，把 page 快照写死会给「钉住页」冻结住 —— 拖到半屏
+          // 裁剪不跟手、松手才弹回（覆盖模式卡顿感的来源之一）。
+          return AnimatedBuilder(
+            animation: _pageCtrl,
+            builder: (_, __) {
+              final cur = _pageCtrl.hasClients && _pageCtrl.page != null
+                  ? _pageCtrl.page!
+                  : _page.toDouble();
+              return CoverTurnItem(
+                delta: i - cur,
+                width: MediaQuery.sizeOf(ctx).width,
+                shadowWidth: 14,
+                child: child,
+              );
+            },
           );
         },
       ),
@@ -1036,14 +1120,29 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
       if (_edgeDrag >= _kEdgeDragToChapter) {
         _edgeDrag = 0;
-        if (_page >= _currentPages.length - 1) {
-          _goNext();
-        } else if (_page <= 0) {
-          _goPrev();
-        }
+        return _flipBeyondEdge();
       }
     } else if (n is ScrollEndNotification) {
+      // 松手翻章：章末/章首拖出了越界但没到拖动阈值 —— 松手即翻
+      // （阅读 3.0 同口径：章末轻划松手直接进下一章），否则回弹归位。
+      final drag = _edgeDrag;
       _edgeDrag = 0;
+      if (drag >= _kEdgeDragToChapter ~/ 3) {
+        return _flipBeyondEdge();
+      }
+    }
+    return false;
+  }
+
+  /// 越界方向翻章：当前页在章末 → 下一章，在章首 → 上一章。
+  bool _flipBeyondEdge() {
+    if (_page >= _currentPages.length - 1) {
+      _goNext();
+      return true;
+    }
+    if (_page <= 0) {
+      _goPrev();
+      return true;
     }
     return false;
   }

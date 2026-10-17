@@ -124,8 +124,10 @@ class SourceHttpClient {
       attempt++;
       try {
         final h = <String, String>{
+          // 默认 UA 对齐 legado AppConfig.getPrefUserAgent（CronetMainVersion=128.0.0.0）：
+          // 桌面 Windows Chrome。移动 UA 会让部分站点返回移动版页面，与书源规则错位。
           'User-Agent':
-              'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
           ...?headers,
         };
         final cookie = _cookies.headerFor(uri);
@@ -136,7 +138,12 @@ class SourceHttpClient {
         // 书源的 POST 大多只写 `,{"method":"POST","body":...}` 不给 Content-Type，
         // PHP 站没有表单头会解析不到参数（实测抖音/速读谷收不到关键词）→ 默认补齐。
         if (bodyBytes != null && !_hasHeader(h, 'content-type')) {
-          h['content-type'] = _formContentType(charset);
+          // JSON 串（对象/数组开头）按 JSON 发送（QQ 系 API 校验 Content-Type），
+          // 其余维持表单默认（PHP 站没有表单头解析不到参数）。
+          final t = body!.trimLeft();
+          h['content-type'] = (t.startsWith('{') || t.startsWith('['))
+              ? 'application/json; charset=UTF-8'
+              : _formContentType(charset);
         }
         _sanitizeHeaders(h);
         http.Response resp;

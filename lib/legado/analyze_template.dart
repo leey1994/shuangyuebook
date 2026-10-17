@@ -24,6 +24,7 @@ class TemplateEngine {
     this.baseUrl = '',
     this.jsonRoot,
     TemplateRuleEval? evalRule,
+    this.jsEval,
     String Function(String)? encoder,
   })  : vars = vars ?? const {},
         store = store ?? const {},
@@ -42,6 +43,12 @@ class TemplateEngine {
   final dynamic jsonRoot;
 
   final TemplateRuleEval? _evalRule;
+
+  /// P0：JS 兜底求值挂钩（子集无法求值时走真实 JS；null = 引擎不可用）。
+  /// `ctx` 为链上当前结果（legado：`evalJS(expr, result)`，即 JS 里的 `result`）。
+  /// 返回 null 表示脚本报错（模板降级为空串）。
+  final String? Function(String expr, Object? ctx)? jsEval;
+
   final String Function(String)? _encoder;
 
   static final RegExp _braces = RegExp(r'\{\{([\s\S]*?)\}\}');
@@ -85,19 +92,34 @@ class TemplateEngine {
     if (expr.isEmpty) return null;
     String? s;
     var enc = true;
+    var ruleLike = false;
     if (expr.startsWith('@@')) {
       s = _evalRule?.call(expr.substring(2).trim(), ctx);
       enc = false;
+      ruleLike = true;
+    } else if (expr.startsWith('@') || expr.startsWith('//')) {
+      // legado isRule()：`@xxx` / `//` 开头按规则求值（如 {{@css:.title}}、{{//div}}）
+      s = _evalRule?.call(expr, ctx);
+      enc = false;
+      ruleLike = true;
     } else {
       final r = _ExprParser(expr, this, ctx).parse();
       if (r != null) {
         s = _stringify(r.$1);
         enc = r.$2;
       } else if (expr.startsWith(r'$')) {
-        final v = jsonPathLookup(expr, ctx);
-        if (v != null) {
-          s = v;
-          enc = true;
+        // legado isRule()：`$.` / `$[` 按 JSONPath 规则求值（不落到 JS，避免 $ is not defined）
+        s = jsonPathLookup(expr, ctx);
+        enc = true;
+        ruleLike = true;
+      }
+      if (s == null && !ruleLike) {
+        // P0：子集无法求值 → 真实 JS 兜底（legado：{{}} 内容按 JS 求值）。
+        // JS 结果原样保留（需要编码时源里显式调 java.encodeURI 等）。
+        final js = jsEval?.call(expr, ctx);
+        if (js != null && js.isNotEmpty) {
+          s = js;
+          enc = false;
         }
       }
     }

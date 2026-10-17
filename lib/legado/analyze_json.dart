@@ -383,6 +383,11 @@ List<dynamic> jsonSelect(dynamic root, String path) {
     current = next;
     if (current.isEmpty) break;
   }
+  // 对齐 legado（AnalyzeByJSonPath）：`ctx.read(rule)` 的结果若是 List，
+  // 消费端逐元素展开 —— `$.chapterlist` ≡ `$.chapterlist[*]`（单值恰为数组时）。
+  if (current.length == 1 && current.first is List) {
+    return List<dynamic>.from(current.first as List);
+  }
   return current;
 }
 

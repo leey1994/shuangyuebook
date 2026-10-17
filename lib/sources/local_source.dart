@@ -24,6 +24,7 @@ class LocalBookData {
     required this.paragraphs,
     required this.coverPath,
     this.intro = '',
+    this.chapterDepths,
   });
 
   final String title;
@@ -32,6 +33,9 @@ class LocalBookData {
 
   /// 章节标题（与 [chapters] 同序）。
   final List<String> chapters;
+
+  /// 章节层级（EPUB 多级目录：0=卷，>0=章；null=不分层）。
+  final List<int>? chapterDepths;
 
   /// 章节 → 段落列表。
   final List<List<String>> paragraphs;
@@ -114,7 +118,11 @@ class LocalSource extends NovelSource {
       ),
       chapters: [
         for (var i = 0; i < data.chapters.length; i++)
-          Chapter(title: data.chapters[i], url: chapterUrl(book.url, i)),
+          Chapter(
+            title: data.chapters[i],
+            url: chapterUrl(book.url, i),
+            depth: data.chapterDepths?[i],
+          ),
       ],
     );
   }
@@ -194,6 +202,7 @@ class LocalSource extends NovelSource {
       author: r.meta.author,
       intro: r.meta.intro,
       chapters: [for (final c in r.chapters) c.title],
+      chapterDepths: [for (final c in r.chapters) c.depth],
       paragraphs: [for (final c in r.chapters) c.text.split('\n')],
       coverPath: coverPath,
     );

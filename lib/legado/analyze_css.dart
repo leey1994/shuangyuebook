@@ -30,18 +30,26 @@ class CssStage {
   final String value;
 }
 
-/// 尾部排除后缀：`!0` `!0:2:4` `!1,3`。
-final RegExp _excludeSuffix = RegExp(r'!\s*(\d+(?:\s*[:,\s]\s*\d+)*)$');
+/// 尾部排除后缀：`!0` `!0:2:4` `!1,3` `!-1`（负索引从尾部数）。
+final RegExp _excludeSuffix =
+    RegExp(r'!\s*(-?\d+(?:\s*[:,\s]\s*-?\d+)*)$');
 
 /// 尾部切片/下标后缀：`[1:20]` `[3:]` `[:5]` `[0,2]` `[3]`。
 final RegExp _sliceSuffix =
     RegExp(r'\[(\s*-?\d*\s*:\s*-?\d*\s*|-?\d+\s*(?:,\s*-?\d+\s*)+|-?\d+)\]$');
 
 /// 把规则拆分为阶段列表（`@` 分隔）。解析失败时返回空列表。
-List<CssStage> parseCssStages(String rule) {
+/// 解析 CSS 规则为阶段序列。
+///
+/// [elementsMode]：为 true 时（`getRawList`/`getElements` 路径，如 chapterList）
+/// 末段的裸名字一律按**选择器**理解——`.listmain@dd@a`、`li!0:4@a` 这类
+/// 「目录规则以裸标签结尾」的写法在书源里极常见；若按属性提取器处理会
+/// 一直找名为 `a`/`p` 的属性 → 命中 0 → 目录为空。
+List<CssStage> parseCssStages(String rule, {bool elementsMode = false}) {
   final parts = rule.split('@');
   final stages = <CssStage>[];
-  for (final raw in parts) {
+  for (var i = 0; i < parts.length; i++) {
+    final raw = parts[i];
     var p = raw.trim();
     if (p.isEmpty) continue;
     // 先剥离尾部「排除 / 切片 / 下标」后缀（可叠加），阶段顺序与书写顺序一致。
@@ -63,6 +71,7 @@ List<CssStage> parseCssStages(String rule) {
     }
     if (p.isNotEmpty) {
       final isFirst = stages.isEmpty;
+      final isLast = i == parts.length - 1;
       if (_isIndex(p)) {
         stages.add(CssStage(CssStageType.position, _indexValue(p).toString()));
       } else if (_suffixIndex.hasMatch(p) &&
@@ -73,12 +82,17 @@ List<CssStage> parseCssStages(String rule) {
           CssStage(CssStageType.selector, _normalizeSelector(m.group(1)!)),
         );
         stages.add(CssStage(CssStageType.position, m.group(2)!));
-      } else if (isFirst ? _extractorKeywords.contains(p) : _isExtractor(p)) {
+      } else if (_extractorKeywords.contains(p)) {
+        stages.add(CssStage(CssStageType.extractor, p));
+      } else if (isLast && !isFirst && !elementsMode && _attrNameRe.hasMatch(p)) {
+        // 只有**末段**的纯名字才是属性提取（`a@href`）。
+        // 中间段一律选择器：`.nodeContent@p@html` / `div@p@text` 里的裸标签名
+        // `p`/`a`/`i` 长得像属性名，修前被当成“取 p 属性”→ 命中 0 → 正文变空。
         stages.add(CssStage(CssStageType.extractor, p));
       } else {
-        // 首段一律按选择器理解（除非是 text/html 等关键字）：`a@href` /
-        // `h3@text` 这类单段标签是阅读源最常见写法，不能因为长得像属性名就被
-        // 当成属性提取（修前 `a@href` 命中 0 → 整行静默丢弃）。
+        // 首段也一律按选择器理解：`a@href` / `h3@text` 这类单段标签是阅读源
+        // 最常见写法，不能因为长得像属性名就被当成属性提取（修前 `a@href`
+        // 命中 0 → 整行静默丢弃）。
         stages.add(CssStage(CssStageType.selector, _normalizeSelector(p)));
       }
     }
@@ -101,13 +115,26 @@ const _extractorKeywords = {'text', 'textNodes', 'ownText', 'html', 'all'};
 /// 属性名形态：字母/下划线开头，允许数字、连字符、冒号（如 data-src、xlink:href）。
 final _attrNameRe = RegExp(r'^[A-Za-z_][\w:-]*$');
 
-bool _isExtractor(String p) {
-  if (_extractorKeywords.contains(p)) return true;
-  // 属性名：字母/下划线开头，允许数字、连字符、冒号（如 data-src、xlink:href）
-  return RegExp(r'^[A-Za-z_][\w:-]*$').hasMatch(p);
-}
-
 String _normalizeSelector(String p) {
+  // 复合段（空格分隔的多个选择器token）逐 token 归一化：
+  // `id.mulu class.DivTd3` 修前只换首 token → `#mulu class.DivTd3`
+  // 里残留的 `class.DivTd3` 不是合法 CSS → 整个选择器命中 0。
+  final tokens = p.split(' ');
+  if (tokens.length > 1) {
+    return tokens.map(_normalizeSelector).join(' ');
+  }
+  // 开头 `-` 是导源工具留下的装饰噪声（`-.chapters p`、`-class.chapters`），
+  // 不是合法 CSS → 命中 0；剥掉后按正常段归一化。
+  if (p.length > 1 && p.startsWith('-')) {
+    final rest = p.substring(1);
+    if (rest.startsWith('.') ||
+        rest.startsWith('#') ||
+        rest.startsWith('class.') ||
+        rest.startsWith('id.') ||
+        rest.startsWith('tag.')) {
+      return _normalizeSelector(rest);
+    }
+  }
   if (p.startsWith('tag.')) return p.substring(4);
   if (p.startsWith('class.')) return '.${p.substring(6)}';
   if (p.startsWith('id.')) return '#${p.substring(3)}';
@@ -148,6 +175,23 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
         if (re.hasMatch(e.attributes[attrRe.$2] ?? '')) e,
     ];
   }
+  // `text.XXX`：按「元素自身文本（ownText）包含 XXX」选元素（对齐 legado
+  // `getElementsContainingOwnText`，大小写不敏感）。阅读源常见，如
+  // text.下一页@href、text.章节目录@href。若用全文 `e.text`，祖先节点
+  // （html/body 的聚合文本）会抢先命中，`@href` 便提取不到真正的链接。
+  if (s.startsWith('text.')) {
+    final needle = s.substring(5).split('.').first.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    final all = context is dom.Document
+        ? context.querySelectorAll('*')
+        : context is dom.Element
+            ? context.querySelectorAll('*')
+            : const <dom.Element>[];
+    return [
+      for (final e in all)
+        if (_ownText(e).toLowerCase().contains(needle)) e,
+    ];
+  }
   try {
     if (context is dom.Document) {
       return context.querySelectorAll(s);
@@ -163,6 +207,20 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
 }
 
 // ---------- 尾部过滤伪类 ----------
+
+/// 元素自身的文本（仅直接子文本节点；`<br>` 计为换行）。
+/// 对齐 jsoup `Element.ownText()`。
+String _ownText(dom.Element el) {
+  final buf = StringBuffer();
+  for (final n in el.nodes) {
+    if (n is dom.Text) {
+      buf.write(n.text);
+    } else if (n is dom.Element && n.localName == 'br') {
+      buf.write('\n');
+    }
+  }
+  return buf.toString();
+}
 
 final RegExp _filterSuffix = RegExp(
     r':(lt|gt|eq|nth-of-type|first-of-type|last-of-type)\s*(?:\(([^()]*)\))?\s*$');
@@ -408,11 +466,7 @@ List<String> _extract(List<dom.Node> nodes, String extractor) {
         }
       case 'ownText':
         if (el != null) {
-          final buf = StringBuffer();
-          for (final n in el.nodes) {
-            if (n is dom.Text) buf.write(n.text);
-          }
-          final t = RuleAnalyzer.collapseSpaces(buf.toString());
+          final t = RuleAnalyzer.collapseSpaces(_ownText(el));
           if (t.isNotEmpty) out.add(t);
         }
       case 'html':

@@ -13,7 +13,9 @@ import 'package:xml/xml.dart' as xml;
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
 import 'http_client.dart';
+import 'js_engine.dart';
 import 'models.dart';
+import 'online_book_service.dart';
 import 'source_store.dart';
 
 /// 单源搜索的结果（或错误）。
@@ -161,6 +163,40 @@ class OnlineRepo {
   RateGate _gateFor(BookSource s) =>
       _gates.putIfAbsent(s.bookSourceUrl, () => RateGate(s.concurrentRate));
 
+  /// P0：书源 JS 环境（同一次搜索/发现操作共享 [session]）。
+  static JsEnv jsEnvFor(BookSource source, JsSession session) => JsEnv(
+        scopeKey: source.bookSourceUrl,
+        sourceUrl: source.bookSourceUrl,
+        sourceName: source.bookSourceName,
+        sourceHeader: source.header,
+        jsLib: source.jsLib,
+        session: session,
+      );
+
+  /// 挂起补网：抓取目标写入会话缓存后重跑脚本。
+  Future<void> _resolveSuspend(
+    BookSource source,
+    JsSession session,
+    JsSuspendException e,
+  ) async {
+    if (e.kind == 'webview') {
+      // WebView 渲染规则为 P2：先以空响应继续，避免死循环
+      session.webViewCache[e.target] = '';
+      return;
+    }
+    try {
+      final resp = await _client.get(
+        e.target,
+        headers: _mergeHeaders(source, const {}),
+        timeout: perSourceTimeout,
+        retries: 0,
+      );
+      session.ajaxCache[e.target] = resp.ok ? resp.body : '';
+    } catch (_) {
+      session.ajaxCache[e.target] = '';
+    }
+  }
+
   /// 对所有启用的书源并发搜索。
   ///
   /// 每个源完成（成功或失败）时回调 [onSourceDone]；返回按书源顺序排列的完整结果。
@@ -199,11 +235,29 @@ class OnlineRepo {
     return results;
   }
 
-  /// 单源搜索（错误隔离在内部消化）。
+  /// 单源搜索（错误隔离在内部消化；P0：JS 挂起自动补网重跑）。
   Future<SourceSearchResult> searchOne(
     BookSource source,
     String key, {
     int page = 1,
+  }) async {
+    final session = JsSession();
+    final env = jsEnvFor(source, session);
+    return runWithJsSession(
+      session,
+      () =>
+          _searchOneInner(source, key, page: page, js: env, session: session),
+      (e) => _resolveSuspend(source, session, e),
+    );
+  }
+
+  /// 单源搜索主体（供挂起重跑整体重放）。
+  Future<SourceSearchResult> _searchOneInner(
+    BookSource source,
+    String key, {
+    required int page,
+    required JsEnv js,
+    required JsSession session,
   }) async {
     final started = DateTime.now();
     int elapsed() => DateTime.now().difference(started).inMilliseconds;
@@ -215,12 +269,12 @@ class OnlineRepo {
       final req = buildRequest(rawUrl, source.bookSourceUrl, {
         'key': key,
         'page': page,
-      });
-      // 纯 JS 构建的搜索入口（整段 @js: / <js> 且没有可直接使用的明文地址）：
-      // 明确报错，而不是拿一段脚本文本去请求换来含糊的「无效的地址」。
+      }, js: js);
+      // 纯 JS 构建的搜索入口且引擎不可用：明确报错，而不是拿一段脚本文本去请求。
       final lowUrl = req.url.toLowerCase();
-      if (lowUrl.contains('<js') || lowUrl.contains('@js:')) {
-        throw const FormatException('搜索入口由 JS 脚本构建（当前引擎不支持，可手动替换搜索地址）');
+      if ((lowUrl.contains('<js') || lowUrl.contains('@js:')) &&
+          !JsBridge.available) {
+        throw const FormatException('搜索入口由 JS 脚本构建（JS 引擎不可用，可手动替换搜索地址）');
       }
       if (req.url.trim().isEmpty) {
         throw const FormatException('搜索地址渲染为空（searchUrl 可能由 JS 表达式构建）');
@@ -257,7 +311,8 @@ class OnlineRepo {
       if (!resp.ok) {
         throw SourceHttpException('HTTP ${resp.statusCode}');
       }
-      final parsed = parseSearchPageDetailed(source, resp.body);
+      final parsed = parseSearchPageDetailed(source, resp.body,
+          js: js, pageUrl: req.url);
       if (parsed.books.isEmpty && parsed.rows > 0) {
         final reason = parsed.noUrl > 0
             ? '${parsed.noUrl} 条结果无法解析书籍链接（bookUrl 规则可能依赖 JS 脚本）'
@@ -286,6 +341,7 @@ class OnlineRepo {
         elapsedMs: elapsed(),
       );
     } catch (e) {
+      if (e is JsSuspendException) rethrow; // 交给外层补网重跑
       return SourceSearchResult(
         source: source,
         error: '解析失败：$e',
@@ -299,13 +355,15 @@ class OnlineRepo {
       parseSearchPageDetailed(source, body).books;
 
   /// 解析搜索结果页，同时给出被跳过条目的计数（用于失败归因）。
-  SearchParseResult parseSearchPageDetailed(BookSource source, String body) {
+  SearchParseResult parseSearchPageDetailed(BookSource source, String body,
+      {JsEnv? js, String? pageUrl}) {
     final rule = source.searchRule;
     if (rule == null) return const SearchParseResult([]);
     final listRule = (rule.bookList ?? '').trim();
     if (listRule.isEmpty) return const SearchParseResult([]);
 
-    final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(body,
+        baseUrl: pageUrl ?? source.bookSourceUrl, js: js);
     final items = engine.getRawList(listRule);
     final books = <SearchBook>[];
     var rows = 0;
@@ -340,13 +398,19 @@ class OnlineRepo {
 
       // 没有书籍页地址的条目点开必炸（JS-only 规则在非 Android 端解析不出地址）——直接丢弃，
       // 但计数用于把「0 结果」解释成「N 条结果链接解析失败（bookUrl 依赖 JS）」。
-      final bookUrlRaw = _field(engine, rule.bookUrl, item);
+      final bookUrlRaw = _field(engine, rule.bookUrl, item, isUrl: true);
       final bookUrl = bookUrlRaw == null
           ? ''
           : resolveUrl(bookUrlRaw, source.bookSourceUrl);
       if (bookUrl.isEmpty) {
         noUrl++;
         continue;
+      }
+      // 跨阶段变量快照（legado book.variableMap）：搜索条目 `@put:{k:rule}`
+      // 的产出挂在书级，详情阶段 `@get:{k}` 读回（17k: `@put:{book:id}`）。
+      final sv = js?.session?.vars;
+      if (sv != null && sv.isNotEmpty) {
+        OnlineBookService.cacheItemVars(source.bookSourceUrl, bookUrl, sv);
       }
       books.add(
         SearchBook(
@@ -369,10 +433,11 @@ class OnlineRepo {
     return SearchParseResult(books, rows: rows, noName: noName, noUrl: noUrl);
   }
 
-  String? _field(AnalyzeRule engine, String? rule, Object item) {
+  String? _field(AnalyzeRule engine, String? rule, Object item,
+      {bool isUrl = false}) {
     final r = rule?.trim();
     if (r == null || r.isEmpty) return null;
-    final v = engine.getString(r, ctx: item);
+    final v = engine.getString(r, ctx: item, isUrl: isUrl);
     return (v == null || v.isEmpty) ? null : v;
   }
 
@@ -487,7 +552,23 @@ class OnlineRepo {
     ExploreCategory category, {
     int page = 1,
   }) async {
-    final url = renderExploreUrl(category.url, source.bookSourceUrl, page);
+    final session = JsSession();
+    final env = jsEnvFor(source, session);
+    return runWithJsSession(
+      session,
+      () => _exploreOneInner(source, category, page: page, js: env),
+      (e) => _resolveSuspend(source, session, e),
+    );
+  }
+
+  Future<List<SearchBook>> _exploreOneInner(
+    BookSource source,
+    ExploreCategory category, {
+    required int page,
+    required JsEnv js,
+  }) async {
+    final url =
+        renderExploreUrl(category.url, source.bookSourceUrl, page, js: js);
     final headers = _mergeHeaders(source, const {});
     await _gateFor(source).waitSlot();
     final resp = await _client.get(
@@ -496,16 +577,17 @@ class OnlineRepo {
       timeout: perSourceTimeout,
     );
     if (!resp.ok) throw SourceHttpException('HTTP ${resp.statusCode}');
-    return parseExplorePage(source, resp.body);
+    return parseExplorePage(source, resp.body, js: js, pageUrl: url);
   }
 
   /// 把分类地址渲染为可请求的绝对地址（补全相对路径 + `{{page}}` / `{page}` 占位）。
   @visibleForTesting
-  static String renderExploreUrl(String raw, String base, int page) {
+  static String renderExploreUrl(String raw, String base, int page,
+      {JsEnv? js}) {
     var s = raw.trim();
     // 先渲染 {{page}}（模板引擎，含算术），再回落旧式单花括号 {page}：
     // 顺序不能反——先替换 `{page}` 会把 `{{page}}` 破坏成 `{N}`。
-    s = renderUrlTemplate(s, {'page': page});
+    s = renderUrlTemplate(s, {'page': page}, js: js);
     s = s.replaceAll('{page}', '$page');
     return resolveUrl(s, base);
   }
@@ -516,13 +598,15 @@ class OnlineRepo {
   /// 大量书源的 `ruleExplore` 是**空对象 `{}`**（非 null），`??` 不会回退，
   /// 于是 bookList 取不到 → 解析出 0 本书（用户反馈「发现页什么都没有」）。
   /// 这里改为「exploreRule 有 bookList 才用它，否则回退 searchRule」。
-  List<SearchBook> parseExplorePage(BookSource source, String body) {
+  List<SearchBook> parseExplorePage(BookSource source, String body,
+      {JsEnv? js, String? pageUrl}) {
     final rule = _pickExploreRule(source);
     // ExploreRule 与 SearchRule 字段同名，这里统一取字段
     final listRule = _exploreField(rule, 'bookList');
     if (listRule == null || listRule.trim().isEmpty) return const [];
 
-    final engine = AnalyzeRule(body, baseUrl: source.bookSourceUrl);
+    final engine = AnalyzeRule(body,
+        baseUrl: pageUrl ?? source.bookSourceUrl, js: js);
     final items = engine.getRawList(listRule);
     final books = <SearchBook>[];
     for (final item in items) {
@@ -544,7 +628,8 @@ class OnlineRepo {
       final coverRaw = _field(engine, _exploreField(rule, 'coverUrl'), item);
       // 同上：解析不出书籍页地址的条目一律不进榜（否则点开就是「无效的地址」）。
       // bookUrl 最后求值，便于模板引用已解析字段（{{book.kind}} 等）。
-      final bookUrlRaw = _field(engine, _exploreField(rule, 'bookUrl'), item);
+      final bookUrlRaw =
+          _field(engine, _exploreField(rule, 'bookUrl'), item, isUrl: true);
       final bookUrl = bookUrlRaw == null
           ? ''
           : resolveUrl(bookUrlRaw, source.bookSourceUrl);
@@ -765,18 +850,7 @@ class OnlineRepo {
     BookSource source,
     Map<String, dynamic> options,
   ) {
-    final out = <String, String>{};
-    final raw = source.header;
-    if (raw != null && raw.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          decoded.forEach((k, v) => out[k.toString()] = v.toString());
-        }
-      } catch (_) {
-        // 非 JSON 的 header 忽略（部分老源是空串）
-      }
-    }
+    final out = OnlineBookService.headerMap(source);
     final opts = options['headers'];
     if (opts is Map) {
       opts.forEach((k, v) => out[k.toString()] = v.toString());

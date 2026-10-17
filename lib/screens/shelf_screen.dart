@@ -449,7 +449,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
     return LayoutBuilder(
       builder: (context, box) {
         final avail = box.maxWidth - edge * 2;
-        final cols = narrow ? 3 : (avail / 176).floor().clamp(3, 6);
+        // 长卡片一行一卡：书名长的才显示得全（正方形卡片维持多列密度）。
+        final cols = square ? (narrow ? 3 : (avail / 176).floor().clamp(3, 6)) : 1;
         final tileW = (avail - gap * (cols - 1)) / cols;
         // 「导入本地书」虚线块只跟在在线书架后面（本地书段顶部单独放）
         final tiles = <Widget>[
@@ -463,7 +464,7 @@ class _ShelfScreenState extends State<ShelfScreen> {
             crossAxisCount: cols,
             mainAxisSpacing: 16,
             crossAxisSpacing: gap,
-            mainAxisExtent: square ? tileW * 1.34 + 34 : 96,
+            mainAxisExtent: square ? tileW * 1.34 + 34 : 112,
           ),
           itemCount: tiles.length,
           itemBuilder: (context, i) => tiles[i],
@@ -551,7 +552,7 @@ class _ShelfScreenState extends State<ShelfScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 58,
+            width: square ? 58 : 78,
             child: AspectRatio(
               aspectRatio: 0.74,
               child:

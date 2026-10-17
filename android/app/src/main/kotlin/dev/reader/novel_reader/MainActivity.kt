@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -29,7 +30,10 @@ class MainActivity : FlutterActivity() {
     private var nativeChannel: MethodChannel? = null
     private var openChannel: MethodChannel? = null
     private var ttsChannel: MethodChannel? = null
+    private var readerKeysChannel: MethodChannel? = null
     private var eventSink: EventChannel.EventSink? = null
+    /** 音量键翻页门控：阅读器在前台时 true —— 音量键按门控派发进 Dart，吞掉系统音量。 */
+    private var readerActive = false
 
     /** 冷启动时 Dart 尚未就绪，先把文件路径存下来等 Dart 来取。 */
     private var pendingOpenPath: String? = null
@@ -141,6 +145,21 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // 音量键翻页：Dart 侧阅读器进出场时 setActive 切换门控；
+        // 命中门控时 dispatchKeyEvent 直接转发 turn(keyCode) 并消费，
+        // 解锁「部分 ROM 音量键不走 Flutter 键通道」的兜底路径。
+        readerKeysChannel = MethodChannel(messenger, "dev.reader.novel_reader/reader_keys").also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setActive" -> {
+                        readerActive = call.arguments == true
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
         // 热启动文件推送用独立 EventChannel：Dart 侧订阅后才开始收，
         // 避免冷启动时 Dart 还没挂上监听就丢事件。
         EventChannel(messenger, "dev.reader.novel_reader/open_events")
@@ -161,6 +180,29 @@ class MainActivity : FlutterActivity() {
     }
 
     // ==================== 基础能力 ====================
+
+    /**
+     * 音量键翻页（阅读器门控期内拦截）：
+     *  - ACTION_DOWN 且非长按连发 → 转发 turn(keyCode) 进 Dart 翻页；
+     *  - up / repeat 一并消费（音量条不弹、长按不连翻）；
+     *  - 门控关闭或非音量键 → 原样交给 Flutter / 系统链路。
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val on = readerActive &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+                event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        if (on) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                android.util.Log.i("ShuangYue", "volume turn " + event.keyCode)
+                try {
+                    readerKeysChannel?.invokeMethod("turn", event.keyCode)
+                } catch (e: Exception) {
+                }
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     /**
      * 取字符串参数，兼容两种传法：
