@@ -34,7 +34,7 @@
 |平台|文件|
 |-|-|
 |Android|`novel_reader_android.apk`|
-|Windows|`novel_reader_windows_x64.zip`（内含 `novel_reader.exe`）—— 解压即用，无需安装|
+|Windows|`novel_reader_windows_x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装|
 |iOS|工程已就绪，需自行在 macOS + Xcode 上签名构建|
 
 已装 v1.0.0 / v1.0.1 的用户在应用内点「检查更新」即可一键升级（安卓直装 APK，Windows 自动替换并重启）。

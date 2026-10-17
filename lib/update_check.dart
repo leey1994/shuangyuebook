@@ -57,7 +57,8 @@ int compareVersion(String a, String b) {
 ///
 /// 更新动作全自动：
 /// - 安卓：下载 APK → 系统安装器安装
-/// - Windows：下载 zip → 解压 → 辅助脚本等待本进程退出后替换运行目录 → 重启
+/// - Windows：交给独立更新器（程序目录 `updater.exe`，后台下载/解压/换装/重启）；
+///   老包兜底：UI 内下载 zip → 更新脚本等待本进程退出后替换运行目录 → 重启
 class UpdateChecker {
   UpdateChecker._();
 
@@ -184,10 +185,41 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     });
     try {
       final dir = await getTemporaryDirectory();
+
+      // ---- Windows 优先：独立更新器后台包办（下载/解压/换装/重启）----
+      // UI 进程只点个火就退出 —— 下载字节流、进度条、磁盘写入全不沾手。
+      if (!isAndroid) {
+        final exe = Platform.resolvedExecutable;
+        final exeDir = File(exe).parent.path;
+        final exeName =
+            exe.substring(exe.lastIndexOf(Platform.pathSeparator) + 1);
+        final updater = File('$exeDir/updater.exe');
+        if (updater.existsSync()) {
+          // 更新器在程序目录：把镜像 URL 列表全传过去（更新器自己逐条回退）
+          final urlList = [
+            for (var i = 0; i < kDownloadMirrors.length; i++) mirrorUrl(url, i),
+          ];
+          setState(() => _phase = '已交给更新器，下载完成后自动重启…');
+          try {
+            await Process.start(
+              updater.path,
+              ['--appdir=$exeDir', '--appexe=$exeName', ...urlList],
+              mode: ProcessStartMode.detached,
+            );
+          } catch (e) {
+            throw Exception('更新器启动失败：$e');
+          }
+          if (!mounted) return;
+          await Future.delayed(const Duration(milliseconds: 600));
+          exit(0);
+        }
+      }
+
       final target = File(
           '${dir.path}/${isAndroid ? 'update.apk' : 'shuangyue_update.zip'}');
 
       // ---- 流式下载（边下边写盘，显示百分比），镜像逐个回退 ----
+      // 仅剩安卓与「老包没有更新器」的 Windows 兜底会走到这里
       final expected = await _downloadWithMirrors(url, target);
       if (expected == null) {
         throw Exception('所有下载线路都失败了，请检查网络后重试');
@@ -202,7 +234,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         return;
       }
 
-      // ---- Windows：解压 → 自替换脚本 → 退出重启 ----
+      // ---- Windows 旧版兜底（v1.0.2 之前的老包：没有 updater.exe）----
+      // 解压 → 自替换脚本 → 退出重启
       setState(() => _phase = '正在解压…');
       final stage = Directory('${dir.path}/shuangyue_update');
       if (stage.existsSync()) stage.deleteSync(recursive: true);

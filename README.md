@@ -89,7 +89,7 @@ Flutter 打造的双端（Android / Windows）小说阅读器——内置固化�
 * 搜索与发现页**实时出结果**：任一书源返回即刻上屏，不必等最慢的那个
 * 安卓全程 edge-to-edge，顶部窄带就是状态栏本身那一行（原来显示时间 / 信号强度的位置）；窄带底色跟随阅读背景，不会割裂
 * 实时公告：启动与运行中自动检查，新公告全屏直达（内容由 GitHub Pages 分发，改一处即全端生效）。同一条公告每人只弹一次，读过就不再打扰
-* 自动更新：启动静默检查新版本，弹窗即更新公告；安卓一键安装，Windows 自动替换重启；下载多线路回退并校验完整性
+* 自动更新：启动静默检查新版本，弹窗即更新公告；安卓一键安装；**Windows 交给独立更新器 `updater.exe` 后台包办**（多线路下载 → 解压校验 → 等主程序退出 → 整体换装 → 自动重启，全程不占 UI、写 `updater.log` 可查）；下载多线路回退并校验完整性
 * 桌面端独立窗口，窄屏 / 宽屏自适应布局
 
 ## 下载
@@ -113,6 +113,11 @@ flutter test
 # 「我的 → 关于」与自动更新都靠它判断有没有新版本。
 flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.2
 flutter build windows --release --dart-define=APP_VERSION=1.0.2
+
+# Windows 更新器（独立后台进程，打 Windows 包前必须先产出并放进 Release 目录）：
+# 负责下载/解压/换装/重启，UI 进程只负责点火。
+dart compile exe tool/updater.dart -o build/windows/x64/runner/Release/updater.exe
+# 然后整目录打包成 novel_reader_windows_x64.zip（updater.exe 一并进包）。
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
