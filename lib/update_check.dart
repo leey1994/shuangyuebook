@@ -160,10 +160,18 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   double? _pct; // null = 不确定进度（下载阶段才有百分比）
   String? _phase; // 下载完成后的阶段文案（解压/重启）
   String? _error;
+  String? _statusPath; // Windows 更新器状态文件（轮询进度 / 关弹窗即取消）
 
   @override
   void dispose() {
     _client?.close(); // 下载中途关闭对话框则中断连接
+    // 更新器流程中用户关闭弹窗 = 取消更新（更新器在检查点自行终止）
+    final sp = _statusPath;
+    if (sp != null) {
+      try {
+        File(sp).writeAsStringSync('abort\n', mode: FileMode.append);
+      } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -195,11 +203,15 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             exe.substring(exe.lastIndexOf(Platform.pathSeparator) + 1);
         final updater = File('$exeDir/updater.exe');
         if (updater.existsSync()) {
-          // 更新器在程序目录：把镜像 URL 列表全传过去（更新器自己逐条回退）
+          // 更新器在程序目录：把镜像 URL 列表全传过去（更新器自己逐条回退）。
+          // 应用保持可用：更新器后台下载（进度写状态文件，本弹窗轮询展示），
+          // 下载完成后这里才退出应用，更新器随即换装并自动重启。
           final urlList = [
             for (var i = 0; i < kDownloadMirrors.length; i++) mirrorUrl(url, i),
           ];
-          setState(() => _phase = '已交给更新器，下载完成后自动重启…');
+          final statusFile = File('$exeDir/update_status.txt');
+          _statusPath = statusFile.path;
+          setState(() => _phase = '更新器已启动，正在后台下载…');
           try {
             await Process.start(
               updater.path,
@@ -210,8 +222,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
             throw Exception('更新器启动失败：$e');
           }
           if (!mounted) return;
-          await Future.delayed(const Duration(milliseconds: 600));
-          exit(0);
+          await _followUpdater(statusFile);
+          return;
         }
       }
 
@@ -326,6 +338,43 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       client.close();
       _client = null;
     }
+  }
+
+  /// 轮询更新器状态文件：downloading 百分比 → ready 时退出应用 → failed 报错。
+  /// 上限 10 分钟；弹窗被关闭时 dispose 会写 abort，这里自行退出。
+  Future<void> _followUpdater(File statusFile) async {
+    for (var i = 0; i < 1200; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      String line = '';
+      try {
+        final content = statusFile.readAsStringSync().trim();
+        if (content.isNotEmpty) {
+          line = content.split('\n').last.trim();
+        }
+      } catch (_) {}
+      if (line.startsWith('downloading')) {
+        final p = double.tryParse(line.split(' ').last);
+        if (p != null) {
+          setState(() {
+            _pct = p / 100;
+            _phase = null;
+          });
+        }
+      } else if (line.startsWith('ready') || line.startsWith('done')) {
+        // 包已就绪：现在才关闭应用，更新器随即换装并重启
+        setState(() {
+          _pct = null;
+          _phase = '下载完成，正在退出应用并安装更新…';
+        });
+        await Future.delayed(const Duration(milliseconds: 600));
+        _statusPath = null; // 正常退出，不算取消
+        exit(0);
+      } else if (line.startsWith('failed')) {
+        throw Exception('更新器：${line.substring(6).trim()}');
+      }
+    }
+    throw Exception('更新器超时未响应');
   }
 
   void _spawnUpdater(Directory stage, File zip) {

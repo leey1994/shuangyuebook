@@ -25,6 +25,23 @@ void _log(String dir, String msg) {
   } catch (_) {}
 }
 
+/// 状态文件（UI 轮询这个文件拿到进度/就绪信号；用户关弹窗时 UI 会追加 abort）。
+void _status(String dir, String line) {
+  try {
+    File('$dir/update_status.txt')
+        .writeAsStringSync('$line\n', mode: FileMode.append);
+  } catch (_) {}
+}
+
+/// 用户是否取消过（扫描全文，避免被后续 downloading 行冲掉）。
+bool _aborted(String dir) {
+  try {
+    return File('$dir/update_status.txt').readAsStringSync().contains('abort');
+  } catch (_) {
+    return false;
+  }
+}
+
 /// rename 移动条目（文件/目录均适用，同盘原子）；被锁直接抛异常由调用方重试。
 void _move(FileSystemEntity e, String to) {
   e.renameSync(to);
@@ -52,13 +69,17 @@ void main(List<String> rawArgs) async {
       throw Exception('参数不完整');
     }
     _sweepStale(appDir);
+    // 重置状态文件（新一轮更新开始；此后 UI 追加 abort 表示取消）
+    try {
+      File('$appDir/update_status.txt').writeAsStringSync('starting\n');
+    } catch (_) {}
     final stageRoot = Directory(
         '${Directory.systemTemp.path}/shuangyue_update');
     if (!stageRoot.existsSync()) stageRoot.createSync(recursive: true);
     final tmpZip = File(
         '${stageRoot.path}/shuangyue_update_${DateTime.now().millisecondsSinceEpoch}.zip');
 
-    // 1. 逐镜像下载
+    // 1. 逐镜像下载（进度实时写状态文件，UI 轮询展示；应用保持可用）
     var ok = false;
     for (final url in urls) {
       try {
@@ -75,8 +96,22 @@ void main(List<String> rawArgs) async {
           if (rs.statusCode != 200) {
             throw Exception('HTTP ${rs.statusCode}');
           }
+          final total = rs.contentLength ?? 0;
           final sink = tmpZip.openWrite();
-          await rs.pipe(sink);
+          var got = 0;
+          var lastPct = -1;
+          await for (final chunk in rs) {
+            sink.add(chunk);
+            got += chunk.length;
+            if (total > 0) {
+              final pct = (got * 100 / total).floor();
+              if (pct != lastPct) {
+                lastPct = pct;
+                _status(appDir, 'downloading $pct');
+              }
+            }
+          }
+          await sink.close();
           c.close();
         }
         final len = tmpZip.lengthSync();
@@ -92,8 +127,19 @@ void main(List<String> rawArgs) async {
           if (tmpZip.existsSync()) tmpZip.deleteSync();
         } catch (_) {}
       }
+      if (_aborted(appDir)) {
+        _log(appDir, '用户取消，停止下载');
+        exit(1);
+      }
     }
     if (!ok) throw Exception('所有下载线路都失败了');
+    if (_aborted(appDir)) {
+      _log(appDir, '用户取消，丢弃已下载内容');
+      try {
+        if (tmpZip.existsSync()) tmpZip.deleteSync();
+      } catch (_) {}
+      exit(1);
+    }
 
     // 2. 解压校验（CRC 随解压失败抛出）
     final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -115,17 +161,28 @@ void main(List<String> rawArgs) async {
     } catch (_) {}
     _log(appDir, '解压完成，共 ${zip.files.length} 个文件');
 
-    // 3. 等主程序退出：旧 exe 不可写时 rename 会抛 → 重试至多 60 秒
+    // 3. 等 UI 看到.ready 后退出本应用（UI 轮询状态文件，退出 ~0.5s 内发生）：
+    // 旧 exe 不可写时 rename 会抛 → 重试至多 120 秒；期间可被用户取消
     final oldDir = Directory('$appDir._old_$stamp');
     if (oldDir.existsSync()) oldDir.deleteSync(recursive: true);
     oldDir.createSync();
+    _status(appDir, 'ready'); // 通知 UI：包已就绪，请退出应用
     var movedAll = false;
-    for (var t = 0; t < 60; t++) {
+    var aborted = false;
+    for (var t = 0; t < 120; t++) {
+      if (_aborted(appDir)) {
+        aborted = true;
+        break;
+      }
       try {
         final outOfWay = <String, bool>{};
         for (final e in Directory(appDir).listSync()) {
           final n = e.path.split(RegExp(r'[/\\]')).last;
-          if (n == 'updater.log' || outOfWay[n] == true) continue;
+          if (n == 'updater.log' ||
+              n == 'update_status.txt' ||
+              outOfWay[n] == true) {
+            continue;
+          }
           _move(e, '${oldDir.path}/$n');
           outOfWay[n] = true;
         }
@@ -134,6 +191,12 @@ void main(List<String> rawArgs) async {
       } catch (_) {
         sleep(const Duration(seconds: 1));
       }
+    }
+    if (aborted) {
+      _log(appDir, '用户取消，清理暂存');
+      oldDir.deleteSync(recursive: true);
+      stage.deleteSync(recursive: true);
+      exit(1);
     }
     if (!movedAll) throw Exception('主程序迟迟未退出，旧文件保留原状');
     _log(appDir, '旧文件已整体换出');
@@ -150,12 +213,14 @@ void main(List<String> rawArgs) async {
     _log(appDir, '收尾：删除备份目录');
     _cleanupOld(oldDir);
     _log(appDir, '更新完成，重启 $appExe');
+    _status(appDir, 'done');
     await Process.start('$appDir/$appExe', [], workingDirectory: appDir,
             mode: ProcessStartMode.detached)
         .then((_) {});
     exit(0);
   } catch (e) {
     _log(appDir, '更新失败：$e');
+    _status(appDir, 'failed $e');
     // 尽力把旧文件搬回来
     final parent = Directory(appDir).parent;
     final oldDirs = parent
