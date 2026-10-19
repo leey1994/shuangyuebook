@@ -411,6 +411,18 @@ void main() {
       );
       expect(selectElements(doc, 'i[property~=category|status]').length, 2);
     });
+
+    test('## 替换链作用于未折叠空白的原始串（P1-4）', () {
+      // XPath 文本节点：原始换行保留（CSS @text 按 jsoup 语义归一，无原始串）
+      final eng = AnalyzeRule(
+        '<div><p>第一段\n\n\n第二段</p></div>',
+      );
+      expect(eng.getString(r'//p/text()##\n+##|'), '第一段|第二段');
+      expect(eng.getString(r'//p/text()##\s+##+'), '第一段+第二段');
+      // JSON 值同样是原始串
+      final j = AnalyzeRule('{"c":"甲\\n\\n乙"}');
+      expect(j.getString(r'$.c##\n+##/'), '甲/乙');
+    });
   });
 
   group('XPath 谓词', () {
@@ -441,6 +453,62 @@ void main() {
       expect(evalXPath(d, '//li[span]/a/@href').strings, ['/a']);
     });
 
+    test('相对路径 .// 与 ..（legado jsoupXpath 常用写法）', () {
+      final d = parseXmlLoose(
+        '<div id="box"><ul><li><a href="/c1">一</a></li>'
+        '<li><a href="/c2">二</a></li></ul></div>',
+      )!;
+      final box = d.rootElement;
+      // .// 从当前元素起（含自身后代）
+      expect(evalXPath(box, './/a/@href').strings, ['/c1', '/c2']);
+      // ./ 单步（子轴，不跨层）
+      expect(evalXPath(box, './ul/li/a/@href').strings, ['/c1', '/c2']);
+      expect(evalXPath(box, './a').elements, isEmpty);
+      // .. 父轴：li → ul → div（带 id）
+      final li = evalXPath(box, './/li').elements.first;
+      expect(evalXPath(li, '../@id').strings, isEmpty);
+      expect(evalXPath(li, '../../@id').strings, ['box']);
+    });
+
+    test('复合谓词 and / or / not / starts-with', () {
+      final d = parseXmlLoose(
+        '<ul>'
+        '<li><a href="/c1">第一章</a></li>'
+        '<li><a href="javascript:void(0)">JS伪链</a></li>'
+        '<li><a href="/c2">第二章</a></li>'
+        '</ul>',
+      )!;
+      expect(
+        evalXPath(
+          d,
+          "//a[contains(@href,'/c') and not(contains(@href,'javascript'))]/@href",
+        ).strings,
+        ['/c1', '/c2'],
+      );
+      expect(
+        evalXPath(d, "//a[starts-with(@href,'/c1')]/@href").strings,
+        ['/c1'],
+      );
+      expect(
+        evalXPath(d, "//a[@href='/c1' or @href='/c2']/@href").strings,
+        ['/c1', '/c2'],
+      );
+    });
+
+    test('不支持的谓词：整条规则失败（宁空勿错，不再保留全部）', () {
+      final d = parseXmlLoose(
+        '<ul><li><a href="/c1">一</a></li><li><a href="/c2">二</a></li></ul>',
+      )!;
+      // substring() 未实现 → 返回空而不是把两章都留下
+      expect(evalXPath(d, "//a[substring(@href,1,2)='/c']/@href").strings,
+          isEmpty);
+    });
+
+    test('string() 取路径文本', () {
+      final d = parseXmlLoose('<div><p>你好</p></div>')!;
+      expect(evalXPath(d, 'string(//p)').strings, ['你好']);
+    });
+
     test('裸 // 规则自动走 XPath（书源主流写法）', () {
       final e = AnalyzeRule(
         '<html><head><meta property="og:novel:book_name" content="书名"/>'
@@ -450,6 +518,27 @@ void main() {
         e.getString('//meta[@property="og:novel:book_name"]/@content'),
         '书名',
       );
+    });
+
+    test('P1-2 XPath 列表 + CSS 习惯字段规则：上下文限定在条目内', () {
+      // 站点 LOGO 与真实目录并存：若上下文被换成整页，每条的 a@text 都会拿到全页链接
+      const src = '<div>站点 LOGO<a href="/">首页</a>'
+          '<ul><li><a href="/c/1.html">第一章 开端</a></li>'
+          '<li><a href="/c/2.html">第二章 试炼</a></li></ul></div>';
+      final eng = AnalyzeRule(src);
+      final doc = parseXmlLoose(src)!;
+      final items = evalXPath(doc, '//li').elements;
+      expect(items.length, 2);
+      // a@text / a@href 按 `tag@attr` shim 走，逐条只取自己的链接
+      expect(eng.getString('a@text', ctx: items[0]), '第一章 开端');
+      expect(eng.getString('a@text', ctx: items[1]), '第二章 试炼');
+      expect(eng.getString('a@href', ctx: items[0]), '/c/1.html');
+      expect(eng.getString('a@href', ctx: items[1]), '/c/2.html');
+      // 复杂选择器（shim 不认）落到片段解析：仍限定在条目内，且条目间不串味
+      expect(eng.getString('a', ctx: items[0]), '第一章 开端');
+      expect(eng.getString('li a', ctx: items[1]), '第二章 试炼');
+      // 提取器关键字（裸 text）保持原样
+      expect(eng.getString('text', ctx: items[0]), '第一章 开端');
     });
   });
 
@@ -639,6 +728,44 @@ https://x.com/b/{{result}}''');
     }
   });
 
+  test('P1-8 header / 发现分类缓存：同源重复求值只算一次', () {
+    OnlineBookService.debugClearHeaderCache();
+    final src = BookSource(
+      bookSourceUrl: 'https://hdr.test',
+      bookSourceName: 'h',
+      header: '{"Referer":"https://hdr.test/","UA":"x"}',
+      exploreUrl: '[{"title":"男生","url":"/boy"},{"title":"女生","url":"/girl"}]',
+    );
+    final h1 = OnlineBookService.headerMap(src);
+    final h2 = OnlineBookService.headerMap(src);
+    expect(h1['Referer'], 'https://hdr.test/');
+    expect(identical(h1, h2), isTrue); // 命中缓存：同一实例，未重新解析
+
+    OnlineRepo.debugClearCategoryCache();
+    final c1 = OnlineRepo.parseExploreCategories(src);
+    final c2 = OnlineRepo.parseExploreCategories(src);
+    expect(c1.map((e) => e.title).toList(), ['男生', '女生']);
+    expect(identical(c1, c2), isTrue);
+    // 清缓存后重新解析：内容一致（缓存不改变语义）
+    OnlineRepo.debugClearCategoryCache();
+    final c3 = OnlineRepo.parseExploreCategories(src);
+    expect(c3.map((e) => e.title).toList(), ['男生', '女生']);
+
+    // `@js:` 头同样只求值一次（引擎可用时）
+    if (JsBridge.available) {
+      OnlineBookService.debugClearHeaderCache();
+      final js = BookSource(
+        bookSourceUrl: 'https://hdr.test',
+        bookSourceName: 'h',
+        header: '@js:\nJSON.stringify({"Referer": source.bookSourceUrl})',
+      );
+      final j1 = OnlineBookService.headerMap(js);
+      final j2 = OnlineBookService.headerMap(js);
+      expect(j1['Referer'], 'https://hdr.test');
+      expect(identical(j1, j2), isTrue);
+    }
+  });
+
   test('跨阶段变量袋：搜索 @put:{book:id} → 详情 @get:{book} 读回', () {
     if (!JsBridge.available) return;
     final session = JsSession();
@@ -654,6 +781,33 @@ https://x.com/b/{{result}}''');
         js: JsEnv(session: s2), vars: {'book': {'name': 'x'}});
     expect(e2.getString('http://x.com/book/@get:{book}/volumes'),
         'http://x.com/book/753943/volumes');
+  });
+
+  test('P1-9 纯转换脚本结果缓存：同码同输入命中，含副作用/时间的不缓存', () {
+    if (!JsBridge.available) return;
+    JsBridge.debugClearJsCache();
+    final env = JsEnv(sourceUrl: 'https://cache.test', baseUrl: 'https://cache.test/');
+    const code = r'String(result).replace(/a/g, "b")';
+    final first = JsBridge.evalCode(code, env: env, input: 'aaa');
+    if (!JsBridge.available) return; // 引擎懒加载失败（测试机缺 DLL）：跳过
+    expect(first, 'bbb');
+    expect(JsBridge.debugJsCacheSize, 1);
+    // 不同输入 → 不同签名 → 新条目，且结果仍正确
+    expect(JsBridge.evalCode(code, env: env, input: 'aab'), 'bbb');
+    expect(JsBridge.debugJsCacheSize, 2);
+    // 同码同输入 → 命中（条数不涨）
+    expect(JsBridge.evalCode(code, env: env, input: 'aaa'), 'bbb');
+    expect(JsBridge.debugJsCacheSize, 2);
+    // 纯 java.* 编解码也可缓存
+    expect(JsBridge.evalCode('java.base64Encode(String(result))',
+        env: env, input: 'abc'), 'YWJj');
+    expect(JsBridge.debugJsCacheSize, 3);
+    // 有副作用 / 依赖时间：不进缓存
+    JsBridge.debugClearJsCache();
+    JsBridge.evalCode('java.put("k", "1"); String(result)', env: env, input: 'x');
+    JsBridge.evalCode('String(Date.now())', env: env, input: 'x');
+    JsBridge.evalCode('String(Math.random())', env: env, input: 'x');
+    expect(JsBridge.debugJsCacheSize, 0);
   });
 
   test('java-lib 垫层：DES/CBC/PKCS5 对齐 .NET 向量 + String.getBytes + org.jsoup', () {

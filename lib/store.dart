@@ -169,18 +169,31 @@ class AppStore extends ChangeNotifier {
           sp.getBool('shelfAscending') ?? _shelfSort.defaultAscending;
       _shelfView = shelfViewModeFrom(sp.getString('shelfView'));
       _punchHole = punchHoleFrom(sp.getString('punchHole'));
+      // 轻量进度记录先覆盖回来（进程被杀时最后几页只写在 progress:* 里），
+      // 再排序，保证「最近阅读」顺序与真实阅读时间一致。
+      _applyProgressRecords(sp);
       applyShelfSort();
     }
-    try {
-      _cacheDir = Directory(
-          '${(await getApplicationSupportDirectory()).path}/novel_cache');
-      if (!await _cacheDir!.exists()) {
-        await _cacheDir!.create(recursive: true);
+    if (_cacheDir == null) {
+      try {
+        _cacheDir = Directory(
+            '${(await getApplicationSupportDirectory()).path}/novel_cache');
+        if (!await _cacheDir!.exists()) {
+          await _cacheDir!.create(recursive: true);
+        }
+      } catch (_) {
+        _cacheDir = null;
       }
-    } catch (_) {
-      _cacheDir = null;
     }
     inited = true;
+  }
+
+  /// 仅测试用：跳过 path_provider，把离线缓存指到临时目录。
+  @visibleForTesting
+  void debugSetCacheDir(Directory? d) {
+    _cacheDir = d;
+    _metaFut.clear();
+    _metaSig.clear();
   }
 
   List<ShelfEntry> _loadList(String key) {
@@ -221,6 +234,59 @@ class AppStore extends ChangeNotifier {
     }
     if (notify) notifyListeners();
   }
+
+  // ---------- 轻量进度记录 ----------
+  //
+  // 每翻一页只写一条 ~120B 的 `progress:<hash>`；书架 / 历史两份完整列表
+  // 只在「换章 / 章节数变化 / 首次入历史」这类低频事件时整体落盘。
+  // SharedPreferences 每次 setString 都会重写整份 XML，所以这里真正的收益是
+  // 「每页少编码少写两份大 JSON」，写盘体积与书量无关。
+
+  static const String _kProgress = 'progress:';
+
+  String _progressKey(String bookUrl) => '$_kProgress${_hash(bookUrl)}';
+
+  /// 启动时把 `progress:*` 覆盖回 shelf / history（上次进程被杀时最后几页只在
+  /// 进度记录里）。整表落盘的那份时间戳更新时以整表为准。
+  void _applyProgressRecords(SharedPreferences sp) {
+    for (final k in sp.getKeys()) {
+      if (!k.startsWith(_kProgress)) continue;
+      final raw = sp.getString(k);
+      if (raw == null || raw.isEmpty) continue;
+      Map<String, dynamic>? rec;
+      try {
+        final dec = jsonDecode(raw);
+        if (dec is Map<String, dynamic>) rec = dec;
+      } catch (_) {
+        continue;
+      }
+      if (rec == null) continue;
+      final url = rec['u'];
+      if (url is! String) continue;
+      final ts = (rec['ts'] as num?)?.toInt() ?? 0;
+      for (final list in [shelf, history]) {
+        for (final e in list) {
+          if (e.book.url != url) continue;
+          if (ts > 0 && ts < e.updatedAt.millisecondsSinceEpoch) continue;
+          final c = (rec['c'] as num?)?.toInt();
+          if (c != null && c >= 0) e.chapterIndex = c;
+          final t = rec['t'];
+          if (t is String && t.isNotEmpty) e.chapterTitle = t;
+          final p = (rec['p'] as num?)?.toInt();
+          if (p != null) e.page = p;
+          final o = (rec['o'] as num?)?.toInt();
+          if (o != null) e.paragraph = o;
+          final n = (rec['n'] as num?)?.toInt();
+          if (n != null && n > e.chapterCount) e.chapterCount = n;
+          if (ts > 0) e.updatedAt = DateTime.fromMillisecondsSinceEpoch(ts);
+        }
+      }
+    }
+  }
+
+  /// 把内存里的书架 / 历史整体落盘。离开阅读器、App 进后台时各调一次即可，
+  /// 不必每翻页都写。
+  void flushProgress() => _save(notify: false, bookmarks: false);
 
   // ---------- 书架排序 ----------
 
@@ -480,7 +546,10 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 更新阅读进度（同时写书架与历史）。
-  /// [silent] = true 时不通知监听者（滚动中高频调用，避免整树重建）。
+  ///
+  /// 章内翻页是高频路径：只写一条轻量进度记录（[flushProgress] 会在离开
+  /// 阅读器时把整表补写一次），换章/章节数变化/首次入历史才重写两份大列表。
+  /// [silent] = true 时连监听都不通知（滚动模式每 600ms 一次）。
   void updateProgress(
     Book b, {
     required int chapterIndex,
@@ -490,6 +559,19 @@ class AppStore extends ChangeNotifier {
     bool silent = false,
     int chapterCount = 0,
   }) {
+    ShelfEntry? prev;
+    for (final e in history) {
+      if (e.book.url == b.url) {
+        prev = e;
+        break;
+      }
+    }
+    prev ??= shelfEntry(b.url);
+    final prevIdx = prev?.chapterIndex ?? -1;
+    final prevCount = prev?.chapterCount ?? 0;
+    final prevTitle = prev?.chapterTitle ?? '';
+
+    var created = false;
     ShelfEntry upsert(List<ShelfEntry> list) {
       ShelfEntry? e;
       for (final x in list) {
@@ -498,7 +580,10 @@ class AppStore extends ChangeNotifier {
           break;
         }
       }
-      e ??= ShelfEntry(book: b);
+      if (e == null) {
+        e = ShelfEntry(book: b);
+        created = true;
+      }
       if (chapterCount > e.chapterCount) e.chapterCount = chapterCount;
       e.book = b;
       e.chapterIndex = chapterIndex;
@@ -511,7 +596,6 @@ class AppStore extends ChangeNotifier {
       return e;
     }
 
-    final prevCount = shelfEntry(b.url)?.chapterCount ?? 0;
     final h = upsert(history);
     // 阅读进度带着更大的章节数 = 详情已刷新：追更角标视为已读
     if (h.chapterCount > prevCount && shelfUpdates.remove(b.url) != null) {
@@ -523,8 +607,33 @@ class AppStore extends ChangeNotifier {
       shelf.insert(0, h);
     }
     if (history.length > 100) history.removeRange(100, history.length);
-    _save(notify: !silent, bookmarks: false);
+
+    // 1) 轻量记录：一条 ~120B 的小 JSON，与书量无关
+    _sp?.setString(
+      _progressKey(b.url),
+      jsonEncode({
+        'u': b.url,
+        'c': chapterIndex,
+        't': chapterTitle,
+        'p': page,
+        'o': paragraph,
+        'n': h.chapterCount,
+        'ts': h.updatedAt.millisecondsSinceEpoch,
+      }),
+    );
+
+    // 2) 整表落盘：只在低频变化时做
+    final chapterChanged = created ||
+        prevIdx != chapterIndex ||
+        prevCount != h.chapterCount ||
+        prevTitle != chapterTitle;
+    if (chapterChanged) {
+      _save(notify: !silent, bookmarks: false);
+    }
+    // 章内翻页（prevPage/prevPara 变了、章名没变）不落盘也不通知：
+    // 书架页展示的章名没变化，没必要重建整棵树；进度已在上面存好。
   }
+
 
   void clearHistory() {
     history.clear();
@@ -578,14 +687,36 @@ class AppStore extends ChangeNotifier {
 
   // ---------- 章节离线缓存 ----------
   //
-  // 每本书一个 JSON 文件：{detail..., "texts": {chapterUrl: [段落...]}}
+  // 一章一文件（命中路径只读一个小 JSON，不再整本解析）：
+  //   novel_cache/<bookHash>.json           目录 + 书名（旧版同路径，含 texts 时自动迁移）
+  //   novel_cache/<bookHash>/<chHash>.json  单章 {"u": chapterUrl, "p": [段落...]}
+  // 文件名用 chapterUrl 的哈希，文件内再存一份 url：哈希撞车时当作未命中，不会串章。
 
   File? _bookFile(String bookUrl) {
     final dir = _cacheDir;
     if (dir == null) return null;
-    final key = _hash(bookUrl);
-    return File('${dir.path}/$key.json');
+    return File('${dir.path}/${_hash(bookUrl)}.json');
   }
+
+  Directory? _bookDir(String bookUrl) {
+    final dir = _cacheDir;
+    if (dir == null) return null;
+    return Directory('${dir.path}/${_hash(bookUrl)}');
+  }
+
+  Future<Directory?> _ensureBookDir(String bookUrl) async {
+    final d = _bookDir(bookUrl);
+    if (d == null) return null;
+    try {
+      if (!await d.exists()) await d.create(recursive: true);
+      return d;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  File _chapterFile(Directory dir, String chapterUrl) =>
+      File('${dir.path}/${_hash(chapterUrl)}.json');
 
   static String _hash(String s) {
     // FNV-1a 32bit，文件名安全
@@ -597,58 +728,175 @@ class AppStore extends ChangeNotifier {
     return h.toRadixString(16);
   }
 
-  Future<Map<String, dynamic>> _loadBookJson(String bookUrl) async {
+  final Map<String, Future<Map<String, dynamic>>> _metaFut = {};
+  final Map<String, String> _metaSig = {};
+
+  /// 目录元数据（含旧布局迁移；每本书每进程只解析一次）。
+  Future<Map<String, dynamic>> _meta(String bookUrl) =>
+      _metaFut.putIfAbsent(bookUrl, () => _readMeta(bookUrl));
+
+  Future<Map<String, dynamic>> _readMeta(String bookUrl) async {
+    var m = <String, dynamic>{};
     final f = _bookFile(bookUrl);
-    if (f == null || !await f.exists()) return {};
-    try {
-      return jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-    } catch (_) {
-      return {};
+    if (f != null) {
+      try {
+        if (await f.exists()) {
+          final raw = await f.readAsString();
+          final dec = raw.isEmpty ? null : jsonDecode(raw);
+          if (dec is Map<String, dynamic>) m = dec;
+        }
+      } catch (_) {
+        m = <String, dynamic>{};
+      }
     }
+    // 旧布局迁移：整本 texts → 一章一文件，再把不带 texts 的目录写回
+    final legacy = m.remove('texts');
+    if (legacy is Map && legacy.isNotEmpty) {
+      final dir = await _ensureBookDir(bookUrl);
+      if (dir != null) {
+        for (final e in legacy.entries) {
+          final v = e.value;
+          if (v is! List || v.isEmpty) continue;
+          final url = e.key.toString();
+          final cf = _chapterFile(dir, url);
+          try {
+            if (await cf.exists()) continue;
+            await cf.writeAsString(jsonEncode({'u': url, 'p': v}), flush: true);
+          } catch (_) {}
+        }
+        await _writeMeta(bookUrl, m);
+      }
+    }
+    _metaSig[bookUrl] = _sigOf(m);
+    return m;
   }
 
-  Future<void> _saveBookJson(String bookUrl, Map<String, dynamic> j) async {
+  String _sigOf(Map<String, dynamic> m) =>
+      _sigOfParts(m['title']?.toString(), (m['chapters'] as List?) ?? const []);
+
+  /// 目录签名：书名 + 章数 + 首末章地址。任何一项变了才值得重写目录文件。
+  String _sigOfParts(String? title, List<dynamic> chs) {
+    final n = chs.length;
+    String urlAt(int i) {
+      final e = chs[i];
+      return e is Map ? (e['url']?.toString() ?? '') : '';
+    }
+
+    final first = n == 0 ? '' : urlAt(0);
+    final last = n == 0 ? '' : urlAt(n - 1);
+    return '${title ?? ''}|$n|$first|$last';
+  }
+
+  Future<void> _writeMeta(String bookUrl, Map<String, dynamic> m) async {
     final f = _bookFile(bookUrl);
     if (f == null) return;
     try {
-      await f.writeAsString(jsonEncode(j), flush: true);
+      final copy = Map<String, dynamic>.from(m)..remove('texts');
+      await f.writeAsString(jsonEncode(copy), flush: true);
+      _metaSig[bookUrl] = _sigOf(copy);
     } catch (_) {}
   }
 
-  /// 取章节正文：缓存优先，否则抓网并写缓存。
+  /// 记住目录 / 书名；内容没变就不写盘（千章目录 ≈150 KB，不能每章重写）。
+  Future<void> _rememberDetail(BookDetail detail) async {
+    final url = detail.book.url;
+    final m = await _meta(url);
+    final chs = detail.chapters.map((c) => c.toJson()).toList();
+    final sig = _sigOfParts(detail.book.title, chs);
+    if (_metaSig[url] == sig) return;
+    m['title'] = detail.book.title;
+    m['chapters'] = chs;
+    await _writeMeta(url, m);
+    _metaSig[url] = sig;
+  }
+
+  Future<List<String>?> _readChapter(String bookUrl, String chUrl) async {
+    final dir = _bookDir(bookUrl);
+    if (dir == null) return null;
+    try {
+      final f = _chapterFile(dir, chUrl);
+      if (!await f.exists()) return null;
+      final dec = jsonDecode(await f.readAsString());
+      if (dec is! Map || dec['u'] != chUrl) return null; // 哈希撞车 → 当未命中
+      final p = dec['p'];
+      if (p is! List || p.isEmpty) return null;
+      return p.map((e) => e.toString()).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeChapter(
+      String bookUrl, String chUrl, List<String> paras) async {
+    final dir = await _ensureBookDir(bookUrl);
+    if (dir == null) return;
+    try {
+      await _chapterFile(dir, chUrl)
+          .writeAsString(jsonEncode({'u': chUrl, 'p': paras}), flush: true);
+    } catch (_) {}
+  }
+
+  Future<bool> _hasChapter(String bookUrl, String chUrl) async {
+    final dir = _bookDir(bookUrl);
+    if (dir == null) return false;
+    try {
+      return await _chapterFile(dir, chUrl).exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 取章节正文：缓存优先（只读一个小文件），否则抓网并写缓存。
   Future<List<String>> chapterText(
     NovelSource src,
     BookDetail detail,
     Chapter ch,
   ) async {
-    final j = await _loadBookJson(detail.book.url);
-    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
-    final hit = texts[ch.url];
-    if (hit is List && hit.isNotEmpty) return hit.cast<String>();
+    final bookUrl = detail.book.url;
+    await _meta(bookUrl); // 顺带完成旧布局迁移（每本每进程一次）
+    final hit = await _readChapter(bookUrl, ch.url);
+    if (hit != null) return hit;
     final paras = await src.fetchChapter(detail, ch);
-    if (paras.isNotEmpty) texts[ch.url] = paras; // 空结果不入缓存（解析失败可重试）
-    j['texts'] = texts;
-    j['chapters'] = detail.chapters.map((c) => c.toJson()).toList();
-    j['title'] = detail.book.title;
-    await _saveBookJson(detail.book.url, j);
+    if (paras.isNotEmpty) {
+      await _writeChapter(bookUrl, ch.url, paras); // 空结果不入缓存（可重试）
+    }
+    await _rememberDetail(detail);
     return paras;
   }
 
   /// 已缓存的章节数。
   Future<int> cachedChapterCount(String bookUrl) async {
-    final j = await _loadBookJson(bookUrl);
-    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
-    return texts.length;
+    await _meta(bookUrl);
+    final dir = _bookDir(bookUrl);
+    if (dir == null) return 0;
+    var n = 0;
+    try {
+      await for (final e in dir.list()) {
+        if (e is File && e.path.endsWith('.json')) n++;
+      }
+    } catch (_) {}
+    return n;
   }
 
   /// 读取已缓存的章节正文（书内搜索用）：chapterUrl → 段落数组。
   Future<Map<String, List<String>>> cachedTexts(String bookUrl) async {
-    final j = await _loadBookJson(bookUrl);
-    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
+    await _meta(bookUrl);
     final out = <String, List<String>>{};
-    texts.forEach((k, v) {
-      if (v is List) out[k] = v.map((e) => e.toString()).toList();
-    });
+    final dir = _bookDir(bookUrl);
+    if (dir == null) return out;
+    try {
+      await for (final e in dir.list()) {
+        if (e is! File || !e.path.endsWith('.json')) continue;
+        try {
+          final dec = jsonDecode(await e.readAsString());
+          if (dec is! Map) continue;
+          final u = dec['u'];
+          final p = dec['p'];
+          if (u is! String || p is! List || p.isEmpty) continue;
+          out[u] = p.map((x) => x.toString()).toList();
+        } catch (_) {}
+      }
+    } catch (_) {}
     return out;
   }
 
@@ -789,8 +1037,8 @@ class AppStore extends ChangeNotifier {
 
   /// 离线兜底：读取缓存的目录。
   Future<BookDetail?> cachedDetail(Book b) async {
-    final j = await _loadBookJson(b.url);
-    final chs = (j['chapters'] as List?)?.toList();
+    final m = await _meta(b.url);
+    final chs = (m['chapters'] as List?)?.toList();
     if (chs == null || chs.isEmpty) return null;
     return BookDetail(
       book: b,
@@ -800,44 +1048,32 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 下载整本书离线；[onProgress] (已完成, 总数)；返回是否全部完成。
+  ///
+  /// 一章一文件，无需批量落盘：已存在的章节直接跳过（文件存在即命中）。
   Future<bool> downloadBook(
     NovelSource src,
     BookDetail detail, {
     void Function(int done, int total)? onProgress,
     bool Function()? cancelled,
   }) async {
-    final j = await _loadBookJson(detail.book.url);
-    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
+    final bookUrl = detail.book.url;
     final total = detail.chapters.length;
-    // ponytail: 目录/标题不变，循环外算一次；落盘每 5 章批量一次
-    //（原每章整本 jsonEncode+flush，千章书 O(n²) 写放大），与 prefetchNext 一致。
-    j['chapters'] = detail.chapters.map((c) => c.toJson()).toList();
-    j['title'] = detail.book.title;
+    await _rememberDetail(detail); // 目录先落盘（不变则不写）
     for (var i = 0; i < total; i++) {
-      if (cancelled?.call() ?? false) {
-        j['texts'] = texts;
-        await _saveBookJson(detail.book.url, j); // 取消时已下章节照常落盘
-        return false;
-      }
+      if (cancelled?.call() ?? false) return false; // 已下章节各自成文件，无需补写
       final ch = detail.chapters[i];
-      if (texts[ch.url] is List && (texts[ch.url] as List).isNotEmpty) {
+      if (await _hasChapter(bookUrl, ch.url)) {
         onProgress?.call(i + 1, total);
         continue;
       }
       try {
         final t = await src.fetchChapter(detail, ch);
-        if (t.isNotEmpty) texts[ch.url] = t;
+        if (t.isNotEmpty) await _writeChapter(bookUrl, ch.url, t);
       } catch (_) {
         // 单章失败不中断整本下载
       }
-      if (i % 5 == 4) {
-        j['texts'] = texts;
-        await _saveBookJson(detail.book.url, j);
-      }
       onProgress?.call(i + 1, total);
     }
-    j['texts'] = texts;
-    await _saveBookJson(detail.book.url, j);
     return true;
   }
 
@@ -849,8 +1085,7 @@ class AppStore extends ChangeNotifier {
   void cancelPrefetch() => _prefetchGen++;
 
   /// 自动缓存从 [from] 章起的 [count] 章（仅抓未缓存的，网络失败即停）。
-  /// ponytail: 预取与手动读章各自整本读改写同一 JSON，极端并发下可能互相覆盖，
-  ///          单章丢失时重读一次即可，不引入文件锁。
+  /// 一章一文件后不再有「整本读改写」的覆盖竞争，预取与阅读可以并行。
   Future<void> prefetchNext(
     NovelSource src,
     BookDetail detail,
@@ -859,50 +1094,52 @@ class AppStore extends ChangeNotifier {
   ) async {
     if (count <= 0 || from >= detail.chapters.length) return;
     final gen = ++_prefetchGen;
-    final j = await _loadBookJson(detail.book.url);
-    final texts = (j['texts'] as Map<String, dynamic>?) ?? {};
+    final bookUrl = detail.book.url;
     final end = (from + count).clamp(0, detail.chapters.length);
     for (var i = from; i < end; i++) {
       if (gen != _prefetchGen) return;
       final ch = detail.chapters[i];
-      if (texts[ch.url] is List && (texts[ch.url] as List).isNotEmpty) {
-        continue;
-      }
+      if (await _hasChapter(bookUrl, ch.url)) continue;
       try {
         final t = await src.fetchChapter(detail, ch);
-        if (t.isNotEmpty) texts[ch.url] = t;
+        if (t.isNotEmpty) await _writeChapter(bookUrl, ch.url, t);
       } catch (_) {
         return; // 网络中断/失败：停止预取，不刷屏重试
       }
-      if (i % 5 == 4) {
-        j['texts'] = texts;
-        await _saveBookJson(detail.book.url, j); // 每5章落盘一次
-      }
     }
     if (gen != _prefetchGen) return;
-    j['texts'] = texts;
-    j['chapters'] = detail.chapters.map((c) => c.toJson()).toList();
-    j['title'] = detail.book.title;
-    await _saveBookJson(detail.book.url, j);
+    await _rememberDetail(detail);
   }
 
-  /// 缓存目录占用字节数。
+  /// 缓存目录占用字节数（含各书章节子目录）。
   Future<int> cacheSize() async {
     final dir = _cacheDir;
     if (dir == null || !await dir.exists()) return 0;
     var total = 0;
-    await for (final f in dir.list()) {
-      if (f is File) total += await f.length();
-    }
+    try {
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
+        if (e is File) total += await e.length();
+      }
+    } catch (_) {}
     return total;
   }
 
   Future<void> clearCache() async {
     final dir = _cacheDir;
     if (dir == null || !await dir.exists()) return;
-    await for (final f in dir.list()) {
-      if (f is File) await f.delete();
-    }
+    try {
+      await for (final e in dir.list()) {
+        // tts 音频子目录长期复用（见 ttsAudioDir），清缓存不动它
+        if (e is Directory && (e.path.endsWith('${Platform.pathSeparator}tts'))) {
+          continue;
+        }
+        try {
+          await e.delete(recursive: true);
+        } catch (_) {}
+      }
+    } catch (_) {}
+    _metaFut.clear(); // 目录与章节都已删掉，别拿旧缓存糊回去
+    _metaSig.clear();
     notifyListeners();
   }
 }

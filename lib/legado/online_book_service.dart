@@ -11,6 +11,8 @@
 // 本文件不依赖 UI；WebView 引擎仅在「取正文」时被调用。
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../models.dart';
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
@@ -696,11 +698,33 @@ class OnlineBookService {
     return resp.body;
   }
 
+  /// header 求值结果缓存（P1-8）：下载整本时每章一次请求都会走这里，
+  /// `@js:` 头（QQ 浏览器源注入 QIMEI/Referer）重算一次要起一遍 JS 引擎。
+  /// 带 TTL 缓存：既省掉重复求值，又不会让时效性签名一直用旧值。
+  static final Map<String, (Map<String, String>, DateTime)> _hdrCache = {};
+  static const Duration _hdrTtl = Duration(minutes: 1);
+
+  /// 测试用：清空 header 缓存。
+  @visibleForTesting
+  static void debugClearHeaderCache() => _hdrCache.clear();
+
   /// 书源 header 求值：`@js:`/`<js>` 头先走脚本（legado：header 走规则求值，
   /// QQ 浏览器源用它注入 Referer/UA/QIMEI），其余按 JSON 宽松解析。
   static Map<String, String> headerMap(BookSource source) {
     final raw = (source.header ?? '').trim();
     if (raw.isEmpty) return const {};
+    final key = '${source.bookSourceUrl}\u0000$raw';
+    final hit = _hdrCache[key];
+    if (hit != null && DateTime.now().difference(hit.$2) < _hdrTtl) {
+      return hit.$1;
+    }
+    final m = _evalHeaderMap(source, raw);
+    if (_hdrCache.length >= 128) _hdrCache.remove(_hdrCache.keys.first);
+    _hdrCache[key] = (m, DateTime.now());
+    return m;
+  }
+
+  static Map<String, String> _evalHeaderMap(BookSource source, String raw) {
     final low = raw.toLowerCase();
     final jsHead = low.startsWith('@js:') ||
         (low.startsWith('<js>') && low.endsWith('</js>'));

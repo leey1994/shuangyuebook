@@ -4,11 +4,21 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'pet/pet_event.dart';
 import 'pet/pet_store.dart';
 import 'store.dart';
 import 'theme.dart';
+
+/// 公告里的一个可点击按钮（如「网盘下载」）。老版本客户端会忽略这个字段，
+/// 只能看到正文里的纯文本网址，所以正文里也要把地址写全。
+class AnnouncementLink {
+  final String label;
+  final String url;
+
+  const AnnouncementLink({required this.label, required this.url});
+}
 
 /// 公告数据（源文件：仓库 docs/announcement.json，GitHub Pages / raw 分发）。
 /// 发布流程 = 修改该文件并 push；客户端启动 + 周期轮询自动拉取。
@@ -17,6 +27,9 @@ class Announcement {
   final String title;
   final String body;
   final String image;
+
+  /// 正文下方的按钮（可空）。用途：GitHub 直连不通时给一条网盘下载线路。
+  final List<AnnouncementLink> links;
 
   /// 这条公告对应的版本号，**仅作记录，不参与显示判断**。
   ///
@@ -31,6 +44,7 @@ class Announcement {
     required this.title,
     required this.body,
     this.image = '',
+    this.links = const [],
     this.version = '',
   });
 
@@ -44,6 +58,7 @@ class Announcement {
       title: title,
       body: body,
       image: base.resolve(image).toString(),
+      links: links,
       version: version,
     );
   }
@@ -53,11 +68,26 @@ class Announcement {
         title: (j['title'] as String? ?? '').trim(),
         body: (j['body'] as String? ?? '').trim(),
         image: (j['image'] as String? ?? '').trim(),
+        links: _parseLinks(j['links']),
         // 官网脚本读 `version`，历史文件写的是 `min_version` —— 两个都认，
         // 否则改文件名时 App 端和网页端会各自拿到一半。
         version: (j['version'] as String? ?? j['min_version'] as String? ?? '')
             .trim(),
       );
+
+  static List<AnnouncementLink> _parseLinks(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <AnnouncementLink>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final label = (e['label'] as String? ?? '').trim();
+      final url = (e['url'] as String? ?? '').trim();
+      // 只放行 http(s)：公告是远端内容，别让它变成任意 scheme 的启动器。
+      if (label.isEmpty || !url.startsWith('http')) continue;
+      out.add(AnnouncementLink(label: label, url: url));
+    }
+    return List.unmodifiable(out);
+  }
 }
 
 /// 拉取公告 → 与本地已读 id 比对 → 不同则全屏弹出（关闭后记录）。
@@ -173,24 +203,61 @@ class NoticePage extends StatelessWidget {
                       const SizedBox(height: 16),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          notice.image,
-                          // 公告正文里的链接可能指向上一次发版，图片加载失败
-                          // 时留一条灰字，比整块空白更容易排查。
-                          errorBuilder: (_, __, ___) => Text(
-                            '（配图加载失败）',
-                            style: text.bodySmall?.copyWith(
-                              color: theme.colorScheme.outline,
+                        // 公告配图现在也用来放二维码：限制最大边长，免得
+                        // 574px 的原图在窄屏上横向溢出。
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxWidth: 320,
+                            maxHeight: 320,
+                          ),
+                          child: Image.network(
+                            notice.image,
+                            fit: BoxFit.contain,
+                            // 公告正文里的链接可能指向上一次发版，图片加载失败
+                            // 时留一条灰字，比整块空白更容易排查。
+                            errorBuilder: (_, __, ___) => Text(
+                              '（配图加载失败）',
+                              style: text.bodySmall?.copyWith(
+                                color: theme.colorScheme.outline,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ],
                     const SizedBox(height: 16),
-                    Text(
+                    // 可选中复制：正文里会写网盘地址，长按能直接拷走。
+                    SelectableText(
                       notice.body,
                       style: text.bodyLarge?.copyWith(height: 1.8),
                     ),
+                    if (notice.links.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      for (final l in notice.links)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.open_in_new, size: 18),
+                              label: Text(l.label),
+                              onPressed: () async {
+                                final ok = await launchUrl(
+                                  Uri.parse(l.url),
+                                  mode: LaunchMode.externalApplication,
+                                );
+                                if (!ok && context.mounted) {
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(const SnackBar(
+                                    content: Text('打不开链接，可长按正文复制地址'),
+                                    duration: Duration(seconds: 2),
+                                  ));
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),

@@ -98,24 +98,30 @@ class _SearchScreenState extends State<SearchScreen> {
       _done = 0;
       _total = targets.length;
     });
-    // 全源并行 + 每个源返回即上屏（慢源不拖住整页）
-    await Future.wait(targets.map((s) async {
-      List<Book> r = const [];
-      try {
-        r = await FeedCache.reach(
-          FeedCache.key(['search', s.id, q]),
-          () => s.search(q),
-        );
-      } catch (_) {
-        r = const [];
-      }
-      if (!mounted || gen != _gen) return;
-      setState(() {
-        _done++;
-        _returned.add(s.id);
-        if (r.isNotEmpty) _all.addAll([for (final b in r) (s, b)]);
+    // 分池并发（上限 6）：每个源返回即上屏（慢源不拖住整页），但同时在跑的
+    // 源数受控 —— 一次扇出全部源会在结果集中到达时把主 isolate 打满。
+    final jobs = <Future<void> Function()>[];
+    for (final s in targets) {
+      jobs.add(() async {
+        List<Book> r = const [];
+        try {
+          r = await FeedCache.reach(
+            FeedCache.key(['search', s.id, q]),
+            () => s.search(q),
+            skipEmpty: true, // 源抽风返回空 ≠ 没有这本书，别缓存住整个 TTL
+          );
+        } catch (_) {
+          r = const [];
+        }
+        if (!mounted || gen != _gen) return;
+        setState(() {
+          _done++;
+          _returned.add(s.id);
+          if (r.isNotEmpty) _all.addAll([for (final b in r) (s, b)]);
+        });
       });
-    }));
+    }
+    await runPooled(jobs);
     if (!mounted || gen != _gen) return;
     setState(() => _searching = false);
     if (_all.isNotEmpty) PetStore.I.emit(PetAction.searchOpen);

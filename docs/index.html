@@ -68,6 +68,13 @@ th{color:var(--dim); font-weight:500}
 @media (max-width:560px){ .shots{grid-template-columns:1fr} }
 footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 .tag{display:inline-block; font-size:12px; color:var(--accent); letter-spacing:.08em}
+/* GitHub 打不开时的备用下载线路（网盘 + 二维码） */
+.dl-alt{display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin:24px 0 0;
+  padding:16px 18px; border:1px solid rgba(128,128,128,.25); border-radius:12px; text-align:left}
+.dl-alt img{width:132px; height:132px; flex:none; background:#fff; padding:6px; border-radius:8px}
+.dl-alt .t{flex:1; min-width:230px}
+.dl-alt .t strong{font-size:15px}
+.dl-alt .t p{margin:8px 0 0; font-size:14px; line-height:1.7; color:var(--dim); overflow-wrap:anywhere}
 @media (prefers-reduced-motion: no-preference){
   .btn{transition:border-color .15s}
 }
@@ -87,7 +94,21 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
       <a class="btn" id="dl-windows" href="https://github.com/leey1994/shuangyuebook/releases/latest">下载 Windows 版</a>
       <a class="btn" href="https://github.com/leey1994/shuangyuebook">源码</a>
     </div>
-    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端 · 约 22 MB</p>
+    <p class="muted" id="dl-note">免费 · 无广告 · Android / Windows 双端 · 安卓约 24 MB（32 位约 22 MB）/ Windows 约 18 MB<br>
+      <span style="font-size:13px">安卓按架构分包：64 位手机选 <code>arm64-v8a</code>，32 位老机型选 <code>armeabi-v7a</code>，覆盖安装不丢数据</span></p>
+
+    <div class="dl-alt">
+      <img src="assets/qr-doubao-drive.png" width="132" height="132"
+           alt="网盘下载二维码（扫码打开网盘链接）">
+      <div class="t">
+        <strong>GitHub 打不开？用网盘下载</strong>
+        <p>在线更新地址是 <b>GitHub</b>：应用内「我的 → 检查更新」直接从 GitHub Releases 拉最新版，一键升级。
+           部分网络下 GitHub 连不上（下载龟速、反复失败、提示「检查更新失败」），这时改用网盘下载同一份安装包：</p>
+        <p><a href="https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe"
+              target="_blank" rel="noopener">https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe</a><br>
+           <span style="font-size:13px">左边二维码就是上面这个网盘地址，扫码即可打开；装好后照样能用「检查更新」。</span></p>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -195,7 +216,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 // announcement.json 里的 version，最后才用页面里写死的默认值。
 // 这样发一次版，网页自己就跟上，不用再改一次 HTML。
 (function () {
-  var FALLBACK = 'v1.0.2';
+  var FALLBACK = 'v1.0.3';
   var REPO = 'leey1994/shuangyuebook';
 
   function apply(v) {

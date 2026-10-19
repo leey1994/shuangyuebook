@@ -4,7 +4,7 @@
 
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
-当前版本：**v1.0.2**
+当前版本：**v1.0.3**（更新内容见 [docs/release-notes-v1.0.3.md](docs/release-notes-v1.0.3.md)）
 
 静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/)
 
@@ -96,10 +96,31 @@ Flutter 打造的双端（Android / Windows）小说阅读器——内置固化�
 
 到 [Releases](https://github.com/leey1994/shuangyuebook/releases/latest) 页面下载：
 
-| 平台 | 文件 |
-| --- | --- |
-| Android | `novel_reader_android.apk`（约 22 MB） |
-| Windows | `novel_reader_windows_x64.zip`（内含 `novel_reader.exe`）—— 解压即用，无需安装 |
+| 平台 | 文件 | 体积 |
+| --- | --- | --- |
+| Android（64 位，推荐） | `ShuangYue-v1.0.3+9-arm64-v8a.apk` | 约 24 MB |
+| Android（32 位老机型） | `ShuangYue-v1.0.3+9-armeabi-v7a.apk` | 约 22 MB |
+| Windows | `ShuangYue-v1.0.3+9-windows-x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装 | 约 18 MB |
+
+> **为什么要按架构分开？** Flutter 每个 ABI 都要带一份自己的引擎（约 20 MB）。
+> 三合一「通用包」会把 arm64 / armeabi-v7a / x86_64 三份都塞进去，体积直接到 ~68 MB。
+> 所以官方只分发前两个：64 位手机（2016 年后的绝大多数机型）装 `arm64-v8a`，
+> 提示"应用未安装"再换 `armeabi-v7a`；模拟器请按下方源码构建命令自己出 x86_64 包。
+> 两者同包名同签名，可互相覆盖安装，数据不丢。
+
+### 在线更新走 GitHub，连不上就走网盘
+
+应用内「我的 → 检查更新」读的是 GitHub Releases（`api.github.com/repos/leey1994/shuangyuebook/releases/latest`），
+能连上就一键升级；部分网络下 GitHub 龟速或不通，用网盘下载**同一份**安装包：
+
+* 网盘：<https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe>
+* 二维码（就是上面这个地址，仓库内 `docs/assets/qr-doubao-drive.png`，同时显示在官网与 App 公告里）：
+
+  ![网盘下载二维码](docs/assets/qr-doubao-drive.png)
+
+公告源文件 `docs/announcement.json` 通过 GitHub Pages 分发，里面的 `image` 指向上面这张二维码，
+`links` 渲染成公告页底部的两个按钮（网盘 / GitHub Releases）；老版本客户端不认识 `links`，
+所以正文里把地址也写全了，长按可复制。
 
 
 ## 从源码构建
@@ -111,13 +132,16 @@ flutter test
 
 # APP_VERSION 取自 pubspec.yaml 的 version，必须显式传 ——
 # 「我的 → 关于」与自动更新都靠它判断有没有新版本。
-flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.2
-flutter build windows --release --dart-define=APP_VERSION=1.0.2
+# 安卓：--split-per-abi 出三个按架构分包（各 ~20 MB），不要用默认的通用包（~68 MB）。
+flutter build apk --release --split-per-abi --dart-define=APP_VERSION=1.0.3
+# 只要其中一个架构：
+flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.3
+flutter build windows --release --dart-define=APP_VERSION=1.0.3
 
 # Windows 更新器（独立后台进程，打 Windows 包前必须先产出并放进 Release 目录）：
 # 负责下载/解压/换装/重启，UI 进程只负责点火。
 dart compile exe tool/updater.dart -o build/windows/x64/runner/Release/updater.exe
-# 然后整目录打包成 novel_reader_windows_x64.zip（updater.exe 一并进包）。
+# 然后整目录打包成 ShuangYue-v1.0.3+9-windows-x64.zip（updater.exe 一并进包）。
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：

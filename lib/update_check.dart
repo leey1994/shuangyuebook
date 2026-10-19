@@ -51,6 +51,64 @@ int compareVersion(String a, String b) {
   return 0;
 }
 
+/// 设备 CPU 架构标记：arm64 / arm / x64 / x86 取不到返回 null。
+///
+/// Android 上没有 `Abi.current()`（当前 Dart SDK 的 dart:io 未导出），
+/// 但 `Platform.version` 末尾带 `on "android_arm64"` 这种后缀，足够判架构。
+/// 万一被裁剪，再用 `resolvedExecutable`（arm64 设备是 app_process64）兜底。
+String? deviceAbiTag() {
+  final m = RegExp(r'on "([a-z0-9_]+)"').firstMatch(Platform.version);
+  final full = m?.group(1) ?? '';
+  const p = 'android_';
+  if (full.startsWith(p)) return full.substring(p.length);
+  if (Platform.isAndroid) {
+    final exe = Platform.resolvedExecutable;
+    if (exe.contains('app_process64')) return 'arm64';
+    if (exe.contains('app_process32')) return 'arm';
+  }
+  return null;
+}
+
+/// 从资产文件名猜架构：'' 表示未标注（通用包 / 老命名）。
+String assetAbiTag(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('arm64') || n.contains('aarch64') || n.contains('v8a')) {
+    return 'arm64';
+  }
+  if (n.contains('x86_64') || n.contains('x64')) return 'x64';
+  if (n.contains('x86')) return 'x86';
+  if (n.contains('armeabi') ||
+      n.contains('armv7') ||
+      n.contains('v7a') ||
+      n.contains('arm32')) {
+    return 'arm';
+  }
+  return '';
+}
+
+/// 在多个 APK 资产里挑一个：同架构 > 未标注（通用包）> 其它。
+///
+/// v1.0.3 起 APK 按 ABI 拆包，Release 里同时挂了 arm64-v8a 与 armeabi-v7a，
+/// 老逻辑「第一个 .apk」会把 32 位包装到 64 位机上（或反之）。全都匹配不上
+/// 时仍返回第一个，保证至少有个下载入口，装不上还可以走网盘手动装。
+String? pickApkUrl(List<(String, String)> apks, String? deviceAbi) {
+  String? best;
+  var bestScore = -1;
+  for (final (name, url) in apks) {
+    final tag = assetAbiTag(name);
+    final score = tag.isEmpty
+        ? 1
+        : (deviceAbi != null && tag == deviceAbi)
+            ? 2
+            : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = url;
+    }
+  }
+  return best;
+}
+
 /// 启动时静默检查 GitHub Release：发现比当前更新的版本则弹窗提示，
 /// 公告内容即该 Release 的版本说明（body）。网络失败/无 Release 静默跳过。
 /// [manual] 为 true（设置页手动检查）时给出结果反馈：已是最新 / 检查失败。
@@ -103,17 +161,20 @@ class UpdateChecker {
           'https://github.com/$_repo/releases/latest';
       String? apkUrl;
       String? zipUrl;
+      final apkAssets = <(String, String)>[];
       for (final a in (j['assets'] as List? ?? [])) {
         final m = a as Map;
         final name = (m['name'] as String? ?? '').toLowerCase();
         final url = m['browser_download_url'] as String?;
         if (url == null) continue;
         if (name.endsWith('.apk')) {
-          apkUrl ??= url;
+          apkAssets.add((name, url));
         } else if (name.endsWith('.zip') && name.contains('windows')) {
           zipUrl ??= url;
         }
       }
+      // 按设备架构挑包：arm64 机不再装到 32 位包（反之亦然）。
+      apkUrl = pickApkUrl(apkAssets, deviceAbiTag());
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,

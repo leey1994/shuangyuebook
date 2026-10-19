@@ -15,10 +15,12 @@ import '../sources/registry.dart';
 import '../sources/source.dart';
 
 /// 书名 + 作者规范化（去空白与常见标点），跨源同名书合并键。
+/// 书名/作者的归一化正则（P2：原来每次调用都 new 一个 RegExp）。
+final RegExp _kBookKeyNoise = RegExp(
+    r'''[\s·・,，。！!？?、:：;；"'“”‘’《》<>【】\[\]()（）\-—_…~～]''');
+
 String bookKeyOf(Book b) {
-  String norm(String s) => s
-      .toLowerCase()
-      .replaceAll(RegExp(r'''[\s·・,，。！!？?、:：;；"'“”‘’《》<>【】\[\]()（）\-—_…~～]'''), '');
+  String norm(String s) => s.toLowerCase().replaceAll(_kBookKeyNoise, '');
   return '${norm(b.title)}|${norm(b.author ?? '')}';
 }
 

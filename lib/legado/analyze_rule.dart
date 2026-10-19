@@ -479,6 +479,9 @@ class AnalyzeRule {
   /// 2) `@get:{k}` 内联替换为已存变量的值（可出现在 URL 中间）；
   /// 3) 尾随 `@js:…` 脚本剥离（无 JS 引擎：保留脚本前的中间结果）；
   /// 4) `{{表达式}}` / `{$JSONPath}` 模板求值。
+  static final RegExp _putRe = RegExp(r'@put:\s*\{([^{}]*)\}');
+  static final RegExp _getRe = RegExp(r'@get:\s*\{([^{}]*)\}');
+
   String preprocess(String rule, {Object? ctx}) {
     if (rule.isEmpty) return rule;
     if (!rule.contains('@') && !rule.contains('{{') && !rule.contains(r'{$')) {
@@ -486,13 +489,13 @@ class AnalyzeRule {
     }
     var r = rule;
     if (r.contains('@put:')) {
-      r = r.replaceAllMapped(RegExp(r'@put:\s*\{([^{}]*)\}'), (m) {
+      r = r.replaceAllMapped(_putRe, (m) {
         _applyPut(m.group(1)!, ctx);
         return '';
       });
     }
     if (r.contains('@get:')) {
-      r = r.replaceAllMapped(RegExp(r'@get:\s*\{([^{}]*)\}'), (m) {
+      r = r.replaceAllMapped(_getRe, (m) {
         final k = m.group(1)!.trim();
         // legado：`@get:{k}` 读 put 变量袋（ruleData.variableMap）优先于
         // 绑定注入（`book` 可同时是绑定对象与 put 键，两命名空间同名不互扰）。
@@ -598,7 +601,7 @@ class AnalyzeRule {
     }
     if (parts.chains.isEmpty) return res;
     return res
-        .map((o) => RuleAnalyzer.applyReplaces(_toStr(o) ?? '', parts.chains))
+        .map((o) => RuleAnalyzer.applyReplaces(_toStrRaw(o) ?? '', parts.chains))
         .toList();
   }
 
@@ -712,8 +715,18 @@ class AnalyzeRule {
 
   // ---------- 上下文适配 ----------
 
+  /// XPath 元素 → html 片段文档缓存（同一条目上的 name/url 等多个字段规则
+  /// 复用同一次解析，避免每字段各解析一遍片段）。
+  final Expando<dom.Document> _fragCache = Expando<dom.Document>();
+
   dom.Node _ctxDomNode(Object? ctx) {
     if (ctx is dom.Node) return ctx;
+    if (ctx is xml.XmlElement) {
+      // XPath 条目上的 CSS 习惯字段规则（`a@text` / `a@href`）：
+      // 限定在该条目内解析，而不是退回整页（否则每条拿到全页所有 a，
+      // 目录里各章同名同地址再被去重压成一章——静默错结果）。
+      return _fragCache[ctx] ??= parseHtml(ctx.toXmlString());
+    }
     return htmlDoc;
   }
 
@@ -798,6 +811,45 @@ class AnalyzeRule {
       final v = el.getAttribute(r);
       if (v != null && v.trim().isNotEmpty) return [v.trim()];
     }
+    // CSS 习惯字段规则：`a@text` / `a@href` / `.cls@attr` / `#id@attr` /
+    // 末段裸标签 `tag`（取首个匹配子元素的文本）。命中即免片段解析。
+    final m = RegExp(
+      r'^(?:([A-Za-z_][\w:-]*)|\.([\w-]+)|#([\w-]+))(?:@([\w:-]+))?$',
+    ).firstMatch(r);
+    if (m != null) {
+      final tag = m.group(1);
+      final cls = m.group(2);
+      final id = m.group(3);
+      final attr = m.group(4);
+      Iterable<xml.XmlElement> sel = const [];
+      if (tag != null) {
+        sel = tag == '*'
+            ? el.descendantElements
+            : el.descendantElements
+                .where((e) => e.name.local == tag || e.name.toString() == tag);
+      } else if (cls != null) {
+        sel = el.descendantElements.where(
+          (e) => (e.getAttribute('class') ?? '').split(RegExp(r'\s+')).contains(cls),
+        );
+      } else if (id != null) {
+        sel = el.descendantElements
+            .where((e) => (e.getAttribute('id') ?? '') == id);
+      }
+      final first = sel.isEmpty ? null : sel.first;
+      if (first != null) {
+        if (attr == null) {
+          final t = RuleAnalyzer.collapseSpaces(first.innerText);
+          return t.isEmpty ? const [] : [t];
+        }
+        if (attr == 'text') {
+          final t = RuleAnalyzer.collapseSpaces(first.innerText);
+          return t.isEmpty ? const [] : [t];
+        }
+        final v = first.getAttribute(attr);
+        if (v != null && v.trim().isNotEmpty) return [v.trim()];
+        return const [];
+      }
+    }
     return null;
   }
 
@@ -828,5 +880,22 @@ class AnalyzeRule {
     }
     final v = jsonValueToString(o);
     return v;
+  }
+
+  /// 与 [_toStr] 同，但**不折叠空白**：`##` 替换链要看到原始换行/缩进
+  /// （对齐 legado：链正则作用于原始 result 字符串，仅最终输出裁剪）。
+  String? _toStrRaw(Object o) {
+    String raw;
+    if (o is String) {
+      raw = o;
+    } else if (o is dom.Element) {
+      raw = o.text; // jsoup text() 语义本身就归一空白，保持原样
+    } else if (o is xml.XmlElement) {
+      raw = o.innerText;
+    } else {
+      raw = jsonValueToString(o) ?? '';
+    }
+    final t = raw.trim();
+    return t.isEmpty ? null : t;
   }
 }

@@ -97,24 +97,29 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     final current = _src.id;
     setState(() => _autoMsg = '当前来源打不开，正在试其它来源…');
     final found = <(NovelSource, Book)>[];
-    await Future.wait(collectSources()
-        .where((s) => s.id != current)
-        .map((s) async {
-      try {
-        final r = await FeedCache.reach(
-          FeedCache.key(['search', s.id, title]),
-          () => s.search(title),
-        );
-        for (final b in r) {
-          if (bookKeyOf(b) == key) {
-            found.add((s, b));
-            break;
+    // 分池并发（上限 6）：全源一次扇出会在结果集中到达时卡住主 isolate
+    final jobs = <Future<void> Function()>[];
+    for (final s in collectSources()) {
+      if (s.id == current) continue;
+      jobs.add(() async {
+        try {
+          final r = await FeedCache.reach(
+            FeedCache.key(['search', s.id, title]),
+            () => s.search(title),
+            skipEmpty: true,
+          );
+          for (final b in r) {
+            if (bookKeyOf(b) == key) {
+              found.add((s, b));
+              break;
+            }
           }
+        } catch (_) {
+          // 这个源搜不动就跳过，不影响其它候选
         }
-      } catch (_) {
-        // 这个源搜不动就跳过，不影响其它候选
-      }
-    }));
+      });
+    }
+    await runPooled(jobs);
     if (!mounted) return;
     // 并发返回顺序不定：按 collectSources 的登记顺序重排后再试
     final order = <String, int>{};
@@ -154,26 +159,30 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     final key = bookKeyOf(_book);
     final title = _book.title;
     var count = 1; // 当前来源
-    await Future.wait(collectSources()
-        .where((s) => s.id != _src.id)
-        .map((s) async {
-      try {
-        final r = await FeedCache.reach(
-          FeedCache.key(['search', s.id, title]),
-          () => s.search(title),
-        );
-        if (!mounted) return;
-        for (final b in r) {
-          if (bookKeyOf(b) == key) {
-            count++;
-            setState(() => _availSources = count);
-            break;
+    final jobs = <Future<void> Function()>[];
+    for (final s in collectSources()) {
+      if (s.id == _src.id) continue;
+      jobs.add(() async {
+        try {
+          final r = await FeedCache.reach(
+            FeedCache.key(['search', s.id, title]),
+            () => s.search(title),
+            skipEmpty: true,
+          );
+          if (!mounted) return;
+          for (final b in r) {
+            if (bookKeyOf(b) == key) {
+              count++;
+              setState(() => _availSources = count);
+              break;
+            }
           }
+        } catch (_) {
+          // 单个源失败不影响计数
         }
-      } catch (_) {
-        // 单个源失败不影响计数
-      }
-    }));
+      });
+    }
+    await runPooled(jobs);
     if (mounted) setState(() => _availSources = count);
   }
 

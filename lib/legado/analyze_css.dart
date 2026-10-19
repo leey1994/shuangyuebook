@@ -38,6 +38,10 @@ final RegExp _excludeSuffix =
 final RegExp _sliceSuffix =
     RegExp(r'\[(\s*-?\d*\s*:\s*-?\d*\s*|-?\d+\s*(?:,\s*-?\d+\s*)+|-?\d+)\]$');
 
+/// 解析结果缓存（同一规则的阶段列表逐条目重复解析；上限 512，超过整体清空。
+/// [elementsMode] 影响语义，作为缓存键的一部分）。
+final Map<String, List<CssStage>> _cssStageCache = {};
+
 /// 把规则拆分为阶段列表（`@` 分隔）。解析失败时返回空列表。
 /// 解析 CSS 规则为阶段序列。
 ///
@@ -46,6 +50,13 @@ final RegExp _sliceSuffix =
 /// 「目录规则以裸标签结尾」的写法在书源里极常见；若按属性提取器处理会
 /// 一直找名为 `a`/`p` 的属性 → 命中 0 → 目录为空。
 List<CssStage> parseCssStages(String rule, {bool elementsMode = false}) {
+  final key = elementsMode ? '1$rule' : '0$rule';
+  if (_cssStageCache.length > 512) _cssStageCache.clear();
+  return _cssStageCache.putIfAbsent(key, () => _parseCssStagesUncached(rule, elementsMode: elementsMode));
+}
+
+List<CssStage> _parseCssStagesUncached(String rule,
+    {bool elementsMode = false}) {
   final parts = rule.split('@');
   final stages = <CssStage>[];
   for (var i = 0; i < parts.length; i++) {

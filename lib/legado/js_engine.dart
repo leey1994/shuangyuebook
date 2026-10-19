@@ -200,10 +200,109 @@ abstract final class JsBridge {
   /// 最近一次脚本错误（求值开始时清空；供规则层判断是否退回降级路径）。
   static String? lastError;
 
+  // ---------------------------------------------------------------------
+  // P1-9：纯转换脚本结果缓存
+  //
+  // QuickJS 的 JS_Eval 每次都要「解析 + 编译 + 执行」整段源码，而上游 legado
+  // 有 scriptCache（AnalyzeRule.kt:938-941）。引擎包只暴露 evaluate(String)，
+  // 拿不到已编译 Script 句柄，因此在桥这一层缓存**结果**：
+  // 键 = (源码, 上下文签名)，只对无副作用、无时间/随机/网络痕迹的纯脚本生效
+  // （这类脚本占语料大多数：String(result).replace/match、base64、解码等）。
+  // 命中即省掉一次完整编译 + 执行。
+  // ---------------------------------------------------------------------
+
+  static final Map<String, String> _resultCache = {};
+  static const int _resultCacheMax = 256;
+  static const int _resultCacheMaxLen = 64 * 1024;
+
+  /// 出现这些痕迹说明脚本有副作用或结果不确定 → 不缓存。
+  /// 注意：只排除 java.* 里真正带网络/会话副作用的调用，
+  /// 纯编解码（`java.base64Decode`/`java.md5Encode` 等）仍可缓存。
+  static const List<String> _kImpureMarks = [
+    'java.ajax', 'java.webView', 'java.startBrowser', 'java.getCookie',
+    'java.put', 'java.get(', 'java.cache', 'java.connect',
+    'Date', // 时间
+    'Math.random',
+    'getString', 'getElement', 'getCookie', 'sendMessage',
+    'fetch(', 'xhr', 'webview', 'cookie', 'cache',
+    'put(', 'clear(',
+  ];
+
+  static bool _pureJs(String code) =>
+      code.length <= 4096 && !_kImpureMarks.any(code.contains);
+
+  /// 上下文签名：任何会影响结果的绑定值变化都必须落进来。
+  static String _ctxSig(JsEnv e, Object? input) {
+    final b = StringBuffer();
+    b
+      ..write(e.scopeKey)
+      ..write('\u0000')
+      ..write(e.baseUrl ?? '')
+      ..write('\u0000')
+      ..write(e.nextChapterUrl ?? '')
+      ..write('\u0000')
+      ..write(e.title ?? '')
+      ..write('\u0000');
+    final ch = e.chapter;
+    if (ch != null) {
+      b
+        ..write(ch['title'] ?? '')
+        ..write('\u0000')
+        ..write(ch['url'] ?? '');
+    }
+    b.write('\u0000');
+    if (input is Map || input is List) {
+      try {
+        b.write(jsonEncode(input));
+      } catch (_) {
+        b.write('$input');
+      }
+    } else {
+      b.write('${input ?? ''}');
+    }
+    final vs = e.vars;
+    if (vs != null && vs.isNotEmpty) {
+      b.write('\u0000');
+      final keys = vs.keys.toList()..sort();
+      for (final k in keys) {
+        final v = vs[k];
+        if (v is String || v is num || v is bool) {
+          b
+            ..write(k)
+            ..write('=')
+            ..write(v)
+            ..write(';');
+        }
+      }
+    }
+    return b.toString();
+  }
+
+  /// 测试用：当前结果缓存条数 / 清空。
+  @visibleForTesting
+  static int get debugJsCacheSize => _resultCache.length;
+
+  @visibleForTesting
+  static void debugClearJsCache() => _resultCache.clear();
+
+  static void _cacheResult(String? key, String value) {
+    if (key == null || value.length > _resultCacheMaxLen) return;
+    if (_resultCache.length >= _resultCacheMax) {
+      _resultCache.remove(_resultCache.keys.first);
+    }
+    _resultCache[key] = value;
+  }
+
   static String? evalCode(String code, {JsEnv? env, Object? input}) {
     lastError = null;
     if (_libFailed) return null;
     final e = env ?? JsEnv();
+    final pure = _pureJs(code);
+    final ckey = pure ? '$code\u0000${_ctxSig(e, input)}' : null;
+    if (ckey != null) {
+      final hit = _resultCache[ckey];
+      if (hit != null) return hit;
+    }
     final rt = _obtain(e);
     if (rt == null) return null;
     // 对齐 legado 求值作用域：每次求值都是全新作用域（var/let/const 不跨调用泄漏，
@@ -237,14 +336,21 @@ abstract final class JsBridge {
     }
     final raw = r.rawResult;
     if (raw == null) return null;
-    if (raw is String) return raw;
-    if (raw is num || raw is bool) return raw.toString();
-    if (raw is Map || raw is List) {
-      try {
-        return jsonEncode(raw);
-      } catch (_) {}
+    String? out;
+    if (raw is String) {
+      out = raw;
+    } else if (raw is num || raw is bool) {
+      out = raw.toString();
+    } else {
+      if (raw is Map || raw is List) {
+        try {
+          out = jsonEncode(raw);
+        } catch (_) {}
+      }
+      out ??= text;
     }
-    return text;
+    _cacheResult(ckey, out);
+    return out;
   }
 
   /// 丢弃某书源的运行时（异常恢复 / 测试清理）。

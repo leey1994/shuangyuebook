@@ -51,10 +51,12 @@ class FeedCache {
         return e.$1 as T?;
       }
     }
-    // 内存未命中 → 尝试磁盘（24 小时内有效）
-    final d = _readDisk(k);
+    // 内存未命中 → 尝试磁盘（24 小时内有效）。
+    // 时间戳用磁盘记录的原始抓取时间，不用「本次读取时间」：
+    // 否则每次读取都会把 5 分钟内存 TTL 重新计时，数据年龄永远不增长。
+    final (d, ts) = _readDisk(k);
     if (d is Object && d is T) {
-      _m[k] = (d, DateTime.now());
+      _m[k] = (d, ts);
       return d as T;
     }
     return null;
@@ -98,29 +100,36 @@ class FeedCache {
   }
 
   /// 带缓存的异步取值：命中（内存或磁盘）直接返回，未命中执行 [fetch] 并写缓存。
-  static Future<T> reach<T>(String k, Future<T> Function() fetch) async {
+  ///
+  /// [skipEmpty]：结果为空列表时不写缓存（源抽风返回空 ≠ 真的没有数据，
+  /// 缓存住会让用户在整个 TTL 里都搜不到这本书）。
+  static Future<T> reach<T>(String k, Future<T> Function() fetch,
+      {bool skipEmpty = false}) async {
     final hit = get<T>(k);
     if (hit != null) return hit;
     final v = await fetch();
+    if (skipEmpty && v is List && v.isEmpty) return v; // 空结果不入缓存
     if (v is Object) set(k, v); // T 为可空类型时不缓存 null
     return v;
   }
 
   // ---------------- 磁盘编解码（类型按键前缀区分） ----------------
 
-  static Object? _readDisk(String k) {
+  static (Object?, DateTime) _readDisk(String k) {
+    final now = DateTime.now();
     try {
       final f = _file(k);
-      if (f == null || !f.existsSync()) return null;
+      if (f == null || !f.existsSync()) return (null, now);
       final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
       final ts = j['ts'] as int? ?? 0;
-      if (DateTime.now().millisecondsSinceEpoch - ts > diskTtl.inMilliseconds) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+      if (now.difference(dt) > diskTtl) {
         f.deleteSync();
-        return null;
+        return (null, now);
       }
-      return _decode(k, j['v']);
+      return (_decode(k, j['v']), dt);
     } catch (_) {
-      return null;
+      return (null, now);
     }
   }
 

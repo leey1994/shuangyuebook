@@ -1,10 +1,20 @@
 {
-    "id":  "20261017-v102",
-    "version":  "v1.0.2",
-    "title":  "爽阅 V1.0.2：JS 书源全量可用 + 阅读手感修复",
-    "body":  "· 书源引擎补全 JS 一脉：内置 JS 引擎与 java.* 桥，QQ 阅读系 8 源正文 2600+ 章、晋江文学城全链路打通；请求选项（POST body / header / 编码）与 @put/@get 变量持久化对齐「阅读 3.0」——56 源实测目录可用 36→48、正文可用 30→43。\n\n· 阅读器：章末轻划松手即进下一章；修复翻页到边界停半屏再跳回；覆盖模式跟随手指全程贴手；安卓音量键翻页（音量下=下一页、音量上=上一页，听书时自动让位调音量）。\n\n· 首页推荐流可页内选源（与搜索页同款）；书架长卡片一行一卡，长书名不截断；EPUB 多级目录按卷/章层级展示。\n\n自动更新：安卓与 Windows 一键升级（下载中切勿关闭应用）。",
-    "image":  "assets/slogan.png",
-    "enabled":  true,
-    "min_version":  "0.0.4",
-    "updated_at":  "2026-10-17"
+  "id": "20261020-v103",
+  "version": "v1.0.3",
+  "title": "爽阅 V1.0.3：书源解析更准 + 进章翻页更快",
+  "body": "【更新内容】\n· 书源解析：XPath 的相对路径（./ ../ .//）、and/or/not/starts-with/string() 现在都认；目录用 XPath、字段用 CSS 写法的源不再把整页链接当成章节（那类源以前会莫名只剩 1 章）；@Json:/@XPath: 等大写前缀也认；## 替换链不再提前吃掉换行，多行正文保持原结构。\n· 速度：正文分页改成先排第一屏、其余逐帧补算，进章不再先白屏卡 200~300 毫秒；规则只解析一次（整页解析快约 30%，## 链快约 2.7 倍）；发现页请求头与分类 1 分钟内复用；空搜索结果不再进缓存。\n· 存储：章节缓存改一章一文件，进章更快、写盘更小，旧缓存自动迁移；清理缓存保留听书音频；章内翻页只写一条进度，掉帧更少。\n\n【下载与更新】\n在线更新地址是 GitHub：应用内「我的 → 检查更新」从 GitHub Releases 拉最新版，能连上就直接一键升级。\n部分网络下 GitHub 打不开（下载龟速、反复失败、或提示「检查更新失败」），这种情况请改用网盘下载，安装包与 GitHub 上的完全相同：\nhttps://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe\n上面这张二维码就是该网盘地址，扫码或长按下方地址复制都可以。\n\n安装包按手机架构分包：64 位手机用 arm64-v8a（约 24 MB），32 位老机型装不上时再换 armeabi-v7a（约 22 MB）；Windows 解压后双击 novel_reader.exe。均为覆盖安装，书架、书源、进度、听书音频都不会丢。\n\n 网盘下载（GitHub 不通时用）https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe",
+  "image": "assets/qr-doubao-drive.png",
+  "links": [
+    {
+      "label": "网盘下载（GitHub 不通时用）",
+      "url": "https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe"
+    },
+    {
+      "label": "GitHub Releases（在线更新源）",
+      "url": "https://github.com/leey1994/shuangyuebook/releases/latest"
+    }
+  ],
+  "enabled": true,
+  "min_version": "0.0.4",
+  "updated_at": "2026-10-20"
 }

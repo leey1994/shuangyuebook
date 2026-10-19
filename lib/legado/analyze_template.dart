@@ -404,12 +404,21 @@ class _ExprParser {
     throw _Bad();
   }
 
+  /// `[\w$]` 的字符码判断（P2：原来每读一个字符都 new 一个 RegExp）。
+  static bool _identChar(String ch) {
+    final c = ch.codeUnitAt(0);
+    return c == 0x24 || // $
+        c == 0x5F || // _
+        (c >= 0x30 && c <= 0x39) || // 0-9
+        (c >= 0x41 && c <= 0x5A) || // A-Z
+        (c >= 0x61 && c <= 0x7A); // a-z
+  }
+
   String? _readIdent() {
     final start = pos;
     while (pos < src.length) {
       final ch = src[pos];
-      final ok = RegExp(r'[\w$]').hasMatch(ch) || ch == '.';
-      if (!ok) break;
+      if (!_identChar(ch) && ch != '.') break;
       pos++;
     }
     if (pos == start) return null;

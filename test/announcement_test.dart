@@ -135,4 +135,55 @@ void main() {
       expect(n.image, '');
     });
   });
+
+  group('公告按钮（GitHub 不通时的网盘线路）', () {
+    // 公告正文是纯文本、老版本客户端点不动，所以网盘/Release 地址还得再给
+    // 一组可点按钮；同时把危险 scheme 挡在解析层，别让它变成任意启动器。
+    const raw = {
+      'id': 'i',
+      'title': 't',
+      'body': 'b',
+      'links': [
+        {'label': '网盘下载', 'url': 'https://www.doubao.com/drive/shr/abc'},
+        {
+          'label': 'GitHub Release',
+          'url': 'https://github.com/leey1994/shuangyuebook/releases/latest',
+        },
+        {'label': '危险', 'url': 'javascript:alert(1)'},
+        {'label': '空地址', 'url': ''},
+        {'label': '', 'url': 'https://a.example.com'},
+        {'nope': 1},
+      ],
+    };
+
+    test('解析出可点按钮，非 http(s) 与空字段被丢弃', () {
+      final n = Announcement.fromJson(raw);
+      expect(n.links.length, 2);
+      expect(n.links[0].label, '网盘下载');
+      expect(n.links[0].url, 'https://www.doubao.com/drive/shr/abc');
+      expect(n.links[1].label, 'GitHub Release');
+    });
+
+    test('没有 links 字段 / 类型不对时为空列表', () {
+      expect(
+        Announcement.fromJson(const {'id': 'i', 'title': 't', 'body': 'b'})
+            .links,
+        isEmpty,
+      );
+      expect(
+        Announcement.fromJson(const {'id': 'i', 'title': 't', 'links': 'x'})
+            .links,
+        isEmpty,
+      );
+    });
+
+    test('补全配图地址时不能把 buttons 丢掉', () {
+      final n = Announcement.fromJson({
+        ...raw,
+        'image': 'assets/slogan.png',
+      }).withResolvedImage(Uri.parse('https://leey1994.github.io/shuangyuebook/'));
+      expect(n.image, endsWith('assets/slogan.png'));
+      expect(n.links.length, 2);
+    });
+  });
 }

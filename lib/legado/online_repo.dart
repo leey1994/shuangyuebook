@@ -460,10 +460,27 @@ class OnlineRepo {
   ///    静态解析无法支持 —— 返回空列表，由 UI 明确提示（不静默失败）。
   ///
   /// 「标题::地址」也兼容 `标题,地址`；无标题时取 URL 末段。
+  ///
+  /// P1-8：纯函数（只依赖 exploreUrl 文本），按文本缓存。列表页每次渲染
+  /// 都会为每个源调一遍，318 个 JSON 源逐个 jsonDecode 是纯浪费。
+  static final Map<String, List<ExploreCategory>> _catCache = {};
+
+  /// 测试用：清空发现分类缓存。
+  @visibleForTesting
+  static void debugClearCategoryCache() => _catCache.clear();
+
   static List<ExploreCategory> parseExploreCategories(BookSource source) {
     final raw = source.exploreUrl?.trim();
     if (raw == null || raw.isEmpty) return const [];
+    final hit = _catCache[raw];
+    if (hit != null) return hit;
+    final res = _parseExploreCategoriesUncached(raw);
+    if (_catCache.length >= 64) _catCache.remove(_catCache.keys.first);
+    _catCache[raw] = res;
+    return res;
+  }
 
+  static List<ExploreCategory> _parseExploreCategoriesUncached(String raw) {
     // JS 脚本：无法静态解析
     if (raw.startsWith('@js:') ||
         raw.startsWith('<js>') ||

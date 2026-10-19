@@ -182,10 +182,19 @@ abstract final class RuleAnalyzer {
   ///
   /// `a##p1##r1##p2##r2` → base=`a`, chains=[(p1,r1),(p2,r2)]
   /// 末尾落单的一段视为“删除该匹配”（replacement 为空串）。
+  ///
+  /// 解析结果按规则串缓存（同一规则逐条目重复拆解；上限 512，超过整体清空，
+  /// 模板渲染出的高基数串最坏只造成缓存抖动，不影响语义）。
+  static final Map<String, RuleParts> _partsCache = {};
   static RuleParts splitReplaces(String rule) {
     if (!rule.contains('##')) {
       return RuleParts(rule.trim(), const []);
     }
+    if (_partsCache.length > 512) _partsCache.clear();
+    return _partsCache.putIfAbsent(rule, () => _splitReplacesUncached(rule));
+  }
+
+  static RuleParts _splitReplacesUncached(String rule) {
     final parts = rule.split('##');
     final base = parts.first.trim();
     // 四段链标记：`base##p##r###` 尾段仅剩 `#`／空 → 末链 replaceFirst
@@ -211,24 +220,53 @@ abstract final class RuleAnalyzer {
   /// 解析模式前缀，返回（模式, 剩余规则）。无前缀时模式为 [RuleMode.auto]。
   ///
   /// `@@` 前缀（legado 转义写法）→ 剥离后按默认模式处理。
+  /// 前缀**大小写不敏感**（上游 `AnalyzeRule.kt:665-683` 用 `ignoreCase = true`，
+  /// `@Json:` / `@XPath:` 同样成立）。
   static (RuleMode, String) parsePrefix(String rule) {
     var r = rule.trim();
     if (r.startsWith('@@')) {
       r = r.substring(2).trim();
     }
-    if (r.startsWith(jsonPrefix)) {
-      return (RuleMode.json, r.substring(jsonPrefix.length).trim());
-    }
-    if (r.startsWith(xpathPrefix)) {
-      return (RuleMode.xpath, r.substring(xpathPrefix.length).trim());
-    }
-    if (r.startsWith(cssPrefix)) {
-      return (RuleMode.css, r.substring(cssPrefix.length).trim());
-    }
-    if (r.startsWith(regexPrefix)) {
-      return (RuleMode.regex, r.substring(regexPrefix.length).trim());
+    if (r.startsWith('@')) {
+      final low = r.toLowerCase();
+      for (final (prefix, mode) in _prefixTable) {
+        if (low.startsWith(prefix)) {
+          return (mode, r.substring(prefix.length).trim());
+        }
+      }
     }
     return (RuleMode.auto, r);
+  }
+
+  /// 规则前缀表（小写形式，按上表顺序匹配）。
+  static const List<(String, RuleMode)> _prefixTable = [
+    (jsonPrefix, RuleMode.json),
+    (xpathPrefix, RuleMode.xpath),
+    (cssPrefix, RuleMode.css),
+    (regexPrefix, RuleMode.regex),
+  ];
+
+  /// 规范空白：折叠连续空白为单个空格并去首尾（用于把 HTML 文本变干净）。
+  ///
+  /// 每个文本节点都会走这里，正则必须预编译（原来每次调用都 new RegExp）。
+  static final RegExp _wsRe = RegExp(r'[\s\u00A0]+');
+  static String collapseSpaces(String s) =>
+      s.replaceAll(_wsRe, ' ').trim();
+
+  /// 正则缓存（含编译失败的 null 记忆，避免同一坏规则反复抛异常）。
+  ///
+  /// `##` 替换链占单条规则耗时的大头（实测 ~50%），全部来自这里逐次重编译。
+  /// 上限 512：书源数量有限，超过即整体清空（最坏情况退回原行为）。
+  static final Map<String, RegExp?> _regexCache = {};
+  static RegExp? _cachedRegex(String pattern) {
+    if (_regexCache.length > 512) _regexCache.clear();
+    return _regexCache.putIfAbsent(pattern, () {
+      try {
+        return RegExp(pattern);
+      } catch (_) {
+        return null;
+      }
+    });
   }
 
   /// 应用替换链（容错：非法正则跳过该链）。
@@ -242,19 +280,16 @@ abstract final class RuleAnalyzer {
         out = tryBase64Decode(out) ?? out;
         continue;
       }
-      try {
-        final re = RegExp(chain.pattern);
-        if (chain.replaceFirst) {
-          // 四段链：只取第一个匹配段并展开替换；无匹配 → 空串（legado replaceFirst）
-          final m = re.firstMatch(out);
-          out = (m == null) ? '' : _expandReplacement(chain.replacement, m);
-          continue;
-        }
-        out = out.replaceAllMapped(
-            re, (m) => _expandReplacement(chain.replacement, m));
-      } catch (_) {
-        // 非法正则：跳过，不影响其它链
+      final re = _cachedRegex(chain.pattern);
+      if (re == null) continue; // 非法正则：跳过，不影响其它链
+      if (chain.replaceFirst) {
+        // 四段链：只取第一个匹配段并展开替换；无匹配 → 空串（legado replaceFirst）
+        final m = re.firstMatch(out);
+        out = (m == null) ? '' : _expandReplacement(chain.replacement, m);
+        continue;
       }
+      out = out.replaceAllMapped(
+          re, (m) => _expandReplacement(chain.replacement, m));
     }
     return out;
   }
@@ -376,10 +411,6 @@ abstract final class RuleAnalyzer {
       return null;
     }
   }
-
-  /// 规范空白：折叠连续空白为单个空格并去首尾（用于把 HTML 文本变干净）。
-  static String collapseSpaces(String s) =>
-      s.replaceAll(RegExp(r'[\s\u00A0]+'), ' ').trim();
 
   /// 清理书源主地址：部分源的 `bookSourceUrl` 带 `##分组` / `#备注` 尾缀
   /// （如 `https://www.qidian.com##分类`），直接参与相对地址解析会破坏基准地址。

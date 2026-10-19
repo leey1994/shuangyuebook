@@ -113,6 +113,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   double _lastW = 0, _lastH = 0;
   TextScaler _lastScaler = TextScaler.noScaling;
   Timer? _repagTimer;
+  // 分批分页：长章节首屏只排一个时间预算，其余让出一帧后继续（P1-7）
+  ParaPaginator? _pager;
+  int _pagerGen = 0;
 
   // 偏好快照：排版签名（字号/行距/字距/缩进/字体/边距/翻页方式/背景）变化才重建
   late String _pLayout;
@@ -279,6 +282,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     // 退到后台：停表并落盘这一段，离开阅读器不再计入时长
     if (state != AppLifecycleState.resumed) {
       _settleReading();
+      // 章内翻页只写了轻量进度记录，这里把书架/历史整表补写一次；
+      // 进程被系统杀掉也最多丢当前页的页码（下次启动由进度记录补回）。
+      if (_detail != null) _store.flushProgress();
     } else if (mounted) {
       unawaited(NativeBridge.setKeepScreenOn(true));
     }
@@ -317,6 +323,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _clock?.cancel();
     _sleepTimer?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
+    // 离开阅读器：整表补写一次（章内翻页期间只写了轻量进度记录）
+    if (_detail != null) _store.flushProgress();
     // 音量键控制权交还系统（原生按 active 直拦，必须主动关闭）
     _volGateSent = null;
     if (Platform.isAndroid) {
@@ -456,6 +464,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       _error = null;
       _pages = null;
       _pagesKey = null;
+      _pager = null;
+      _pagerGen++; // 作废进行中的分批分页
       _startPage = toEnd ? 1 << 30 : startPage;
       _startOffset = startOffset;
       _page = 0;
@@ -836,15 +846,22 @@ class _ReaderScreenState extends State<ReaderScreen>
                     final key = Object.hash(identityHashCode(_paras), w, h,
                         _prefs.layoutSignature, ts.toString());
                     if (_pages == null) {
-                      // 新章节首排：立即分页（避免白屏）
-                      _pages = paginateParas(
+                      // 新章节首排：只排一个时间预算（首屏立即有字），
+                      // 余下部分让出一帧后分批补排，避免长章节卡住这一帧
+                      final pager = ParaPaginator(
                         paras: _paras,
                         width: w,
                         height: h,
                         style: _bodyStyle,
                         paraSpacing: _prefs.fontSize * 0.6,
                         textScaler: ts,
+                        indent: _prefs.indentFirstLine ? '　　' : '',
                       );
+                      _pagerGen++;
+                      final gen = _pagerGen;
+                      _pager = pager;
+                      pager.pump(const Duration(milliseconds: 8));
+                      _pages = pager.pages;
                       _pagesKey = key;
                       if (_startPage != 0) {
                         _page = _startPage >= _pages!.length
@@ -852,6 +869,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                             : _startPage;
                         _startPage = 0;
                       }
+                      if (!pager.done) unawaited(_pumpRest(gen, pager));
                     } else if (_pagesKey != key) {
                       // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
                       _repagTimer?.cancel();
@@ -930,23 +948,44 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   /// 防抖重排（窗口尺寸变化 / 字号行距变化后调用）。
+  /// 同样只排首屏预算，剩余部分交给 [_pumpRest] 分批补排。
   void _repaginate() {
     if (!mounted || _lastW <= 0 || _lastH <= 0) return;
-    final pages = paginateParas(
+    final pager = ParaPaginator(
       paras: _paras,
       width: _lastW,
       height: _lastH,
       style: _bodyStyle,
       paraSpacing: _prefs.fontSize * 0.6,
       textScaler: _lastScaler,
+      indent: _prefs.indentFirstLine ? '　　' : '',
     );
+    _pagerGen++;
+    final gen = _pagerGen;
+    _pager = pager;
+    pager.pump(const Duration(milliseconds: 8));
     if (!mounted) return;
     setState(() {
-      _pages = pages;
+      _pages = pager.pages;
       _pagesKey = Object.hash(identityHashCode(_paras), _lastW, _lastH,
           _prefs.layoutSignature, _lastScaler.toString());
-      _page = _page.clamp(0, pages.length - 1).toInt();
+      _page = _page.clamp(0, pager.pages.length - 1).toInt();
     });
+    if (!pager.done) unawaited(_pumpRest(gen, pager));
+  }
+
+  /// 把剩余段落分批排完：每次让出一帧，排一个小预算后刷新页码。
+  /// 章节切换 / 重排会自增 [_pagerGen]，过期任务在此退出（P1-7）。
+  Future<void> _pumpRest(int gen, ParaPaginator pager) async {
+    await Future<void>.delayed(Duration.zero); // 先让首屏那一帧渲染出来
+    while (mounted && gen == _pagerGen && identical(_pager, pager) && !pager.done) {
+      pager.pump(const Duration(milliseconds: 6));
+      if (!mounted || gen != _pagerGen || !identical(_pager, pager)) return;
+      setState(() {
+        _page = _page.clamp(0, pager.pages.length - 1).toInt();
+      });
+      await Future<void>.delayed(Duration.zero);
+    }
   }
 
   Widget _overlay(Widget child) => Container(
