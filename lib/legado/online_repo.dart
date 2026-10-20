@@ -18,6 +18,7 @@ import 'js_engine.dart';
 import 'models.dart';
 import 'online_book_service.dart';
 import 'source_store.dart';
+import 'source_vars.dart';
 import 'webview_engine.dart';
 
 /// 单源搜索的结果（或错误）。
@@ -536,18 +537,27 @@ class OnlineRepo {
     if (raw == null || raw.isEmpty) return const [];
     final hit = _catCache[raw];
     if (hit != null) return hit;
-    final res = _parseExploreCategoriesUncached(raw);
+    final res = _parseExploreCategoriesUncached(source, raw);
     if (_catCache.length >= 64) _catCache.remove(_catCache.keys.first);
     _catCache[raw] = res;
     return res;
   }
 
-  static List<ExploreCategory> _parseExploreCategoriesUncached(String raw) {
-    // JS 脚本：无法静态解析
-    if (raw.startsWith('@js:') ||
-        raw.startsWith('<js>') ||
-        raw.startsWith('@JS:')) {
-      return const [];
+  static List<ExploreCategory> _parseExploreCategoriesUncached(
+    BookSource source,
+    String raw,
+  ) {
+    // JS 脚本（`@js:` / `<js>`）：跑一遍引擎拿 JSON —— 分类表本来就是源数据
+    // 拼出来的，不需要网络。脚本内部若真要 `java.ajax`（魔丸小说那种），
+    // 这里没有会话可补网，会挂起失败 → 退回空列表。
+    final js = _exploreJsBody(raw);
+    if (js != null) {
+      final byJs = _categoriesFromJs(source, js);
+      if (byJs.isNotEmpty) return byJs;
+      // 求值失败且正文里带明显静态 JSON：尽力解析（少数源把 JSON 写在 JS 尾部）
+      final i = raw.indexOf('[');
+      if (i >= 0) return _parseJsonCategories(raw.substring(i));
+      return byJs;
     }
 
     // JSON 数组格式
@@ -557,6 +567,145 @@ class OnlineRepo {
 
     // 行格式
     return _parseLineCategories(raw);
+  }
+
+  /// 取出 JS 形态 exploreUrl 的脚本体；非 JS 返回 null。
+  static String? _exploreJsBody(String raw) {
+    final low = raw.toLowerCase();
+    if (low.startsWith('@js:')) return raw.substring(4);
+    if (low.startsWith('<js>') && low.endsWith('</js>')) {
+      return raw.substring(4, raw.length - 5);
+    }
+    return null;
+  }
+
+  /// 求值 JS 形态的 exploreUrl，返回 `[{title, url, style?}]`。
+  ///
+  /// legado 里这段脚本的 `this` 是书源对象（`QMA_DISC.explore.call(this, …)`），
+  /// 所以用 `source` 全局对象当 `this` 绑定；结果统一 JSON.stringify 后解析。
+  ///
+  /// 现代写法（legado 3.x）的发现页脚本还会：
+  /// - push `{type:"select", chars:[…], default:"男生", action:"java.refreshExplore()"}`
+  ///   这类**分栏选择器**（不是可抓取分类，UI 无芯片时只取默认值）；
+  /// - 读 `infoMap["频道"]`、写 `infoMap.save()` 保存用户选择。
+  /// 我们按「首次打开」处理：infoMap 先取已存值，缺项用选择器的 `default` 补，
+  /// 补到新值就再跑一遍脚本，等价于原版用默认选项渲染的首屏。
+  static List<ExploreCategory> _categoriesFromJs(
+      BookSource source, String code) {
+    if (!JsBridge.available) return const [];
+    final stored = _loadExploreInfo(source);
+    var tabs = _evalExploreTabs(source, code, stored);
+    if (tabs.isEmpty) return const [];
+    final defaults = <String, String>{};
+    for (final t in tabs) {
+      if ('${t['type']}'.toLowerCase() != 'select') continue;
+      final title = '${t['title'] ?? ''}'.trim();
+      final def = t['default'];
+      if (title.isNotEmpty && def != null && !stored.containsKey(title)) {
+        defaults[title] = '$def';
+      }
+    }
+    if (defaults.isNotEmpty) {
+      final merged = {...stored, ...defaults};
+      final again = _evalExploreTabs(source, code, merged);
+      if (again.isNotEmpty) {
+        tabs = again;
+        _saveExploreInfo(source, merged);
+      }
+    }
+    return _tabsToCategories(tabs);
+  }
+
+  /// 跑一遍发现页脚本，拿到**原始 tab 数组**（含选择器项）。
+  static List<Map> _evalExploreTabs(
+      BookSource source, String code, Map<String, String> info) {
+    try {
+      final env = JsEnv(
+        scopeKey: source.bookSourceUrl,
+        sourceUrl: source.bookSourceUrl,
+        sourceName: source.bookSourceName,
+        sourceHeader: source.header,
+        sourceJson: source.jsSourceFields,
+        jsLib: source.jsLib,
+      );
+      // 用 direct eval 保留「最后一条语句的值」语义（legado 的 `<js>` 就是这样
+      // 取值的；`var out=[]; …; out` 结尾的脚本拿不到显式 return）。
+      // `this` 由外层 `.call(source)` 提供，eval 直接继承。
+      final literal = jsonEncode(code);
+      final infoJson = jsonEncode(jsonEncode(info));
+      final wrapped = 'JSON.stringify((function(){'
+          // infoMap：既支持取值/赋值，也支持源脚本常用的 save()/get()/put()
+          ' var __raw = JSON.parse($infoJson);'
+          ' var infoMap = {};'
+          ' for (var __k in __raw) infoMap[__k] = __raw[__k];'
+          ' infoMap.get = function (k) { return this[k]; };'
+          ' infoMap.put = function (k, v) { this[k] = v; return v; };'
+          ' infoMap.has = function (k) { return Object.prototype.hasOwnProperty.call(this, k); };'
+          ' infoMap.save = function () { return undefined; };'
+          ' var __r = eval($literal);'
+          ' if (__r !== undefined) {'
+          '   try { return JSON.parse(JSON.stringify(__r)); } catch (e) { return __r; }'
+          ' }'
+          ' try { return eval(\'typeof result === "undefined" ? undefined : result\'); }'
+          ' catch (e) { return undefined; }'
+          ' }).call((typeof source === \'object\' && source) ? source : globalThis))';
+      final out = JsBridge.evalCode(wrapped, env: env);
+      if (out == null) return const [];
+      var txt = out;
+      if (txt.startsWith('"')) {
+        // 脚本自己已经 stringify 过：多包了一层
+        final d = jsonDecode(txt);
+        if (d is String) txt = d;
+      }
+      final t = txt.trim();
+      final rawList = t.startsWith('[')
+          ? jsonDecode(t)
+          : (t.startsWith('{') ? jsonDecode('[$t]') : null);
+      if (rawList is! List) return const [];
+      return [
+        for (final e in rawList)
+          if (e is Map) Map<String, dynamic>.from(e),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 原始 tab 数组 → 可抓取分类（选择器/纯标题项跳过）。
+  static List<ExploreCategory> _tabsToCategories(List<Map> tabs) {
+    final out = <ExploreCategory>[];
+    for (final t in tabs) {
+      final type = '${t['type'] ?? ''}'.toLowerCase();
+      if (type == 'select' || type == 'button' || type == 'refresh') continue;
+      final title = '${t['title'] ?? ''}'.trim();
+      final url = '${t['url'] ?? ''}'.trim();
+      if (title.isEmpty || url.isEmpty) continue;
+      out.add(ExploreCategory(title: title, url: url));
+    }
+    return out;
+  }
+
+  /// 发现页选择器状态（`infoMap`）持久化：`@exploreInfo` 一条 JSON。
+  static Map<String, String> _loadExploreInfo(BookSource source) {
+    try {
+      final raw = SourceVars.I.get(source.bookSourceUrl, '@exploreInfo');
+      if (raw.isEmpty) return const {};
+      final d = jsonDecode(raw);
+      if (d is! Map) return const {};
+      return {
+        for (final e in d.entries) '${e.key}': '${e.value}',
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  static void _saveExploreInfo(BookSource source, Map<String, String> info) {
+    try {
+      SourceVars.I.set(source.bookSourceUrl, '@exploreInfo', jsonEncode(info));
+    } catch (_) {
+      // 存不下不影响本次渲染
+    }
   }
 
   /// 解析 JSON 数组格式的 exploreUrl。
@@ -570,8 +719,17 @@ class OnlineRepo {
       if (d is! List) return const [];
       decoded = d;
     } catch (_) {
-      // 非法 JSON（书源写坏 / 被截断）：静默返回空，由 UI 提示该源不可用
-      return const [];
+      // 严格 JSON 失败 → 按 Gson 的宽松模式再试一次（legado 用 Gson，晋江系
+      // 写的是 JS 对象字面量：单引号、无引号键、尾逗号）。仍失败才放弃。
+      final loose = _lenientJson(raw);
+      if (loose == null) return const [];
+      try {
+        final d = jsonDecode(loose);
+        if (d is! List) return const [];
+        decoded = d;
+      } catch (_) {
+        return const [];
+      }
     }
     final out = <ExploreCategory>[];
     for (final item in decoded) {
@@ -585,6 +743,131 @@ class OnlineRepo {
     }
     return out;
   }
+
+  /// 测试用：暴露宽松 JSON 归一化。
+  @visibleForTesting
+  static String? debugLenientJson(String src) => _lenientJson(src);
+
+  /// 宽松 JSON（对齐 Gson 的 lenient 模式）：单引号字符串、无引号键、
+  /// 尾逗号、`//` 与 `/* */` 注释。返回可被 `jsonDecode` 吃下的文本，
+  /// 失败返回 null。
+  static String? _lenientJson(String src) {
+    final b = StringBuffer();
+    var i = 0;
+    final n = src.length;
+    // 上一个有意义的字符，用于判定「这里该出现键了」
+    var expectKey = false;
+    while (i < n) {
+      final c = src[i];
+      // 注释
+      if (c == '/' && i + 1 < n) {
+        if (src[i + 1] == '/') {
+          while (i < n && src[i] != '\n') {
+            i++;
+          }
+          continue;
+        }
+        if (src[i + 1] == '*') {
+          i += 2;
+          while (i + 1 < n && !(src[i] == '*' && src[i + 1] == '/')) {
+            i++;
+          }
+          i = (i + 1 < n) ? i + 2 : n;
+          continue;
+        }
+      }
+      // 字符串
+      if (c == '"' || c == "'") {
+        final q = c;
+        i++;
+        b.write('"');
+        while (i < n) {
+          final ch = src[i];
+          if (ch == '\\' && i + 1 < n) {
+            final nx = src[i + 1];
+            // `\'` 在双引号里是非法转义，其余原样
+            b.write(nx == "'" ? "'" : '$ch$nx');
+            i += 2;
+            continue;
+          }
+          if (ch == q) {
+            i++;
+            break;
+          }
+          if (ch == '"') {
+            b.write(r'\"');
+            i++;
+            continue;
+          }
+          if (ch == '\n' || ch == '\r' || ch == '\t') {
+            // JSON 字符串里不允许裸控制字符（源里手写的多行标题）
+            b.write(ch == '\n'
+                ? r'\n'
+                : ch == '\r'
+                    ? r'\r'
+                    : r'\t');
+            i++;
+            continue;
+          }
+          b.write(ch);
+          i++;
+        }
+        b.write('"');
+        expectKey = false;
+        continue;
+      }
+      // 键：`{` 或 `,` 之后紧跟标识符 + `:`（前瞻，不动游标）
+      if (expectKey && RegExp(r'[A-Za-z_$]').hasMatch(c)) {
+        var j = i + 1;
+        while (j < n && RegExp(r'[A-Za-z0-9_$]').hasMatch(src[j])) {
+          j++;
+        }
+        var k = j;
+        while (k < n && _isJsonWs(src[k])) {
+          k++;
+        }
+        if (k < n && src[k] == ':') {
+          b.write('"${src.substring(i, j)}"');
+          expectKey = false;
+          i = j;
+          continue;
+        }
+      }
+      if (c == ',') {
+        // 尾逗号：`,` 后面（忽略空白）直接是 `]`/`}` → 丢掉
+        var j = i + 1;
+        while (j < n && _isJsonWs(src[j])) {
+          j++;
+        }
+        if (j < n && (src[j] == ']' || src[j] == '}')) {
+          i++;
+          continue;
+        }
+        b.write(',');
+        expectKey = true;
+        i++;
+        continue;
+      }
+      if (c == '{') {
+        b.write(c);
+        expectKey = true;
+        i++;
+        continue;
+      }
+      if (_isJsonWs(c)) {
+        b.write(c);
+        i++;
+        continue;
+      }
+      b.write(c);
+      expectKey = false;
+      i++;
+    }
+    return b.toString();
+  }
+
+  static bool _isJsonWs(String c) =>
+      c == ' ' || c == '\t' || c == '\n' || c == '\r';
 
   /// 解析行格式（`标题::地址` / `标题,地址` / 纯地址）。
   static List<ExploreCategory> _parseLineCategories(String raw) {
