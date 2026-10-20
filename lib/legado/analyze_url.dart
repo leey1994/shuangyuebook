@@ -226,16 +226,30 @@ UrlTemplate buildRequest(
   if (RuleAnalyzer.hasJs(s) && js != null && JsBridge.available) {
     // P0：执行 JS 段（对齐 legado AnalyzeUrl.analyzeJs）
     s = _evalJsBlocks(s, js, vars);
+    if (JsBridge.traceAjax) {
+      print('[url] js raw=${s.length}字 ${s.length > 300 ? s.substring(0, 300) : s}');
+    }
   } else {
     // 无引擎降级：剥离前置 <js> 块；尾随 @js: 丢弃（用于脚本前的地址尽力请求）
     s = _stripJsPrelude(s);
     s = RuleAnalyzer.stripTrailingJs(s);
   }
   final split = _splitOptions(s, vars);
-  final t = _withLegacyOptions(UrlTemplate(split.$1, split.$2));
-  final options = Map<String, dynamic>.from(t.options);
-  final charset = options['charset']?.toString();
-  final rendered = renderUrlTemplate(t.url, vars, charset: charset, js: js);
+  var t = _withLegacyOptions(UrlTemplate(split.$1, split.$2));
+  var options = Map<String, dynamic>.from(t.options);
+  var rendered = renderUrlTemplate(t.url, vars,
+      charset: options['charset']?.toString(), js: js);
+  if (options.isEmpty) {
+    // `{{js(...)}}` 的返回值本身可能带请求选项（`url,{"method":…}`，如 纸间）：
+    // 渲染后若才发现选项，就地再拆一次，避免整串被当成 URL 转义。
+    final re = _splitOptions(rendered, vars);
+    if (re.$2.isNotEmpty) {
+      rendered = re.$1;
+      t = _withLegacyOptions(UrlTemplate(rendered, re.$2));
+      options = Map<String, dynamic>.from(t.options);
+      rendered = t.url;
+    }
+  }
   // P0：阅读页列表 `<url1,url2,…>`（legado pagePattern；{{}} 替换后按 page 选取）
   var url = _applyPageList(rendered, vars['page']);
   url = resolveUrl(url, baseUrl);

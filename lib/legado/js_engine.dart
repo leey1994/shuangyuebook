@@ -333,11 +333,14 @@ abstract final class JsBridge {
     _active = e;
     try {
       r = rt.evaluate('${_setup(e, input)}\n'
-          '(function () { return eval(${jsonEncode(code)}); })()');
+          '(function () { var __r = eval(${jsonEncode(code)}); '
+          'return __lgClean(__r); })()');
       // 部分书源在 @js 里直接写顶层 return（legado 的 Rhino 允许），
       // eval 下会 SyntaxError；此时把整段包进函数体再跑一次。
       if (r.isError && '${r.stringResult}'.contains('return not in a function')) {
-        r = rt.evaluate('${_setup(e, input)}\n(function () {\n$code\n})()');
+        r = rt.evaluate('${_setup(e, input)}\n'
+            '(function () { var __r = (function () {\n$code\n})(); '
+            'return __lgClean(__r); })()');
       }
     } catch (err) {
       debugPrint('[js] evaluate 异常(${e.scopeKey})：$err');
@@ -348,6 +351,11 @@ abstract final class JsBridge {
       _active = null;
     }
     final text = r.stringResult;
+    if (traceAjax) {
+      print('[js] eval code=${code.length}字 isError=${r.isError} '
+          'raw=${r.rawResult == null ? "null" : r.rawResult.runtimeType} '
+          'str=${_clip(text)}');
+    }
     if (r.isError || text.contains('__JSSUSP__')) {
       final m = _suspRe.firstMatch(text) ?? _suspRe.firstMatch('${r.rawResult}');
       if (m != null) {
@@ -701,6 +709,9 @@ abstract final class JsBridge {
     return out;
   }
 
+  /// 诊断开关：打印 ajax 缓存命中/落空（tool/dump_* 里打开）。
+  static bool traceAjax = false;
+
   static dynamic _remote(
     JsEnv? env,
     String kind,
@@ -712,6 +723,13 @@ abstract final class JsBridge {
     if (url.isEmpty) return jsonEncode({'v': ''});
     final ses = env?.session;
     final key = ajaxKey(method, url, body);
+    if (traceAjax) {
+      final hit = kind == 'ajax'
+          ? (ses?.ajaxCache.containsKey(key) ?? false)
+          : (ses?.webViewCache.containsKey(key) ?? false);
+      print('[ajax] ${hit ? "hit " : "miss"} ses=${ses != null} $kind $method $url'
+          '${ses == null ? "" : " keys=${ses.ajaxCache.length}"}');
+    }
     final cache = kind == 'ajax' ? ses?.ajaxCache : ses?.webViewCache;
     if (cache != null && cache.containsKey(key)) {
       final meta = kind == 'ajax' ? ses?.ajaxMeta[key] : null;
@@ -997,6 +1015,25 @@ abstract final class JsBridge {
     };
     return resp;
   }
+  // 单独代理成对的代理项：书源常用 substring/indexOf 切 HTML，容易切出
+  // 「孤立代理项」，QuickJS→Dart 的 UTF-8 转换会整串失败（返回 null）。
+  globalThis.__lgClean = function (s) {
+    if (typeof s !== 'string') return s;
+    var out = '', n = s.length, i, c, d;
+    for (i = 0; i < n; i++) {
+      c = s.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        d = i + 1 < n ? s.charCodeAt(i + 1) : 0;
+        if (d >= 0xdc00 && d <= 0xdfff) {
+          out += s.charAt(i) + s.charAt(i + 1);
+          i++;
+        } else out += '\ufffd';
+      } else if (c >= 0xdc00 && c <= 0xdfff) {
+        out += '\ufffd';
+      } else out += s.charAt(i);
+    }
+    return out;
+  };
   globalThis.__lgResp = __lgResp;
   function __lgBytes(s) {
     var a = [], i, c, d;

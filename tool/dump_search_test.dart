@@ -16,6 +16,7 @@ import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/models.dart';
 import 'package:shuangyue/legado/online_book_service.dart';
 import 'package:shuangyue/legado/online_repo.dart';
+import 'package:shuangyue/legado/rule_analyzer.dart';
 import 'package:shuangyue/legado/source_store.dart';
 
 const _src = String.fromEnvironment('SRC');
@@ -41,6 +42,7 @@ void main() {
       final name = (m['bookSourceName'] ?? '').toString();
       if (!want.any((w) => name.contains(w))) continue;
       final source = BookSource.fromJson(m.cast<String, dynamic>());
+      JsBridge.traceAjax = true;
       final session = JsSession();
       final env = OnlineRepo.jsEnvFor(source, session);
 
@@ -49,12 +51,14 @@ void main() {
       var body = '';
       var finalUrl = '';
       try {
-        var req = buildRequest(source.searchUrl ?? '', source.bookSourceUrl, {
-          'key': _key,
-          'page': 1,
-        }, js: env);
-        for (var round = 0; round < 3; round++) {
+        for (var round = 0; round < 4; round++) {
           try {
+            // 每轮都重新渲染 searchUrl：挂起补网后脚本要重跑才拿得到缓存。
+            final req = buildRequest(
+                source.searchUrl ?? '', source.bookSourceUrl, {
+              'key': _key,
+              'page': 1,
+            }, js: env);
             final method =
                 (req.options['method']?.toString() ?? 'GET').toUpperCase();
             final headers = <String, String>{
@@ -91,10 +95,6 @@ void main() {
               'url': r.finalUrl,
               'headers': const <String, String>{},
             };
-            req = buildRequest(source.searchUrl ?? '', source.bookSourceUrl, {
-              'key': _key,
-              'page': 1,
-            }, js: env);
           }
         }
       } catch (e) {
@@ -104,6 +104,34 @@ void main() {
       final safe = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       if (body.isNotEmpty) {
         File('$_out/$safe.html').writeAsStringSync(body);
+      }
+
+      // searchUrl 渲染为空时，手工重放 JS 段，打印原始返回值定位。
+      final rawTmpl = source.searchUrl ?? '';
+      final mustache = RegExp(r'^\s*\{\{(.+)\}\}\s*$', dotAll: true)
+          .firstMatch(rawTmpl)?.group(1);
+      if (mustache != null) {
+        final v = JsBridge.evalCode(mustache, env: env, input: rawTmpl);
+        print('mustache ${mustache.length}B → ${v == null ? "null" : "${v.length}字"}');
+        if (v != null) {
+          print('raw300=${v.length > 300 ? v.substring(0, 300) : v}');
+        }
+      }
+      if (finalUrl.isEmpty && body.isEmpty && rawTmpl.trim().isNotEmpty) {
+        final segs = RuleAnalyzer.splitJs(rawTmpl);
+        var cur = rawTmpl;
+        for (final seg in segs) {
+          if (!seg.isJs) {
+            final t = seg.text.trim();
+            if (t.isNotEmpty) cur = t.replaceAll('@result', cur);
+            continue;
+          }
+          final v = JsBridge.evalCode(seg.text, env: env, input: cur);
+          print('JS 段 ${seg.text.length} 字 → 返回 ${v == null ? "null" : "${v.length} 字"}'
+              '${v == null ? '' : '：${v.length > 160 ? v.substring(0, 160) : v}'}');
+          cur = v ?? '';
+        }
+        print('JS 重放结果 ${cur.length} 字；lastError=${JsBridge.lastError}');
       }
 
       final parsed = repo.parseSearchPageDetailed(source, body,
