@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'announcement.dart';
+import 'data/font_store.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
 import 'legado/cookie_jar.dart';
@@ -79,12 +80,9 @@ Future<void> main(List<String> args) async {
   } catch (_) {
     // 个别环境（权限/杀软拦截）下偏好初始化失败时不阻塞启动，降级为无持久化运行
   }
-  try {
-    await FeedCache.init(); // 首页/排行/搜索磁盘缓存，二次打开免重新拉取
-  } catch (_) {}
-  try {
-    await StatsStore.I.load(); // 阅读统计（时长 / 连续天数 / 最近 7 天）
-  } catch (_) {}
+  // 首帧之前只做「必须有」的事：书源（含 1000+ 条的 JSON 解析，已挪到后台
+  // isolate）与脚本变量。其余（磁盘缓存、统计、体检、公告）都挪到首帧之后，
+  // 低端机上「点开图标到出画面」这一段每省 100ms 都是体感。
   try {
     // 「阅读 3.0」书源：先补内置源，再把用户启用的源登记进 allSources。
     // 失败不阻塞启动 —— 内置书源照常可用。
@@ -104,6 +102,27 @@ Future<void> main(List<String> args) async {
     syncImportedSources(sources.enabled);
     sources.addListener(() => syncImportedSources(sources.enabled));
   } catch (_) {}
+  // 桌宠的偏好句柄接在 AppStore 上（反过来 import 会和 store 循环引用）
+  try {
+    PetStore.prefsProvider = () => AppStore.I.sp;
+    PetStore.I.load();
+    // 成就徽章点亮时让小墨报喜（stats 不反向 import pet，走回调注入）
+    StatsStore.onBadgeEarned =
+        (b) => PetStore.I.celebrate('${b.name}达成！', exp: 10);
+  } catch (_) {}
+  runApp(const NovelApp());
+  // 首帧之后再做的事：磁盘缓存、统计、体检 —— 都不影响能不能进应用。
+  WidgetsBinding.instance.addPostFrameCallback((_) => _afterFirstFrame());
+}
+
+/// 首帧之后的收尾任务（失败一律忽略）。
+Future<void> _afterFirstFrame() async {
+  try {
+    await FeedCache.init(); // 首页/排行/搜索磁盘缓存，二次打开免重新拉取
+  } catch (_) {}
+  try {
+    await StatsStore.I.load(); // 阅读统计（时长 / 连续天数 / 最近 7 天）
+  } catch (_) {}
   try {
     // 书源健康档案：每天首次启动自动体检一次（只标记不删源）
     await SourceHealthStore.I.load();
@@ -117,14 +136,9 @@ Future<void> main(List<String> args) async {
     }));
   } catch (_) {}
   try {
-    // 桌宠的偏好句柄接在 AppStore 上（反过来 import 会和 store 循环引用）
-    PetStore.prefsProvider = () => AppStore.I.sp;
-    PetStore.I.load();
-    // 成就徽章点亮时让小墨报喜（stats 不反向 import pet，走回调注入）
-    StatsStore.onBadgeEarned =
-        (b) => PetStore.I.celebrate('${b.name}达成！', exp: 10);
+    // 上次选过网络字体：后台把字体下好（只下一次），下完进阅读器即刻生效。
+    FontStore.I.warmUpSelected(AppStore.I.prefs.fontFamily);
   } catch (_) {}
-  runApp(const NovelApp());
 }
 
 /// 只在主题变化时重建 MaterialApp，

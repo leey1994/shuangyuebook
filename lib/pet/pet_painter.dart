@@ -6,6 +6,7 @@
 // 那双豆豆眼、顶尖底圆的水滴头都原样保留，认得出是同一只。
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 /// 成长阶段（造型不变，只变胖瘦与装饰）。
@@ -49,7 +50,8 @@ class PetPainter extends CustomPainter {
     required this.phase,
     this.squash = 0,
     this.blink = false,
-  });
+    this.phaseListenable,
+  }) : super(repaint: phaseListenable);
 
   final PetStage stage;
 
@@ -64,11 +66,22 @@ class PetPainter extends CustomPainter {
   /// 眼睛是否闭合（眨眼瞬间）。
   final bool blink;
 
+  /// 相位活源：传了就由它驱动重绘，呼吸起伏不再依赖 widget 每帧 setState。
+  ///
+  /// 桌宠待机时 widget 一次都不重建，只把新相位推到这个 ValueNotifier 上，
+  /// CustomPainter 自己重画 —— 省掉整棵子树的 build/layout（低端机上是
+  /// 每帧一次的全屏重建）。
+  final ValueListenable<double>? phaseListenable;
+
+  /// 本次绘制用的相位：优先取活源（最新），否则用构造时传进来的快照。
+  double get _phaseNow => phaseListenable?.value ?? phase;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (size.width <= 0 || size.height <= 0) return;
     final h = size.height;
     final cx = size.width / 2;
+    final phase = _phaseNow;
 
     final i = stage.index;
     // 按阶段的整体尺寸画，再贴着底边对齐 —— 小的就是真的小
@@ -376,6 +389,8 @@ class PetPainter extends CustomPainter {
       old.mood != mood ||
       old.blink != blink ||
       old.squash != squash ||
+      // 由活源驱动时，重绘由 phaseListenable 通知，phase 快照不参与比较
+      old.phaseListenable != phaseListenable ||
       // 相位一直在走，动画期间不缓存重绘；静止时（phase 不变）才省一次
       old.phase != phase;
 }

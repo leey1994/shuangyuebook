@@ -70,12 +70,20 @@ class PetBar extends StatefulWidget {
 /// 自己玩的小动作。
 enum _Play { still, hop, spin, stretch, peek, yawn, shake, wave }
 
-class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
+class _PetBarState extends State<PetBar>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final Ticker _ticker;
   final _rnd = math.Random();
   final _store = AppStore.I;
   final _pet = PetStore.I;
   int _turn = 0;
+
+  /// 相位活源：待机时只推它，让 CustomPainter 自己重绘，不重建 widget。
+  final ValueNotifier<double> _phaseTick = ValueNotifier<double>(0);
+  bool _blink = false;
+  bool _lastEnabled = true;
+  bool _reduceMotion = false;
+  bool _appPaused = false;
 
   String? _line;
   Timer? _hideLine;
@@ -108,18 +116,37 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _lastEnabled = _pet.enabled;
     _ticker = createTicker((elapsed) {
       final t = elapsed.inMicroseconds / 1e6;
-      final dt = t - _phase;
+      // 切后台 / 被 TickerMode 静音后 elapsed 会跳一大段，限幅防止瞬移
+      final dt = (t - _phase).clamp(0.0, 0.25);
       _phase = t;
       _advanceWalk(dt);
       if (_play != _Play.still) _playT += dt;
       _pet.tickMood();
-      if (mounted) setState(() {});
-    })
-      ..start();
+      if (!mounted) return;
+      // 眨眼：按**相位**判断，而不是按「上一帧是不是闭着眼」——
+      // 上一帧的闭眼状态落在区间外时（区间很短，只闭 0.24s），
+      // 靠比较差值会漏掉「闭→睁」的那次变化，眼睛就一直不眨。
+      final blink = _blinkAt(t);
+      final moving = _walkT < 1 || _play != _Play.still || _squash != 0;
+      if (moving || blink != _blink) {
+        // 走路 / 小动作 / 回弹 / 眨眼：这些会改动 Positioned、Transform 参数，
+        // 非重建不可，但只占全部时间的少数。
+        setState(() => _blink = blink);
+      } else {
+        // 待机：只是呼吸起伏（相位），交给画笔自己重绘。
+        // 原来这里无条件 setState(() {}) —— 每帧重建 + 重排整棵子树，是低端机
+        // 滑动和阅读时「一直有点卡」的根源。
+        _blink = blink;
+        _phaseTick.value = t;
+      }
+    });
     _pet.addListener(_onPet);
     petPinned.addListener(_onPinnedChanged);
+    WidgetsBinding.instance.addObserver(this);
+    _syncTicker();
     _stageTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _pet.checkStage();
@@ -133,9 +160,47 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
     _armPlay();
   }
 
+  /// 眨眼：每 3.9s 两次（0.12s 一闭）。相位算，不重建 widget。
+  static bool _blinkAt(double t) {
+    final m = t % 3.9;
+    return m < 0.12 || (m > 0.30 && m < 0.42);
+  }
+
+  /// 只有「看得见」的时候才跑 ticker：关掉桌宠 / 系统开了省电动画 /
+  /// 应用不在前台时停掉，省的是整机 GPU 与电量。
+  bool get _wantTicker => _pet.enabled && !_reduceMotion && !_appPaused;
+
+  void _syncTicker() {
+    if (_wantTicker) {
+      if (!_ticker.isActive) _ticker.start();
+    } else if (_ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (reduce != _reduceMotion) {
+      _reduceMotion = reduce;
+      _syncTicker();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final paused = state != AppLifecycleState.resumed;
+    if (paused == _appPaused) return;
+    _appPaused = paused;
+    _syncTicker();
+  }
+
   @override
   void dispose() {
     _ticker.dispose();
+    _phaseTick.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     _pet.removeListener(_onPet);
     petPinned.removeListener(_onPinnedChanged);
     _hideLine?.cancel();
@@ -161,6 +226,12 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
 
   void _onPet() {
     if (!mounted) return;
+    // 桌宠被关掉 / 打开：动画随之停启，别在看不见的时候白烧 CPU。
+    if (_pet.enabled != _lastEnabled) {
+      _lastEnabled = _pet.enabled;
+      _syncTicker();
+      if (mounted) setState(() {});
+    }
     final line = _pet.bubble;
     if (line == null || line == _line) return;
     _show(line);
@@ -377,8 +448,8 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
     if (!_pet.enabled) return const SizedBox.shrink();
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
-    final m = _phase % 3.9;
-    final blink = m < 0.12 || (m > 0.30 && m < 0.42);
+    // 眨眼状态由 ticker 推进（_blink），build 里不再另算一份 ——
+    // 两处各算一次会差半帧，表现为「眼皮跳一下」。
     final pose = _pose(h);
 
     return ValueListenableBuilder<bool>(
@@ -457,7 +528,10 @@ class _PetBarState extends State<PetBar> with SingleTickerProviderStateMixin {
                                         mood: pose.mood ?? _pet.mood,
                                         phase: _phase,
                                         squash: _squash + pose.squash,
-                                        blink: blink,
+                                        blink: _blink,
+                                        // 呼吸相位走活源：待机时画笔自己重绘，
+                                        // 不用整棵子树每帧 setState 重建。
+                                        phaseListenable: _phaseTick,
                                       ),
                                     ),
                                   ),

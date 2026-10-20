@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'source_fetch_page.dart';
 import 'source_file_pick_page.dart';
+import 'source_list_filter.dart';
 
 /// 书源管理页。
 ///
@@ -52,6 +53,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   final Set<String> _selected = {};
   bool _bulkMode = false;
 
+  /// 搜索 / 过滤状态（防抖 + 结果缓存，见 source_list_filter.dart）。
+  final SourceListFilter _filter = SourceListFilter();
+  final TextEditingController _searchCtrl = TextEditingController();
+  bool _searching = false;
+
   static SourceStore _fresh() {
     final s = SourceStore();
     unawaited(s.load());
@@ -59,44 +65,82 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   @override
+  void dispose() {
+    _filter.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _appBar(),
+      // 只监听仓库；列表本体交给 SliverList 懒构建。
       body: ListenableBuilder(
         listenable: _store,
-        builder: (context, _) => ListView(
-          padding: EdgeInsets.only(bottom: _bulkMode ? 100 : 32),
-          children: [
-            if (!_bulkMode) ...[
-              _recommendTile(context),
-              _checkSpeedTile(context),
-            ],
-            _header(),
-            const Divider(height: 1),
-            for (final s in _store.sources) _tile(context, s),
-            if (_store.sources.isEmpty) _noImported(context),
-            const Divider(height: 1),
-            _builtinHeader(),
-            for (final s in builtinSources) _builtinTile(context, s),
-          ],
-        ),
+        builder: (context, _) {
+          // sourcesView 在仓库未变更时是同一个 List 实例（不复制整表）；
+          // shown 在过滤条件与视图都没变时也是同一个实例（命中缓存）。
+          final shown = _filter.apply(_store.sourcesView);
+          return CustomScrollView(slivers: _slivers(context, shown));
+        },
       ),
       bottomNavigationBar: _bulkMode ? _bulkBar() : null,
     );
   }
 
+  /// 列表分片。
+  ///
+  /// 旧实现是 `ListView(children: [...for (s in store.sources) _tile(s)])`：
+  /// 1000 条书源会在每一帧全部实例化（随便一次 setState = 1000 个 ListTile +
+  /// 1000 个 Switch）。改成 Sliver 后只有可视区域（± 缓存区）会被 build，
+  /// 滑动时按需创建/回收，1000 条与 30 条的帧开销基本一致。
+  List<Widget> _slivers(BuildContext context, List<BookSource> shown) {
+    final filtering = _filter.isActive;
+    return [
+      // 搜索时把与结果无关的设置项/内置源收起来，屏幕留给结果。
+      if (!_bulkMode && !filtering)
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              _recommendTile(context),
+              _checkSpeedTile(context),
+            ],
+          ),
+        ),
+      SliverToBoxAdapter(child: _header(shown)),
+      const SliverToBoxAdapter(child: Divider(height: 1)),
+      SliverList.builder(
+        itemCount: shown.length,
+        itemBuilder: (context, i) => _tile(context, shown[i]),
+      ),
+      if (shown.isEmpty)
+        SliverToBoxAdapter(
+          child: _noImported(context, searching: filtering && !_store.isEmpty),
+        ),
+      if (!filtering) ...[
+        const SliverToBoxAdapter(child: Divider(height: 1)),
+        SliverToBoxAdapter(child: _builtinHeader()),
+        SliverList.builder(
+          itemCount: builtinSources.length,
+          itemBuilder: (context, i) => _builtinTile(context, builtinSources[i]),
+        ),
+      ],
+      // 列表底部留白（批量条 / 最后一行的安全距离）
+      SliverToBoxAdapter(child: SizedBox(height: _bulkMode ? 100 : 32)),
+    ];
+  }
+
   PreferredSizeWidget _appBar() {
+    if (_searching) return _searchAppBar();
     if (_bulkMode) {
-      final total = _store.sources.length;
+      final total = _store.sourcesView.length;
       final all = _selected.length == total;
       return AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
           tooltip: '退出批量管理',
-          onPressed: () => setState(() {
-            _bulkMode = false;
-            _selected.clear();
-          }),
+          onPressed: _exitBulkMode,
         ),
         title: Text('已选 ${_selected.length} / $total'),
         actions: [
@@ -107,9 +151,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                       if (all) {
                         _selected.clear();
                       } else {
+                        // urls 是缓存视图：全选不必再 map 一遍整表。
                         _selected
                           ..clear()
-                          ..addAll(_store.sources.map((s) => s.bookSourceUrl));
+                          ..addAll(_store.urls);
                       }
                     }),
             child: Text(all ? '取消全选' : '全选'),
@@ -121,9 +166,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       title: const Text('书源管理'),
       actions: [
         IconButton(
+          icon: const Icon(Icons.search),
+          tooltip: '搜索书源',
+          onPressed: _openSearch,
+        ),
+        IconButton(
           icon: const Icon(Icons.checklist),
           tooltip: '批量管理',
-          onPressed: _store.sources.isEmpty
+          onPressed: _store.isEmpty
               ? null
               : () => setState(() {
                     _bulkMode = true;
@@ -149,6 +199,76 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
+  /// 搜索态 AppBar：输入框 + 「仅看已启用」+ 清空。
+  ///
+  /// 输入走 [SourceListFilter] 的防抖（260ms），不是每次按键都重建列表。
+  PreferredSizeWidget _searchAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        tooltip: '退出搜索',
+        onPressed: _closeSearch,
+      ),
+      titleSpacing: 0,
+      title: TextField(
+        controller: _searchCtrl,
+        autofocus: true,
+        textInputAction: TextInputAction.search,
+        decoration: const InputDecoration(
+          hintText: '搜索名称 / 地址 / 分组',
+          border: InputBorder.none,
+        ),
+        onChanged: (v) => _filter.onInput(v, _onFilterChanged),
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(_filter.enabledOnly
+              ? Icons.filter_alt
+              : Icons.filter_alt_outlined),
+          tooltip: '仅看已启用',
+          onPressed: () =>
+              _filter.setEnabledOnly(!_filter.enabledOnly, _onFilterChanged),
+        ),
+        IconButton(
+          icon: const Icon(Icons.clear),
+          tooltip: '清空',
+          onPressed: () {
+            _searchCtrl.clear();
+            _filter.onInput('', _onFilterChanged);
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 过滤条件生效后刷新一次（防抖回调只到这里，重活已由缓存接住）。
+  void _onFilterChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _openSearch() {
+    setState(() {
+      _searching = true;
+      _bulkMode = false;
+      _selected.clear();
+    });
+  }
+
+  void _closeSearch() {
+    _filter.reset();
+    _searchCtrl.clear();
+    if (!mounted) return;
+    setState(() => _searching = false);
+  }
+
+  void _exitBulkMode() {
+    setState(() {
+      _bulkMode = false;
+      _selected.clear();
+    });
+  }
+
   /// 参与推荐页的书源：`（id, 名称）`（固化源 + 已启用的导入源）。
   ///
   /// 用位置记录（$1/$2）而不是具名记录：具名记录的类型注解在当前
@@ -156,8 +276,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   List<(String, String)> _recommendCandidates() {
     return [
       for (final s in builtinSources) (s.id, s.name),
-      for (final s in _store.sources)
-        if (s.enabled) (s.bookSourceUrl, s.bookSourceName),
+      // enabledSources 是缓存视图：这里不再整表 where + 复制。
+      for (final s in _store.enabledSources) (s.bookSourceUrl, s.bookSourceName),
     ];
   }
 
@@ -231,20 +351,22 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: ListView(
-                    children: [
-                      for (final e in items)
-                        CheckboxListTile(
-                          dense: true,
-                          title: Text(e.$2,
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                          value: app.recommendOn(e.$1),
-                          onChanged: (v) {
-                            app.setRecommendOn(e.$1, v == true);
-                            setSheet(() {});
-                          },
-                        ),
-                    ],
+                  // 书源多时（1000+）弹层里同样只建可视行。
+                  child: ListView.builder(
+                    itemCount: items.length,
+                    itemBuilder: (ctx, i) {
+                      final e = items[i];
+                      return CheckboxListTile(
+                        dense: true,
+                        title: Text(e.$2,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        value: app.recommendOn(e.$1),
+                        onChanged: (v) {
+                          app.setRecommendOn(e.$1, v == true);
+                          setSheet(() {});
+                        },
+                      );
+                    },
                   ),
                 ),
               ],
@@ -280,18 +402,22 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         },
       );
 
-  Widget _header() {
-    final n = _store.sources.length;
+  Widget _header(List<BookSource> shown) {
+    final n = _store.sourcesView.length;
+    final filtering = _filter.isActive;
+    final String count;
+    if (filtering) {
+      count = '匹配 ${shown.length} / $n 个 · 已启用 ${_store.enabledCount}';
+    } else {
+      count = n == 0 ? '暂无' : '$n 个 · 已启用 ${_store.enabledCount}';
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       child: Row(
         children: [
           Text('导入书源', style: Theme.of(context).textTheme.titleSmall),
           const Spacer(),
-          Text(
-            n == 0 ? '暂无' : '$n 个 · 已启用 ${_store.enabledCount}',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text(count, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
@@ -367,6 +493,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       onLongPress: () {
         if (!_bulkMode) {
           setState(() {
+            // 批量管理作用于全部书源：先退出搜索，避免「看不见的被选中」。
+            _filter.reset();
+            _searchCtrl.clear();
+            _searching = false;
             _bulkMode = true;
             _selected
               ..clear()
@@ -377,7 +507,23 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
-  Widget _noImported(BuildContext context) {
+  Widget _noImported(BuildContext context, {bool searching = false}) {
+    if (searching) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('没有匹配的书源', style: Theme.of(context).textTheme.bodyLarge),
+            const SizedBox(height: 6),
+            Text(
+              '换个关键词，或关掉「仅看已启用」再试。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       child: Column(
@@ -496,7 +642,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     PetStore.I.emit(PetAction.sourceRemove);
     setState(() {
       _selected.clear();
-      if (_store.sources.isEmpty) _bulkMode = false;
+      if (_store.isEmpty) _bulkMode = false;
     });
     _snack('已删除 $n 个书源');
   }
@@ -645,11 +791,13 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 
   /// 导出全部导入书源：优先复制到剪贴板；剪贴板被拒时改为弹窗展示 JSON 自行取走。
   Future<void> _export() async {
-    if (_store.sources.isEmpty) {
+    if (_store.isEmpty) {
       _snack('还没有书源可导出');
       return;
     }
-    final json = _store.exportJson();
+    // 大库的编码在后台 isolate 做，1000 条时点导出不再卡一下 UI。
+    final json = await _store.exportJsonAsync();
+    if (!mounted) return;
     final size = formatBytes(utf8.encode(json).length);
     try {
       await Clipboard.setData(ClipboardData(text: json));
@@ -764,11 +912,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     _snack('正在检测书源可用性…');
     final report = await SourceHealthStore.I.run(
       concurrency: AppStore.I.checkConcurrency,
-      onProgress: (done, total) {
-        if (mounted && (done == total || done % 5 == 0)) {
-          _snack('检测中…$done/$total');
-        }
-      },
+      onProgress: _progress,
     );
     if (!mounted) return;
     if (!report.hasFailure) {
@@ -782,6 +926,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     if (mounted) setState(() {});
   }
 
+  /// 检测进度提示（节流）：1000 条源不必刷 200 次 SnackBar。
+  void _progress(int done, int total) {
+    if (!mounted) return;
+    final step = total <= 50 ? 5 : (total ~/ 20).clamp(1, total);
+    if (done != total && done % step != 0) return;
+    _snack('检测中…$done/$total');
+  }
+
   /// 列出检测不通过的书源与原因；[allowRemove] 时提供「移除未通过」操作。
   ///
   /// 返回后用户若选了移除，才真正从仓库删除并提示数量。
@@ -791,6 +943,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }) async {
     final failed = report.failed;
     if (failed.isEmpty) return;
+    // 极端情况（1000 条全废）不必把 1000 行都塞进对话框：
+    // 只列前 100 条，其余引导到「阅读记录」的完整清单。
+    const maxRows = 100;
+    final shown = failed.length > maxRows ? failed.sublist(0, maxRows) : failed;
+    final hidden = failed.length - shown.length;
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -804,31 +961,41 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               Text(report.summary),
               const SizedBox(height: 12),
               Flexible(
-                child: ListView(
+                child: ListView.builder(
                   shrinkWrap: true,
-                  children: [
-                    for (final f in failed)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              f.name,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600, fontSize: 13),
-                            ),
-                            Text(
-                              f.error ?? '不可用',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(ctx).colorScheme.error,
-                              ),
-                            ),
-                          ],
+                  itemCount: shown.length + (hidden > 0 ? 1 : 0),
+                  itemBuilder: (ctx, i) {
+                    if (i >= shown.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '…还有 $hidden 个，完整清单见「阅读记录」',
+                          style: const TextStyle(fontSize: 11),
                         ),
+                      );
+                    }
+                    final f = shown[i];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            f.name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                          Text(
+                            f.error ?? '不可用',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(ctx).colorScheme.error,
+                            ),
+                          ),
+                        ],
                       ),
-                  ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -863,11 +1030,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     _snack('正在检测书源可用性…');
     final report = await SourceHealthStore.I.run(
       concurrency: AppStore.I.checkConcurrency,
-      onProgress: (done, total) {
-        if (mounted && (done == total || done % 5 == 0)) {
-          _snack('检测中…$done/$total');
-        }
-      },
+      onProgress: _progress,
     );
     if (!mounted) return;
     if (report.hasFailure) {
@@ -917,7 +1080,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final text =
         await _prompt('粘贴书源 JSON', '在此粘贴书源 JSON…', confirm: '导入', maxLines: 8);
     if (text == null || text.isEmpty || !mounted) return;
-    _report(_store.importFromText(text));
+    // 大 JSON 的 jsonDecode 在后台 isolate 做，避免粘贴 1000 条后卡住界面。
+    final report = await _store.importFromTextAsync(text);
+    if (!mounted) return;
+    _report(report);
   }
 
   Future<void> _importFromFile() async {
@@ -927,7 +1093,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       MaterialPageRoute(builder: (_) => const SourceFilePickPage()),
     );
     if (path == null || path.isEmpty || !mounted) return;
-    _report(await _store.importFromFile(path));
+    final report = await _store.importFromFile(path);
+    if (!mounted) return;
+    _report(report);
   }
 
   /// 导入随包内置的精选书源（离线资产）。
@@ -939,7 +1107,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         'assets/sources/curated_sources.json',
       );
       if (!mounted) return;
-      _report(_store.importFromText(text));
+      final report = await _store.importFromTextAsync(text);
+      if (!mounted) return;
+      _report(report);
     } catch (e) {
       _snack('内置书源读取失败：$e');
     }
@@ -958,7 +1128,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       );
       if (!resp.ok) throw SourceHttpException('HTTP ${resp.statusCode}');
       if (!mounted) return;
-      _report(_store.importFromText(resp.body));
+      final report = await _store.importFromTextAsync(resp.body);
+      if (!mounted) return;
+      _report(report);
     } catch (e) {
       _snack('获取失败：$e');
     }
@@ -983,7 +1155,12 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 
   void _snack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    // 直接 showSnackBar 是**排队**的：一次导入 1000 条时进度提示会排上百条，
+    // 之后好几分钟屏幕一直在滑入滑出（本身也是卡顿感来源）。
+    // 先收掉上一条，队列里永远只有最新的一条。
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
   }
 
   static String _hostOf(String url) {

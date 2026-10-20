@@ -1,6 +1,5 @@
 // 网络书源 · 获取与测试：从公开合集地址下载书源，全链路测试（搜索→目录→正文），
 // 然后一键导入可用源。双端（Android / Windows）同一条纯 Dart 路径。
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -72,12 +71,12 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
     try {
       final list = await fetchSourceCollection(url);
       if (!mounted) return;
-      final existing = _store.sources.map((s) => s.bookSourceUrl).toSet();
+      // 用仓库的 url 索引直接判重（O(1) 一次），不再 map 出整张 Set。
+      final already = list.where((s) => _store.containsUrl(s.bookSourceUrl)).length;
       setState(() {
         _fetching = false;
         _fetched = list;
-        _alreadyInStore =
-            list.where((s) => existing.contains(s.bookSourceUrl)).length;
+        _alreadyInStore = already;
       });
       _snack('获取到 ${list.length} 条书源（$_alreadyInStore 条已在库中）');
     } catch (e) {
@@ -147,8 +146,11 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
       _snack(onlyPassed ? '没有通过全链路测试的书源' : '没有可导入的文本源');
       return;
     }
-    final report =
-        _store.importFromText(jsonEncode([for (final s in list) s.toJson()]));
+    // 这里已经是 BookSource 对象，直接批量入库：
+    // 不再「编码成 JSON 再解析回来」（1000 条白跑一次 encode+decode），
+    // 并且只发一次通知、只排一次落盘。
+    final r = _store.addAll(list);
+    final report = SourceImportReport(added: r.added, updated: r.updated);
     _snack(report.summary);
     if (report.hasAny) PetStore.I.emit(PetAction.sourceImport);
   }

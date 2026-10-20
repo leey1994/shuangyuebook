@@ -15,6 +15,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../tts_voices.dart';
 import '../ui/brand.dart';
+import '../ui/font_picker.dart';
 import '../ui/source/source_manager_page.dart';
 import '../update_check.dart';
 import 'bookmarks_page.dart';
@@ -723,6 +724,14 @@ class _ProfileScreenState extends State<ProfileScreen>
             PetStore.I.emit(PetAction.themeChange);
           },
         ),
+      ),
+      _divider(),
+      _row(
+        icon: Icons.font_download_outlined,
+        label: '阅读字体',
+        subtitle: '不内置字体文件，选中后自动下载（约 8~13MB，只下一次）',
+        value: fontFamilyLabel(p.fontFamily),
+        onTap: () => showFontPicker(context),
       ),
       _divider(),
       _row(

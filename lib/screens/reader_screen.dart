@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../tts_voices.dart';
 import '../ui/brand.dart';
+import '../ui/font_picker.dart';
 import '../ui/pet_top_band.dart';
 import '../ui/reader/cover_turn.dart';
 import '../ui/reader/page_snap_physics.dart';
@@ -91,7 +93,15 @@ class _ReaderScreenState extends State<ReaderScreen>
   int _sinceTick = 0;
 
   /// 页脚时钟与电量（每 30s 刷新一次即可，不必更密）。
-  String _clockText = '';
+  /// 页脚时间：单独一个 ValueNotifier。
+  ///
+  /// 每秒变一次，但只需要重画这一行文字 —— 原来走 setState 时整页正文
+  /// 每秒重建一次（低端机上的「一直有点卡」就是这么来的）。
+  final ValueNotifier<String> _clockText = ValueNotifier<String>('');
+
+  /// 仅测试用：暴露页脚时间的活源（用来断言「时钟不再整页 setState」）。
+  @visibleForTesting
+  ValueListenable<String> get debugClockText => _clockText;
   BatteryStatus? _battery;
 
   /// 顶部的预留留白现在由全局那条窄带承担（安卓在状态栏下方、桌面在自绘标题栏
@@ -204,7 +214,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   ///
   /// 单次累计封顶 [StatsStore.maxChunkSeconds] 防挂机刷时长。
   void _startClock() {
-    _clockText = _fmtClock(DateTime.now());
+    _clockText.value = _fmtClock(DateTime.now());
     _clock?.cancel();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       _sinceTick++;
@@ -213,8 +223,9 @@ class _ReaderScreenState extends State<ReaderScreen>
         _sinceTick = 0;
       }
       final now = DateTime.now();
-      final text = _fmtClock(now);
-      if (text != _clockText && mounted) setState(() => _clockText = text);
+      // 只更新时间这一个 Text —— 原来这里 setState 的是整个阅读器，
+      // 等于每秒重建一次正文（低端机上就是每秒掉一帧）。
+      _clockText.value = _fmtClock(now);
       if (_sinceTick % 30 == 0) {
         NativeBridge.batteryStatus().then((b) {
           if (mounted && b != null) setState(() => _battery = b);
@@ -335,6 +346,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     FontStore.I.removeListener(_onFonts);
     _clock?.cancel();
+    _clockText.dispose();
     _sleepTimer?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
     // 离开阅读器：整表补写一次（章内翻页期间只写了轻量进度记录）
@@ -1314,7 +1326,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              Text(_clockText, style: TextStyle(color: c.dim, fontSize: 11.5)),
+              ValueListenableBuilder<String>(
+                valueListenable: _clockText,
+                builder: (_, text, __) => Text(text,
+                    style: TextStyle(color: c.dim, fontSize: 11.5)),
+              ),
               const Spacer(),
               if (_detail != null)
                 Text(
@@ -1925,7 +1941,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final downloading =
         FontStore.I.statusOf(_prefs.fontFamily) == FontStatus.downloading;
     return InkWell(
-      onTap: () => _pickFont(c),
+      onTap: () => showFontPicker(context, bg: c.bg, fg: c.fg, dim: c.dim),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
@@ -1957,136 +1973,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
             Icon(Icons.chevron_right, size: 18, color: c.dim),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 字体选择面板：系统默认 + 三款网络字体（约 8~13MB，选中才下载）。
-  Future<void> _pickFont(({Color bg, Color fg, Color dim}) c) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: c.bg,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => ListenableBuilder(
-        listenable: FontStore.I,
-        builder: (ctx, _) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Text('字体',
-                        style: TextStyle(
-                            color: c.fg,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700)),
-                    const Spacer(),
-                    Text('不内置 · 选中才下载',
-                        style: TextStyle(color: c.dim, fontSize: 11)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                _fontTile(ctx, c, null),
-                for (final f in kRemoteFonts) _fontTile(ctx, c, f),
-                const SizedBox(height: 6),
-                Text('字体只下载一次，存在本机，之后断网也能用；清理阅读缓存不会删。',
-                    style: TextStyle(color: c.dim, fontSize: 11)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _fontTile(
-      BuildContext ctx, ({Color bg, Color fg, Color dim}) c, RemoteFont? f) {
-    final id = f?.id ?? '';
-    final ready = f == null || FontStore.I.isReady(id);
-    final selected = _prefs.fontFamily == id;
-    final st = f == null ? FontStatus.ready : FontStore.I.statusOf(id);
-    return InkWell(
-      onTap: () async {
-        if (f == null) {
-          _store.setFontFamily('');
-          if (mounted) setState(() {});
-          Navigator.of(ctx).pop();
-          return;
-        }
-        if (ready) {
-          _store.setFontFamily(id);
-          if (mounted) setState(() {});
-          Navigator.of(ctx).pop();
-          return;
-        }
-        final ok = await FontStore.I.ensure(id);
-        if (!ctx.mounted) return;
-        if (ok) {
-          _store.setFontFamily(id);
-          if (mounted) setState(() {});
-          Navigator.of(ctx).pop();
-        } else {
-          _snack(FontStore.I.errorOf(id) ?? '字体下载失败，换个网络再试');
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Row(
-          children: [
-            Icon(
-              selected
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_unchecked,
-              size: 18,
-              color: selected ? Brand.green : c.dim,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(f?.name ?? '系统默认',
-                      style: TextStyle(
-                          color: c.fg,
-                          fontSize: 13.5,
-                          fontFamily: ready && f != null ? f.family : null)),
-                  Text(
-                    f == null ? '跟随系统字体' : '${f.note} · ${f.sizeLabel}',
-                    style: TextStyle(color: c.dim, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            if (f != null && !ready)
-              st == FontStatus.downloading
-                  ? ValueListenableBuilder<double>(
-                      valueListenable: FontStore.I.progressOf(id),
-                      builder: (_, v, __) => SizedBox(
-                        width: 56,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            LinearProgressIndicator(
-                                value: v <= 0 ? null : v, minHeight: 3),
-                            const SizedBox(height: 3),
-                            Text('${(v * 100).round()}%',
-                                style: TextStyle(color: c.dim, fontSize: 10)),
-                          ],
-                        ),
-                      ),
-                    )
-                  : Text(st == FontStatus.failed ? '重试' : '下载',
-                      style:
-                          const TextStyle(color: Brand.green, fontSize: 12))
-            else if (f != null)
-              Text('已下载', style: TextStyle(color: c.dim, fontSize: 11)),
           ],
         ),
       ),

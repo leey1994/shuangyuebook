@@ -83,9 +83,13 @@ class BookCover extends StatelessWidget {
         : fallback;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: (width != null && height != null)
-          ? SizedBox(width: width, height: height, child: content)
-          : content,
+      child: RepaintBoundary(
+        // 封面是列表里最重的绘制（图片解码 + 圆角裁剪）。
+        // 单独隔开一个重绘边界：滚动时兄弟节点变化不会连带把封面重画一遍。
+        child: (width != null && height != null)
+            ? SizedBox(width: width, height: height, child: content)
+            : content,
+      ),
     );
   }
 }
