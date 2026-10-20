@@ -164,6 +164,9 @@ class SourceHttpClient {
       throw SourceHttpException('无效的地址：$url');
     }
     var attempt = 0;
+    // JS 校验挑战页的 cookie：拿到后要带在同一次重试里（见 _jsCookieChallenge）。
+    String? challengeCookie;
+    var challengeTried = false;
     while (true) {
       attempt++;
       try {
@@ -175,8 +178,12 @@ class SourceHttpClient {
           ...?headers,
         };
         final cookie = _cookies.headerFor(uri);
-        if (cookie != null) {
-          h['Cookie'] = cookie;
+        final parts = <String>[
+          if (cookie != null && cookie.isNotEmpty) cookie,
+          if (challengeCookie != null) challengeCookie,
+        ];
+        if (parts.isNotEmpty) {
+          h['Cookie'] = parts.join('; ');
         }
         // 浏览器行为：缺省带同源 Referer（部分站的防盗链/来源校验只认它）。
         if (uri.hasScheme && !_hasHeader(h, 'referer')) {
@@ -241,6 +248,20 @@ class SourceHttpClient {
             finalUrl: follow.request?.url.toString() ?? next.toString(),
           );
         }
+        // 有些站点的「反爬校验」其实只是 set-cookie + reload（神文小说
+        // 的 ge_js_validator）：取出那条 cookie 重发一次即可，不必真跑 JS。
+        // 只对短小的 GET 响应做一次，避免正常页误判。
+        if (!challengeTried &&
+            method == 'GET' &&
+            out.statusCode == 200 &&
+            out.body.length < 4096) {
+          final kv = _jsCookieChallenge(out.body);
+          if (kv != null) {
+            challengeTried = true;
+            challengeCookie = kv;
+            continue;
+          }
+        }
         // 5xx / 429 视为临时故障：按 retries 退避重试；4xx 不重试（规则/权限问题，重试无用）。
         if ((out.statusCode >= 500 || out.statusCode == 429) &&
             attempt <= retries) {
@@ -269,6 +290,19 @@ class SourceHttpClient {
   }
 
   bool get _ownsClient => !identical(_client, sharedClient);
+}
+
+/// 识别「JS 校验」挑战页：`document.cookie = "k=v; path=/"` + `location.reload()`。
+///
+/// 这类站点（ge_js_validator / 神文小说）只是要求带一个 cookie 再请求一次，
+/// 直接照 cookie 重发即可，不需要真的执行 JS。
+String? _jsCookieChallenge(String body) {
+  if (!body.contains('location.reload')) return null;
+  final m = RegExp(r"""document\.cookie\s*=\s*["']([^"']+)["']""")
+      .firstMatch(body);
+  if (m == null) return null;
+  final pair = m.group(1)!.split(';').first.trim();
+  return pair.contains('=') ? pair : null;
 }
 
 /// 解析 30x 的 Location：容忍裸中文/空格（先按 RFC 3986 百分号编码再解析）。

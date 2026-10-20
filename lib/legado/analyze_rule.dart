@@ -397,8 +397,29 @@ class AnalyzeRule {
     return v.isEmpty ? null : v;
   }
 
+  /// 规则列表的顺序前缀（legado AnalyzeRule）：`-` 反转，`+` 显式正序。
+  ///
+  /// 目录规则最常见（`-@js:...` 把最新章节排在前面、`-class.list@tag.a` 同理）。
+  /// 去掉前缀再求值，最后整体反转，语义与上游一致。
+  static ({String rule, bool reverse}) _splitOrder(String rule) {
+    final t = rule.trimLeft();
+    if (t.startsWith('-')) {
+      return (rule: t.substring(1).trimLeft(), reverse: true);
+    }
+    if (t.startsWith('+')) {
+      return (rule: t.substring(1).trimLeft(), reverse: false);
+    }
+    return (rule: rule, reverse: false);
+  }
+
   /// 取字符串列表（`||` 兜底取第一个非空列表）。
   List<String> getStrings(String rule, {Object? ctx}) {
+    final ord = _splitOrder(rule);
+    final out = _getStringsInner(ord.rule, ctx);
+    return ord.reverse ? out.reversed.toList() : out;
+  }
+
+  List<String> _getStringsInner(String rule, Object? ctx) {
     if (RuleAnalyzer.hasJs(rule)) {
       final s = _evalJsSegmentsString(rule, ctx);
       if (s == null || s.isEmpty) return const [];
@@ -419,6 +440,12 @@ class AnalyzeRule {
 
   /// 取元素列表（用于 bookList 这类“再迭代”的规则；CSS / XPath 皆可）。
   List<Object> getElements(String rule, {Object? ctx}) {
+    final ord = _splitOrder(rule);
+    final out = _getElementsInner(ord.rule, ctx);
+    return ord.reverse ? out.reversed.toList() : out;
+  }
+
+  List<Object> _getElementsInner(String rule, Object? ctx) {
     if (RuleAnalyzer.hasJs(rule)) {
       final s = _evalJsSegmentsString(rule, ctx);
       if (s == null || s.isEmpty) return const [];
@@ -436,6 +463,12 @@ class AnalyzeRule {
 
   /// 取原始结果列表（保留原型：DOM 元素 / XML 节点 / JSON 值 / 字符串）。
   List<Object> getRawList(String rule, {Object? ctx}) {
+    final ord = _splitOrder(rule);
+    final out = _getRawListInner(ord.rule, ctx);
+    return ord.reverse ? out.reversed.toList() : out;
+  }
+
+  List<Object> _getRawListInner(String rule, Object? ctx) {
     if (RuleAnalyzer.hasJs(rule)) {
       // 条目保持字符串原型（legado：content 为字符串，JsonPath 字段规则
       // 自行 parse，JS 字段规则直接拿到 JSON 串 `JSON.parse(result)`）。
@@ -730,8 +763,22 @@ class AnalyzeRule {
   /// 复用同一次解析，避免每字段各解析一遍片段）。
   final Expando<dom.Document> _fragCache = Expando<dom.Document>();
 
+  /// 字符串条目（JS 列表规则返回的 `<a ...>` 片段）→ 片段文档缓存。
+  /// 目录规则常把 JS 拼好的 `<a>` 串当条目，字段规则 `a@text`/`a@href`
+  /// 必须在这段片段里找；退回整页会把页面所有链接当章节（静默错结果）。
+  final Map<String, dom.Document> _strFragCache = <String, dom.Document>{};
+
   dom.Node _ctxDomNode(Object? ctx) {
     if (ctx is dom.Node) return ctx;
+    if (ctx is String) {
+      return _strFragCache.putIfAbsent(ctx, () {
+        final t = ctx;
+        if (t.contains('<') && t.contains('>')) return parseHtml(t);
+        // 纯文本条目：包成单元素，CSS 选择返回空（而不是整页），
+        // 需要文本的规则走 `text`/regex 分支。
+        return parseHtml('<pre>${const HtmlEscape().convert(t)}</pre>');
+      });
+    }
     if (ctx is xml.XmlElement) {
       // XPath 条目上的 CSS 习惯字段规则（`a@text` / `a@href`）：
       // 限定在该条目内解析，而不是退回整页（否则每条拿到全页所有 a，

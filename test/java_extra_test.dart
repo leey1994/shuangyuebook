@@ -126,4 +126,16 @@ void main() {
     );
     expect(out, 'true|36|true');
   });
+
+  test('setContent 覆盖只在本次求值生效', () {
+    final env = OnlineRepo.jsEnvFor(_src(), JsSession());
+    final a = JsBridge.evalCode(
+      'java.setContent("<html><body><i>X</i></body></html>", "u");'
+      'java.getElements("@css:i").size() + "";',
+      env: env,
+    );
+    final b = JsBridge.evalCode('java.getElements("@css:i").size() + "";', env: env);
+    expect(a, '1');
+    expect(b, '0');
+  });
 }

@@ -425,6 +425,8 @@ abstract final class JsBridge {
       lastError = _clip(text);
       return null;
     }
+    final pend = _pendingSusp(rt);
+    if (pend != null) throw pend;
     // 超长字符串：脚本已把值挂到 __lgBIG，这里分片取回（见 _finalizeJs 注释）。
     if (text.startsWith(_kBigMarker)) {
       final out = _readBigString(rt, text.substring(_kBigMarker.length), e);
@@ -453,6 +455,23 @@ abstract final class JsBridge {
     }
     _cacheResult(ckey, out);
     return out;
+  }
+
+  /// 取本次求值里被脚本 `try/catch` 吞掉的 suspend（`__lgSuspLog` 首项）。
+  static JsSuspendException? _pendingSusp(JavascriptRuntime rt) {
+    try {
+      final r = rt.evaluate('(globalThis.__lgSuspLog||[])[0]||""');
+      if (r.isError) return null;
+      final m = _suspRe.firstMatch(r.stringResult);
+      if (m == null) return null;
+      final payload = utf8.decode(
+        base64Url.decode(_padB64(m.group(2)!)),
+        allowMalformed: true,
+      );
+      return _decodeSuspend(m.group(1)!, payload);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 分片取回 `__lgBIG`（单次取回上限见 [_kMaxEvalChars]）。
@@ -736,6 +755,10 @@ $obj.remove = function (k) {
     if (s != null) {
       b.writeln('Date.now = function () { return ${s.frozenNow}; };');
     }
+    // setContent 的内容只对本次求值有效（上游每次求值都是新解析器实例）。
+    b.writeln('globalThis.__lgContent = null;');
+    b.writeln('globalThis.__lgContentUrl = "";');
+    b.writeln('globalThis.__lgSuspLog = [];');
     return b.toString();
   }
 
@@ -1419,13 +1442,22 @@ $obj.remove = function (k) {
   /// JS 预置环境：桥函数 + java / cookie / cache 子集。
   static const String _prelude = r'''
 (function () {
+  // setContent 的内容只在本次求值有效：上游每次 AnalyzeRule 求值都是新解析器，
+  // 若把覆盖内容挂在运行时上，下一条规则会拿到上一页的 HTML。
+  globalThis.__lgContent = null;
+  globalThis.__lgContentUrl = '';
   function __lgcall(name, payload) {
     var r = sendMessage('jsbridge', JSON.stringify([name, payload === null || payload === undefined ? null : JSON.stringify(payload)]));
     if (r === null || r === undefined) return null;
     return JSON.parse(r);
   }
   globalThis.__lgcall = __lgcall;
+  globalThis.__lgSuspLog = [];
   globalThis.__lgsusp = function (d) {
+    // 书源常写 `try { html = java.ajax(url) } catch (e) {}`：legado 的 ajax 是
+    // 同步的，这里的“异常”会被脚本吞掉并留下空结果。先把待补的请求记下来，
+    // Dart 侧即使没看到抛出的错误也能补网重跑（见 _pendingSusp）。
+    try { globalThis.__lgSuspLog.push('__JSSUSP__' + d.kind + '__' + d.b64); } catch (e) {}
     throw new Error('__JSSUSP__' + d.kind + '__' + d.b64);
   };
   function __lgv(d, dft) {
