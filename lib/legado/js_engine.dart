@@ -1013,7 +1013,7 @@ abstract final class JsBridge {
     return a;
   }
   globalThis.java = {
-    __http: function (method, url, body, headers) {
+    __httpRaw: function (method, url, body, headers) {
       var d = __lgcall('ajax', {
         url: String(url),
         method: String(method || 'GET').toUpperCase(),
@@ -1021,13 +1021,25 @@ abstract final class JsBridge {
         body: body === null || body === undefined ? null : String(body)
       });
       if (d && d.suspend) __lgsusp(d);
-      return __lgResp(d);
+      return d;
     },
+    __http: function (method, url, body, headers) {
+      return __lgResp(java.__httpRaw(method, url, body, headers));
+    },
+    // legado `override fun ajax(url: Any): String?` —— 返回**响应体字符串**
+    // （`AnalyzeUrl.getStrResponse().body`），不是 StrResponse 对象。
+    // 多看阅读等源直接对返回值调 `.match()/.split()`，给对象会 TypeError。
     ajax: function (a, b) {
-      if (a !== null && a !== undefined && typeof a === 'object') {
-        return java.__http(a.method ? a.method : 'GET', a.url, a.body, a.headers);
+      var d;
+      if (a !== null && a !== undefined && typeof a === 'object' && !Array.isArray(a)) {
+        d = java.__httpRaw(a.method ? a.method : 'GET', a.url, a.body, a.headers);
+      } else {
+        // legado：`url is List` 时取首个元素
+        var u = Array.isArray(a) ? (a.length ? a[0] : '') : a;
+        d = java.__httpRaw('GET', u, null, b);
       }
-      return java.__http('GET', a, null, b);
+      if (d === null || d === undefined) return '';
+      return d.v === null || d.v === undefined ? '' : String(d.v);
     },
     connect: function (url, headers) { return java.__http('GET', url, null, headers); },
     getStrResponse: function (url, a, b, c) {

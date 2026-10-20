@@ -61,6 +61,7 @@ class OnlineBookService {
     Map<String, dynamic>? book,
     String? title,
     String? nextChapterUrl,
+    String? baseUrl,
   }) =>
       JsEnv(
         scopeKey: source.bookSourceUrl,
@@ -72,6 +73,8 @@ class OnlineBookService {
         book: book,
         title: title,
         nextChapterUrl: nextChapterUrl,
+        // legado：脚本里的 baseUrl 是「当前解析页地址」，不是书源地址。
+        baseUrl: baseUrl,
       );
 
   /// 挂起补网：抓取目标写入会话缓存后重跑脚本。
@@ -114,9 +117,12 @@ class OnlineBookService {
     // legado book.variableMap：搜索阶段 `@put:{k:rule}` 写入的变量在此读回，
     // 供 init/字段/tocUrl 模板的 `@get:{k}`（17k: `@get:{book}` → 书籍 id）。
     session.vars.addAll(itemVars(source.bookSourceUrl, bookUrl));
-    final html = await _getHtml(source, bookUrl);
+    final resp = await _fetch(source, bookUrl);
+    final html = resp.body;
+    // 经历 30x 后按最终地址解析（相对链接/脚本里的 baseUrl 都以它为准）
+    final pageUrl = resp.finalUrl.isEmpty ? bookUrl : resp.finalUrl;
     final engine = AnalyzeRule(html,
-        baseUrl: bookUrl, js: jsEnvFor(source, session));
+        baseUrl: pageUrl, js: jsEnvFor(source, session, baseUrl: pageUrl));
     final info = source.bookInfoRule;
 
     String? g(String? rule) {
@@ -168,7 +174,7 @@ class OnlineBookService {
             ? null
             : engine.getString(tocUrlR, isUrl: true);
         if (tocUrlRule != null && tocUrlRule.isNotEmpty && tocUrlRule != bookUrl) {
-          final resolved = resolveUrl(tocUrlRule, bookUrl);
+          final resolved = resolveUrl(tocUrlRule, pageUrl);
           if (resolved.isNotEmpty) {
             try {
               final tocHtml = await _getHtml(source, resolved);
@@ -176,7 +182,7 @@ class OnlineBookService {
                 tocHtml,
                 baseUrl: resolved,
                 vars: {'book': bookVars},
-                js: jsEnvFor(source, session, book: bookVars),
+                js: jsEnvFor(source, session, book: bookVars, baseUrl: resolved),
               );
               tocPageUrl = resolved;
               chapters = parseChapters(tocEngine, tocRule, resolved);
@@ -227,6 +233,7 @@ class OnlineBookService {
     final out = List<Chapter>.from(initial);
     final seen = out.map((c) => c.url).toSet();
     final visited = <String>{firstPageUrl};
+    var pageBase = firstPageUrl;
     var curEngine = engine;
     for (var page = 0; page < 10; page++) {
       List<String> nexts;
@@ -247,7 +254,7 @@ class OnlineBookService {
       // 直接取 nexts.first 会在第二页原地打转。
       var next = '';
       for (final u in nexts) {
-        final r = resolveUrl(u, source.bookSourceUrl);
+        final r = resolveUrl(u, pageBase);
         if (r.isNotEmpty && !visited.contains(r)) {
           next = r;
           break;
@@ -264,7 +271,7 @@ class OnlineBookService {
         break;
       }
       final nextEngine = AnalyzeRule(html,
-          baseUrl: next, js: jsEnvFor(source, session));
+          baseUrl: next, js: jsEnvFor(source, session, baseUrl: next));
       final more = parseChapters(nextEngine, rule, next);
       var added = 0;
       for (final c in more) {
@@ -274,6 +281,7 @@ class OnlineBookService {
         }
       }
       if (added == 0) break;
+      pageBase = next;
       curEngine = nextEngine;
     }
     return out;
@@ -376,7 +384,7 @@ class OnlineBookService {
     // （`java.getElement("$.content")` / `java.getString("$.sayBody")`）。
     late AnalyzeRule engine;
     final env =
-        jsEnvFor(source, session, book: book).copyWith(getString: (r) {
+        jsEnvFor(source, session, book: book, baseUrl: chapterUrl).copyWith(getString: (r) {
       try {
         return engine.getString(r);
       } catch (_) {
@@ -413,7 +421,7 @@ class OnlineBookService {
             .where((u) => u.isNotEmpty)
             .toList();
         if (nexts.isEmpty) break;
-        final next = resolveUrl(nexts.first, source.bookSourceUrl);
+        final next = resolveUrl(nexts.first, chapterUrl);
         if (next.isEmpty || !visited.add(next)) break;
         String nextHtml;
         try {
@@ -649,7 +657,24 @@ class OnlineBookService {
   static Map<String, String> itemVars(String sourceUrl, String bookUrl) =>
       _itemVars['$sourceUrl\u0000$bookUrl'] ?? const {};
 
-  Future<String> _getHtml(BookSource source, String url) async {
+  Future<String> _getHtml(BookSource source, String url) async =>
+      (await _fetch(source, url)).body;
+
+  /// 诊断接口：只抓章节页原始 HTML（不跑规则）。
+  ///
+  /// 抓取失败或需要 JS 补网时抛错，交给调用方打印；
+  /// 用于人工核对「正文为空」到底是站点返回空页还是规则不匹配。
+  Future<String> fetchChapterHtml(
+    BookSource source,
+    String url, {
+    Map<String, dynamic>? book,
+  }) async {
+    final target = splitUrlSuffix(url).$1;
+    return _fetch(source, target).then((r) => r.body);
+  }
+
+  /// 抓页面并保留「最终地址」（经历 30x 后相对链接要按它解析，同 legado）。
+  Future<SourceResponse> _fetch(BookSource source, String url) async {
     // `,{...}` 请求选项尾缀走 analyze_url 的正规解析管线（宽松 JSON：
     // 单引号/尾逗号/未加引号模板值都能吃；不渲染——保存值已渲染）。
     final t = parseUrlTemplate(url);
@@ -697,7 +722,7 @@ class OnlineBookService {
     if (!resp.ok) {
       throw SourceHttpException('HTTP ${resp.statusCode}');
     }
-    return resp.body;
+    return resp;
   }
 
   /// header 求值结果缓存（P1-8）：下载整本时每章一次请求都会走这里，

@@ -428,6 +428,8 @@ class AnalyzeRule {
   /// 取原始结果列表（保留原型：DOM 元素 / XML 节点 / JSON 值 / 字符串）。
   List<Object> getRawList(String rule, {Object? ctx}) {
     if (RuleAnalyzer.hasJs(rule)) {
+      // 条目保持字符串原型（legado：content 为字符串，JsonPath 字段规则
+      // 自行 parse，JS 字段规则直接拿到 JSON 串 `JSON.parse(result)`）。
       return _rawItemsOf(_evalJsSegmentsRaw(rule, ctx));
     }
     rule = preprocess(rule, ctx: ctx);
@@ -732,6 +734,20 @@ class AnalyzeRule {
 
   dynamic _ctxJson(Object? ctx) {
     if (ctx is Map || ctx is List) return ctx;
+    // legado：JSON 条目以「字符串」形式存进 content 时（JS 列表规则返回
+    // JSON.stringify 数组），JsonPath 规则会把它当 JSON 重新解析再取值。
+    if (ctx is String) {
+      final t = ctx.trim();
+      if (t.length > 1 &&
+          ((t.startsWith('{') && t.endsWith('}')) ||
+              (t.startsWith('[') && t.endsWith(']')))) {
+        try {
+          final d = jsonDecode(t);
+          if (d is Map || d is List) return d;
+        } catch (_) {}
+      }
+      return null;
+    }
     return _jsonRoot;
   }
 

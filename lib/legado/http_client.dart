@@ -134,6 +134,10 @@ class SourceHttpClient {
         if (cookie != null) {
           h['Cookie'] = cookie;
         }
+        // 浏览器行为：缺省带同源 Referer（部分站的防盗链/来源校验只认它）。
+        if (uri.hasScheme && !_hasHeader(h, 'referer')) {
+          h['Referer'] = '${uri.scheme}://${uri.host}/';
+        }
         final bodyBytes = body == null ? null : _encodeBody(body, charset);
         // 书源的 POST 大多只写 `,{"method":"POST","body":...}` 不给 Content-Type，
         // PHP 站没有表单头会解析不到参数（实测抖音/速读谷收不到关键词）→ 默认补齐。
@@ -163,13 +167,43 @@ class SourceHttpClient {
         }
         _cookies.absorb(uri, resp.headers);
         final decoded = decodeBody(resp.bodyBytes, resp.headers, charset);
-        return SourceResponse(
+        var out = SourceResponse(
           statusCode: resp.statusCode,
           body: decoded,
           bytes: resp.bodyBytes,
           headers: resp.headers,
           finalUrl: resp.request?.url.toString() ?? url,
         );
+        // 少数站点返回 30x 却不带可跟随的 Location（或 Location 含裸中文/空格），
+        // http 包会原样把它交回来 —— 这里按 RFC 自行跟随，最多 3 跳。
+        var hops = 0;
+        while (out.statusCode >= 300 &&
+            out.statusCode < 400 &&
+            hops < 3 &&
+            _hasHeader(out.headers, 'location')) {
+          final loc = out.headers['location']!.trim();
+          final next = _parseRedirect(uri, loc);
+          if (next == null) break;
+          hops++;
+          final follow = await _client
+              .get(next, headers: h)
+              .timeout(timeout ?? defaultTimeout);
+          _cookies.absorb(next, follow.headers);
+          out = SourceResponse(
+            statusCode: follow.statusCode,
+            body: decodeBody(follow.bodyBytes, follow.headers, charset),
+            bytes: follow.bodyBytes,
+            headers: follow.headers,
+            finalUrl: follow.request?.url.toString() ?? next.toString(),
+          );
+        }
+        // 5xx / 429 视为临时故障：按 retries 退避重试；4xx 不重试（规则/权限问题，重试无用）。
+        if ((out.statusCode >= 500 || out.statusCode == 429) &&
+            attempt <= retries) {
+          await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
+          continue;
+        }
+        return out;
       } on TimeoutException {
         if (attempt <= retries) continue;
         throw SourceHttpException(
@@ -191,6 +225,19 @@ class SourceHttpClient {
   }
 
   bool get _ownsClient => !identical(_client, sharedClient);
+}
+
+/// 解析 30x 的 Location：容忍裸中文/空格（先按 RFC 3986 百分号编码再解析）。
+Uri? _parseRedirect(Uri base, String loc) {
+  if (loc.isEmpty) return null;
+  final direct = Uri.tryParse(loc);
+  if (direct != null && direct.hasScheme) return direct;
+  final encoded = Uri.encodeFull(loc).replaceAll(' ', '%20');
+  try {
+    return base.resolve(encoded);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// 请求体编码：`charset` 为 GBK 系时按 GBK 编码（老 PHP 站常见），否则 UTF-8。

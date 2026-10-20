@@ -329,7 +329,9 @@ class OnlineRepo {
         throw SourceHttpException('HTTP ${resp.statusCode}');
       }
       final parsed = parseSearchPageDetailed(source, resp.body,
-          js: js, pageUrl: req.url);
+          js: js,
+          // 用最终地址（可能经历 30x）作为相对链接的解析基准
+          pageUrl: resp.finalUrl.isEmpty ? req.url : resp.finalUrl);
       if (parsed.books.isEmpty && parsed.rows > 0) {
         final reason = parsed.noUrl > 0
             ? '${parsed.noUrl} 条结果无法解析书籍链接（bookUrl 规则可能依赖 JS 脚本）'
@@ -387,8 +389,13 @@ class OnlineRepo {
     var noName = 0;
     var noUrl = 0;
     for (final item in items) {
-      // 只处理可继续求值的上下文：DOM 元素 / XML 节点 / JSON 对象
-      if (!(item is dom.Element || item is xml.XmlElement || item is Map)) {
+      // 只处理可继续求值的上下文：DOM 元素 / XML 节点 / JSON 对象 /
+      // JSON 串条目（JS 列表规则返回 `JSON.stringify` 数组时，legado 保证
+      // content 是字符串：JsonPath 字段规则自行 parse，JS 字段规则拿到原串）。
+      if (!(item is dom.Element ||
+          item is xml.XmlElement ||
+          item is Map ||
+          item is String)) {
         continue;
       }
       rows++;
