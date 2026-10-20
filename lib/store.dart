@@ -194,6 +194,13 @@ class AppStore extends ChangeNotifier {
     _cacheDir = d;
     _metaFut.clear();
     _metaSig.clear();
+    // 章节内存缓存与在途表也跟着清：换测试目录等于换一本书，
+    // 否则上一个用例读到的正文会从内存里「糊」到新用例上。
+    _memChapter.clear();
+    _memOrder.clear();
+    _inflightChapter.clear();
+    _fgChapterLoads = 0;
+    _prefetchGen++;
   }
 
   List<ShelfEntry> _loadList(String key) {
@@ -846,22 +853,93 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// 取章节正文：缓存优先（只读一个小文件），否则抓网并写缓存。
+  // ---------- 章节正文：内存缓存 + 在途去重 ----------
+  //
+  // 「切下一章有时候要等很久」的根因不是网速，是同一章被抓了两次：后台预取
+  // 正在抓第 N+1 章，用户翻页时前台又发一遍第 N+1 章，两个请求在同一个站点
+  // / IP 上互相拖，还各自跑一遍书源 JS。现在两者共用同一个 Future。
+
+  /// 最近读过的章节正文（内存 LRU）：翻回上一章、来回跳转零延迟。
+  static const int _memChapterMax = 8;
+  final Map<String, List<String>> _memChapter = {};
+  final List<String> _memOrder = [];
+
+  /// 在途章节请求：`bookUrl|chUrl` → Future（预取与前台共用，只发一次）。
+  final Map<String, Future<List<String>>> _inflightChapter = {};
+  int _fgChapterLoads = 0;
+
+  /// 前台正在取章节正文（预取据此让路，别抢站点限速）。
+  bool get chapterBusy => _fgChapterLoads > 0;
+
+  static String _chKey(String bookUrl, String chUrl) => '$bookUrl|$chUrl';
+
+  List<String>? _memGet(String key) {
+    final hit = _memChapter[key];
+    if (hit == null) return null;
+    _memOrder.remove(key);
+    _memOrder.add(key); // 命中挪到队尾，淘汰最久没读的那章
+    return hit;
+  }
+
+  void _memPut(String key, List<String> paras) {
+    if (paras.isEmpty) return;
+    _memChapter[key] = paras;
+    _memOrder.remove(key);
+    _memOrder.add(key);
+    while (_memOrder.length > _memChapterMax) {
+      _memChapter.remove(_memOrder.removeAt(0));
+    }
+  }
+
+  /// 取章节正文：内存 → 磁盘 → 网络（同一章同时只会有一个网络请求在飞）。
+  ///
+  /// [background] = 后台预取：不计入「前台忙」，不抢占前台请求。
   Future<List<String>> chapterText(
     NovelSource src,
     BookDetail detail,
+    Chapter ch, {
+    bool background = false,
+  }) async {
+    final key = _chKey(detail.book.url, ch.url);
+    final mem = _memGet(key);
+    if (mem != null) return mem;
+    final pend = _inflightChapter[key];
+    if (pend != null) return pend; // 预取已经在抓这一章：搭车，别再发一遍
+    final fut = _chapterTextInner(src, detail, ch, key, background);
+    _inflightChapter[key] = fut;
+    try {
+      return await fut;
+    } finally {
+      if (identical(_inflightChapter[key], fut)) _inflightChapter.remove(key);
+    }
+  }
+
+  Future<List<String>> _chapterTextInner(
+    NovelSource src,
+    BookDetail detail,
     Chapter ch,
+    String key,
+    bool background,
   ) async {
     final bookUrl = detail.book.url;
     await _meta(bookUrl); // 顺带完成旧布局迁移（每本每进程一次）
     final hit = await _readChapter(bookUrl, ch.url);
-    if (hit != null) return hit;
-    final paras = await src.fetchChapter(detail, ch);
-    if (paras.isNotEmpty) {
-      await _writeChapter(bookUrl, ch.url, paras); // 空结果不入缓存（可重试）
+    if (hit != null) {
+      _memPut(key, hit);
+      return hit;
     }
-    await _rememberDetail(detail);
-    return paras;
+    if (!background) _fgChapterLoads++;
+    try {
+      final paras = await src.fetchChapter(detail, ch);
+      if (paras.isNotEmpty) {
+        _memPut(key, paras);
+        await _writeChapter(bookUrl, ch.url, paras); // 空结果不入缓存（可重试）
+      }
+      await _rememberDetail(detail);
+      return paras;
+    } finally {
+      if (!background) _fgChapterLoads--;
+    }
   }
 
   /// 已缓存的章节数。
@@ -1085,7 +1163,10 @@ class AppStore extends ChangeNotifier {
   void cancelPrefetch() => _prefetchGen++;
 
   /// 自动缓存从 [from] 章起的 [count] 章（仅抓未缓存的，网络失败即停）。
-  /// 一章一文件后不再有「整本读改写」的覆盖竞争，预取与阅读可以并行。
+  ///
+  /// 自己不直接发请求，走 [chapterText] 的「在途去重」：用户翻到该章时是搭
+  /// 同一个请求，不会再抓一遍。前台正在取正文时让路（站点按 IP 限速，抢道
+  /// 会让「下一章」明显变慢），且每抓一章歇 250 ms，给前台留出余量。
   Future<void> prefetchNext(
     NovelSource src,
     BookDetail detail,
@@ -1099,13 +1180,24 @@ class AppStore extends ChangeNotifier {
     for (var i = from; i < end; i++) {
       if (gen != _prefetchGen) return;
       final ch = detail.chapters[i];
+      if (_memChapter.containsKey(_chKey(bookUrl, ch.url))) continue;
       if (await _hasChapter(bookUrl, ch.url)) continue;
+      // 前台在抓正文：先让路（最多等 4s，之后照常预取，不卡死自己）
+      for (var w = 0; w < 40 && chapterBusy && gen == _prefetchGen; w++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      if (gen != _prefetchGen) return;
+      final sw = Stopwatch()..start();
       try {
-        final t = await src.fetchChapter(detail, ch);
-        if (t.isNotEmpty) await _writeChapter(bookUrl, ch.url, t);
+        await chapterText(src, detail, ch, background: true);
       } catch (_) {
         return; // 网络中断/失败：停止预取，不刷屏重试
       }
+      sw.stop();
+      // 慢源（WebView 渲染 / 站点按 IP 限速）预取一章就收手：一次灌几十章会把
+      // 隐藏 WebView 队列和站点限速占满，反而让「下一章」排在后面等。
+      if (sw.elapsedMilliseconds > 2000) return;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     if (gen != _prefetchGen) return;
     await _rememberDetail(detail);

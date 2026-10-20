@@ -166,8 +166,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     _scrollCtrl.addListener(() {
       if (_paged) return;
       final pos = _scrollCtrl.position;
-      // 滚动到当前章末尾附近：自动加载下一章无缝续读
-      if (pos.pixels >= pos.maxScrollExtent - 400) _loadMore();
+      // 滚动到当前章末尾附近：自动加载下一章无缝续读。
+      // 提前 1200px 就开始抓（约一屏半），滑到底时正文通常已经在手，
+      // 不用盯着空白等网络。
+      if (pos.pixels >= pos.maxScrollExtent - 1200) _loadMore();
       _scrollSave?.cancel();
       _scrollSave = Timer(const Duration(milliseconds: 600), () {
         if (!mounted || _paged) return;
@@ -431,6 +433,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   ///
   /// 失败一律静默 —— 缓存能看的时候没理由用错误打断阅读。
   Future<void> _refreshDetailInBackground() async {
+    // 刚开卷时正文请求和后台预取正在跑，目录刷新先让 600 ms：三个请求一起
+    // 挤同一个站点的限速，「下一章」就要排队等。
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
     try {
       final fresh = await _src.fetchDetail(_book);
       if (!mounted || fresh.chapters.isEmpty) return;
