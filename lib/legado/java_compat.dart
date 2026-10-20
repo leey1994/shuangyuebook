@@ -313,6 +313,21 @@ class JavaCompat {
         }
       ];
     }
+    // 单元素模式：脚本拿一段 outerHtml 反查 jsoup 节点（children/parent/
+    // previousElementSibling 这类树操作要节点元信息）。
+    if (mode == 'node') {
+      final root = _firstElement(doc);
+      return root == null ? null : _nodeMap(root);
+    }
+    // 按「元素索引路径」定位节点：jsoup 的 Element 是有文档位置的活对象，
+    // JS 侧只拿 outerHtml 会丢掉兄弟/父子关系。这里让脚本把根 HTML 拿到
+    // 手里，导航时用索引路径回查同一个文档里的节点，语义与上游一致
+    // （如有度中文靠 previousElementSibling 取分卷标题）。
+    if (mode == 'path') {
+      final path = (p['p'] as List?) ?? const [];
+      final el = _elementAt(doc, path);
+      return el == null ? null : _nodeMap(el);
+    }
     Iterable<dom.Element> nodes;
     try {
       nodes = doc.querySelectorAll(css);
@@ -321,14 +336,61 @@ class JavaCompat {
     }
     final out = <Map<String, dynamic>>[];
     for (final el in nodes.take(limit)) {
-      out.add({
-        'html': el.outerHtml,
-        'text': _cleanText(el.text),
-        'attrs': Map<String, String>.fromEntries(
-            el.attributes.entries.map((e) => MapEntry('${e.key}', '${e.value}'))),
-      });
+      out.add(_nodeMap(el));
     }
     return out;
+  }
+
+  /// 片段里的第一个元素（`outerHtml` 反查节点的入口）。
+  static dom.Element? _firstElement(dom.Document doc) {
+    final body = doc.body;
+    if (body != null && body.children.isNotEmpty) return body.children.first;
+    final root = doc.documentElement;
+    return root;
+  }
+
+  /// 元素索引路径（相对 documentElement，每级取「元素子节点」下标）。
+  static List<int> _pathOf(dom.Element el) {
+    final path = <int>[];
+    var cur = el;
+    while (true) {
+      final parent = cur.parent;
+      if (parent == null || parent is dom.Document) break;
+      final idx = parent.children.indexOf(cur);
+      if (idx < 0) break;
+      path.insert(0, idx);
+      cur = parent;
+    }
+    return path;
+  }
+
+  static dom.Element? _elementAt(dom.Document doc, List<dynamic> path) {
+    dom.Element? cur = doc.documentElement;
+    for (final step in path) {
+      final i = int.tryParse('$step') ?? -1;
+      if (cur == null || i < 0 || i >= cur.children.length) return null;
+      cur = cur.children[i];
+    }
+    return cur;
+  }
+
+  /// 节点元信息：jsoup 的树操作（children/parent/sibling/ownText）靠它实现。
+  static Map<String, dynamic> _nodeMap(dom.Element el) {
+    final parent = el.parent;
+    final siblings = parent?.children ?? const <dom.Element>[];
+    return {
+      'html': el.outerHtml,
+      'text': _cleanText(el.text),
+      'ownText': _cleanText(
+          el.nodes.whereType<dom.Text>().map((t) => t.text).join()),
+      'tag': el.localName,
+      'attrs': Map<String, String>.fromEntries(el.attributes.entries
+          .map((e) => MapEntry(e.key.toString(), e.value.toString()))),
+      'idx': parent == null ? -1 : siblings.indexOf(el),
+      'p': _pathOf(el),
+      'cc': el.children.length,
+      'sc': siblings.length,
+    };
   }
 
   /// HTML5 片段解析：表格类标签（`<tr>`/`<td>`…）直接交给解析器会被丢弃

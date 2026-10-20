@@ -777,24 +777,103 @@ const String kJavaCompatShim = r'''
   };
 
   // jsoup：解析与选择交给宿主（java_compat.dart 用 package:html 实现）
-  function wrapNode(n) {
+  // 节点元信息带回 idx/parent/siblings/children，树操作（children/parent/
+  // previousElementSibling 等）才成立；上游 `result` 就是 jsoup Element，
+  // 源脚本靠这些做「上一条/下一条」定位（如有度中文的分卷标题）。
+  function mkNode(html) {
+    var root = String(html === null || html === undefined ? '' : html);
+    var n = bridge('selector', { html: root, css: 'html', mode: 'node' });
+    return n ? wrapNode(n) : null;
+  }
+  // 同一份根 HTML 里按索引路径回查节点：jsoup 的 Element 是带文档位置的
+  // 活对象，兄弟/父子导航必须回到原文档，否则 parent() 重新解析成孤立片段，
+  // previousElementSibling() 永远是 null（有度中文的分卷标题就是这样丢的）。
+  function nodeAt(root, path) {
+    var n = bridge('selector', { html: root, mode: 'path', p: path });
+    return n ? wrapNode(n, root) : null;
+  }
+  function mkList(arr) {
+    var out = [];
+    for (var i = 0; i < arr.length; i++) {
+      var w = mkNode(arr[i]);
+      if (w) out.push(w);
+    }
+    return decorate(out);
+  }
+  // 集合方法（jsoup Elements）：selectIn/mkList/select 的并集结果都要带。
+  function decorate(out) {
+    out.size = function () { return out.length; };
+    out.get = function (i) { var k = Number(i); if (k < 0) k += out.length; return out[k] || null; };
+    out.first = function () { return out[0] || null; };
+    out.last = function () { return out.length ? out[out.length - 1] : null; };
+    out.text = function () { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].text()); return s.join(' '); };
+    out.attr = function (k) { return out.length ? out[0].attr(k) : ''; };
+    out.html = function () { return out.length ? out[0].html() : ''; };
+    out.eachText = function () { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].text()); return s; };
+    out.eachAttr = function (k) { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].attr(k)); return s; };
+    // jsoup 的 Elements.select 是「所有命中项各自的命中并集」
+    out.select = function (css) {
+      var s = [];
+      for (var i = 0; i < out.length; i++) {
+        var r = out[i].select(css);
+        for (var j = 0; j < r.length; j++) s.push(r[j]);
+      }
+      return decorate(s);
+    };
+    out.parent = function () { return out.length ? out[0].parent() : null; };
+    out.prev = function () { return out.length ? out[0].previousElementSibling() : null; };
+    out.next = function () { return out.length ? out[0].nextElementSibling() : null; };
+    out.is = function () { return out.length > 0; };
+    return out;
+  }
+  function wrapNode(n, root) {
+    var h = root === undefined || root === null ? n.html : String(root);
+    var path = n.p || [];
+    function kid(i) {
+      var p = path.slice();
+      p.push(i);
+      return nodeAt(h, p);
+    }
+    function sibling(delta) {
+      if (!path.length) return null;
+      var last = path[path.length - 1] + delta;
+      if (last < 0 || last >= (n.sc || 0)) return null;
+      var p = path.slice(0, path.length - 1);
+      p.push(last);
+      return nodeAt(h, p);
+    }
     return {
       __n: n,
       html: function () { return n.html; },
       outerHtml: function () { return n.html; },
       text: function () { return n.text; },
+      ownText: function () { return n.ownText !== undefined && n.ownText !== null ? n.ownText : n.text; },
+      data: function () { return n.text; },
       attr: function (k) { return n.attrs && n.attrs[String(k)] !== undefined ? n.attrs[String(k)] : ''; },
       hasAttr: function (k) { return !!(n.attrs && n.attrs[String(k)] !== undefined); },
       select: function (css) { return selectIn(n.html, css); },
       selectFirst: function (css) { var r = selectIn(n.html, css); return r.length ? r[0] : null; },
       getElementsByTag: function (t) { return selectIn(n.html, String(t)); },
+      getElementsByTagName: function (t) { return selectIn(n.html, String(t)); },
+      getElementsByClass: function (c) { return selectIn(n.html, '.' + String(c)); },
       getElementById: function (id) { return selectIn(n.html, '#' + String(id))[0] || null; },
-      children: function () { return []; },
-      childNodes: function () { return []; },
-      childrenSize: function () { return 0; },
-      parent: function () { return null; },
-      nextElementSibling: function () { return null; },
-      previousElementSibling: function () { return null; },
+      children: function () {
+        var out = [], cnt = n.cc || 0;
+        for (var i = 0; i < cnt; i++) { var c = kid(i); if (c) out.push(c); }
+        return decorate(out);
+      },
+      childNodes: function () { return this.children(); },
+      childrenSize: function () { return n.cc || 0; },
+      parent: function () {
+        if (!path.length) return null;
+        return nodeAt(h, path.slice(0, path.length - 1));
+      },
+      nextElementSibling: function () { return sibling(1); },
+      previousElementSibling: function () { return sibling(-1); },
+      classNames: function () {
+        var c = n.attrs && n.attrs['class'] ? String(n.attrs['class']) : '';
+        return c ? c.split(/\s+/).filter(function (x) { return x.length > 0; }) : [];
+      },
       id: function () { return n.attrs && n.attrs.id ? n.attrs.id : ''; },
       className: function () { return n.attrs && n.attrs['class'] ? n.attrs['class'] : ''; },
       tagName: function () { return n.tag || 'div'; },
@@ -805,19 +884,8 @@ const String kJavaCompatShim = r'''
   function selectIn(html, css) {
     var list = bridge('selector', { html: String(html === null || html === undefined ? '' : html), css: String(css) }) || [];
     var out = [];
-    for (var i = 0; i < list.length; i++) out.push(wrapNode(list[i]));
-    out.size = function () { return out.length; };
-    out.get = function (i) { return out[i]; };
-    out.first = function () { return out[0] || null; };
-    out.last = function () { return out[out.length - 1] || null; };
-    out.text = function () { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].text()); return s.join(' '); };
-    out.attr = function (k) { return out.length ? out[0].attr(k) : ''; };
-    out.html = function () { return out.length ? out[0].html() : ''; };
-    out.eachText = function () { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].text()); return s; };
-    out.eachAttr = function (k) { var s = []; for (var i = 0; i < out.length; i++) s.push(out[i].attr(k)); return s; };
-    out.select = function (css) { return selectIn(out.length ? out[0].html() : '', css); };
-    out.is = function () { return out.length > 0; };
-    return out;
+    for (var i = 0; i < list.length; i++) out.push(wrapNode(list[i], html));
+    return decorate(out);
   }
   // legado 里 `result` 是 jsoup 的 Element/Elements；爽阅把条目上下文交给脚本时
   // 是「元素 outerHtml 字符串」。源脚本常直接写 `result.select('td').get(1)…`
@@ -832,6 +900,7 @@ const String kJavaCompatShim = r'''
       return r.length ? r[0] : null;
     };
     SP.getElementsByTag = function (t) { return selectIn(String(this), String(t)); };
+    SP.getElementsByTagName = function (t) { return selectIn(String(this), String(t)); };
     SP.getElementsByClass = function (c) { return selectIn(String(this), '.' + String(c)); };
     SP.getElementById = function (id) { return selectIn(String(this), '#' + String(id))[0] || null; };
     SP.outerHtml = function () { return String(this); };
