@@ -15,6 +15,8 @@ import 'package:shuangyue/sources/legado_source.dart';
 const _src = String.fromEnvironment('SRC');
 const _names = String.fromEnvironment('NAMES');
 const _key = String.fromEnvironment('KEY', defaultValue: '凡人修仙传');
+// CONTENT=1：顺带取首章正文，看「正文 short」是规则问题还是站点只给摘要。
+const _content = bool.fromEnvironment('CONTENT');
 
 void main() {
   test('dump detail', () async {
@@ -68,6 +70,17 @@ void main() {
             'intro=${it.isEmpty ? "空" : "${it.length}字"} '
             'chapters=${info.chapters.length}');
         print('jsErr=${JsBridge.lastError?.split('\n').first}');
+        if (_content && info.chapters.isNotEmpty) {
+          final ch = info.chapters.first;
+          print('首章：${ch.title} / ${ch.url}');
+          try {
+            final text = await OnlineBookService().fetchChapterText(s, ch.url);
+            print('正文长度=${text.length} 前80='
+                '${text.replaceAll(RegExp(r'\s+'), ' ').substring(0, text.length.clamp(0, 80))}');
+          } catch (e) {
+            print('正文失败：$e');
+          }
+        }
       } catch (e) {
         print('失败：$e');
       }

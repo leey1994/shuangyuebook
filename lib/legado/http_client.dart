@@ -348,8 +348,14 @@ final _headerNameRe = RegExp(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$");
 void _sanitizeHeaders(Map<String, String> headers) {
   headers.removeWhere((k, v) => !_headerNameRe.hasMatch(k) || v.contains('\n'));
   for (final k in headers.keys.toList()) {
-    final v = headers[k]!;
-    if (v.contains('\r')) headers[k] = v.replaceAll('\r', ' ');
+    // 非 ASCII 头值同样会让 http 包抛「无效的请求头」，整条书源直接不可用
+    // （同人小说的 Cookie 里留了中文占位「其他你抓到的Cookie」）。按 RFC 7230
+    // 只保留可见 ASCII 与水平制表符，其余剔除——占位 Cookie 本身无害。
+    final v = headers[k]!.replaceAll('\r', ' ').replaceAll(
+          RegExp(r'[^\t\x20-\x7E]'),
+          '',
+        );
+    headers[k] = v;
   }
 }
 
