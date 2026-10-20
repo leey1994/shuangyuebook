@@ -53,6 +53,10 @@ class ReaderPrefs {
   bool showFooter; // 页脚：时间 / 页码 / 电量
   int bgIndex; // 阅读背景序号
 
+  /// 正文字体家族名（'' = 系统默认；其余是通过「字体」面板下载注册的
+  /// 网络字体，家族名由 FontStore 生成，见 lib/data/font_store.dart）。
+  String fontFamily;
+
   /// 兼容旧字段：`paginate=false` 等价于滚动模式。
   bool get paginate => pageMode != PageMode.scroll;
 
@@ -73,12 +77,14 @@ class ReaderPrefs {
     this.showHeader = true,
     this.showFooter = true,
     this.bgIndex = 0,
+    this.fontFamily = '',
   });
 
   /// 排版相关字段变了就重排（阅读器据此决定是否重新分页）。
+  /// 字体也在内：同一段字换成另一款字体，行高与每页字数都会变。
   String get layoutSignature =>
       '$fontSize|$lineHeight|$letterSpacing|$indentFirstLine|'
-      '$marginH|$marginV|${pageMode.name}|$bgIndex';
+      '$marginH|$marginV|${pageMode.name}|$bgIndex|$fontFamily';
 }
 
 /// 全局状态：书架、历史、书签、偏好、章节离线缓存。
@@ -141,6 +147,7 @@ class AppStore extends ChangeNotifier {
       prefs.showHeader = sp.getBool('showHeader') ?? prefs.showHeader;
       prefs.showFooter = sp.getBool('showFooter') ?? prefs.showFooter;
       prefs.bgIndex = sp.getInt('bgIndex') ?? prefs.bgIndex;
+      prefs.fontFamily = sp.getString('fontFamily') ?? prefs.fontFamily;
       shelf = _loadList('shelf');
       history = _loadList('history');
       final bm = sp.getString('bookmarks');
@@ -432,6 +439,14 @@ class AppStore extends ChangeNotifier {
   void setLetterSpacing(double v) {
     prefs.letterSpacing = v.clamp(-1, 8).toDouble();
     _sp?.setDouble('letterSpacing', prefs.letterSpacing);
+    notifyListeners();
+  }
+
+  /// 正文字体（'' = 系统默认，其余是 FontStore 注册的网络字体家族名）。
+  void setFontFamily(String family) {
+    if (prefs.fontFamily == family) return;
+    prefs.fontFamily = family;
+    _sp?.setString('fontFamily', family);
     notifyListeners();
   }
 

@@ -13,6 +13,7 @@ import '../edge_tts.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
 import '../pet/pet_view.dart';
+import '../data/font_store.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
@@ -151,8 +152,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     _startPage = widget.page;
     _startOffset = widget.paragraph;
     final p = _prefs;
-    _pLayout = p.layoutSignature;
+    _pLayout = _layoutSig;
     AppStore.I.addListener(_onPrefs);
+    FontStore.I.addListener(_onFonts);
+    // 上次选过网络字体：进阅读器就先在后台把字体下好（约 8~13MB，只下一次），
+    // 下载完成前正文用系统字体，不会白屏等字。
+    FontStore.I.warmUpSelected(p.fontFamily);
     PetStore.I.emit(PetAction.openBook);
     // 阅读时把桌宠钉在顶部窄带：正文要专注，它也不能挡住任何控件
     petPinned.value = true;
@@ -302,11 +307,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
+  /// 字体表变了（下载完成 / 删了某款）：分页键含字体表版本，rebuild 即重排。
+  void _onFonts() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   void _onPrefs() {
     // 换阅读底色后状态栏必须立刻跟上：_applySystemUi 原本只在
     // didChangeDependencies 调一次，改底色不会触发它，顶部就留一条旧色。
     _applySystemUi();
-    final sig = _prefs.layoutSignature;
+    final sig = _layoutSig;
     if (sig != _pLayout) {
       final wasPaged = _paged;
       final prevMode = _prefs.pageMode;
@@ -322,6 +333,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    FontStore.I.removeListener(_onFonts);
     _clock?.cancel();
     _sleepTimer?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
@@ -801,12 +813,23 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 正文是否处于夜间背景（决定高亮色等派生色）。
   bool get _isNightBg => readerBgIsDark(_prefs.bgIndex, _prefs.theme);
 
-  TextStyle get _bodyStyle => TextStyle(
-        fontSize: _prefs.fontSize,
-        height: _prefs.lineHeight,
-        letterSpacing: _prefs.letterSpacing,
-        color: _colors().fg,
-      );
+  TextStyle get _bodyStyle {
+    // 网络字体：只有「已下载并注册」时才把家族名塞进 TextStyle —— 否则
+    // Flutter 会按缺字回退，先按默认字体排一遍、字体到了再重排，肉眼就是闪一下。
+    final f = FontStore.I.activeFont(_prefs.fontFamily);
+    return TextStyle(
+      fontSize: _prefs.fontSize,
+      height: _prefs.lineHeight,
+      letterSpacing: _prefs.letterSpacing,
+      color: _colors().fg,
+      fontFamily: f?.family,
+      fontFamilyFallback: f?.fallback,
+    );
+  }
+
+  /// 排版签名 + 字体表版本：字体下载完成后也要重排一次（同段落行高会变）。
+  String get _layoutSig =>
+      '${_prefs.layoutSignature}|${FontStore.I.generation}';
 
   /// 页眉 / 页脚各占的高度（关闭时为 0，正文区相应变大）。
   double get _headerH => _prefs.showHeader ? 26 : 0;
@@ -850,7 +873,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   _lastScaler = ts;
                   if (w > 0 && h > 0) {
                     final key = Object.hash(identityHashCode(_paras), w, h,
-                        _prefs.layoutSignature, ts.toString());
+                        _layoutSig, ts.toString());
                     if (_pages == null) {
                       // 新章节首排：只排一个时间预算（首屏立即有字），
                       // 余下部分让出一帧后分批补排，避免长章节卡住这一帧
@@ -974,7 +997,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     setState(() {
       _pages = pager.pages;
       _pagesKey = Object.hash(identityHashCode(_paras), _lastW, _lastH,
-          _prefs.layoutSignature, _lastScaler.toString());
+          _layoutSig, _lastScaler.toString());
       _page = _page.clamp(0, pager.pages.length - 1).toInt();
     });
     if (!pager.done) unawaited(_pumpRest(gen, pager));
@@ -1870,6 +1893,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   Widget _layoutTab(({Color bg, Color fg, Color dim}) c) => ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
         children: [
+          _fontRow(c),
           _slider(c, '字号', _prefs.fontSize, 12, 32, 20, _store.setFontSize,
               valueText: '${_prefs.fontSize.round()}'),
           _slider(
@@ -1892,6 +1916,182 @@ class _ReaderScreenState extends State<ReaderScreen>
           ),
         ],
       );
+
+  /// 「字体」一行：显示当前字体，点开挑选（网络字体选中才下载）。
+  Widget _fontRow(({Color bg, Color fg, Color dim}) c) {
+    final name = _prefs.fontFamily.isEmpty
+        ? '系统默认'
+        : (FontStore.byId(_prefs.fontFamily)?.name ?? '系统默认');
+    final downloading =
+        FontStore.I.statusOf(_prefs.fontFamily) == FontStatus.downloading;
+    return InkWell(
+      onTap: () => _pickFont(c),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            SizedBox(
+                width: 44,
+                child: Text('字体',
+                    style: TextStyle(color: c.dim, fontSize: 12))),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: c.fg,
+                            fontSize: 13,
+                            fontFamily: FontStore.I
+                                .activeFont(_prefs.fontFamily)
+                                ?.family)),
+                  ),
+                  if (downloading) ...[
+                    const SizedBox(width: 6),
+                    Text('下载中…',
+                        style: TextStyle(color: c.dim, fontSize: 10.5)),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 18, color: c.dim),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 字体选择面板：系统默认 + 三款网络字体（约 8~13MB，选中才下载）。
+  Future<void> _pickFont(({Color bg, Color fg, Color dim}) c) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.bg,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => ListenableBuilder(
+        listenable: FontStore.I,
+        builder: (ctx, _) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Text('字体',
+                        style: TextStyle(
+                            color: c.fg,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    Text('不内置 · 选中才下载',
+                        style: TextStyle(color: c.dim, fontSize: 11)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                _fontTile(ctx, c, null),
+                for (final f in kRemoteFonts) _fontTile(ctx, c, f),
+                const SizedBox(height: 6),
+                Text('字体只下载一次，存在本机，之后断网也能用；清理阅读缓存不会删。',
+                    style: TextStyle(color: c.dim, fontSize: 11)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fontTile(
+      BuildContext ctx, ({Color bg, Color fg, Color dim}) c, RemoteFont? f) {
+    final id = f?.id ?? '';
+    final ready = f == null || FontStore.I.isReady(id);
+    final selected = _prefs.fontFamily == id;
+    final st = f == null ? FontStatus.ready : FontStore.I.statusOf(id);
+    return InkWell(
+      onTap: () async {
+        if (f == null) {
+          _store.setFontFamily('');
+          if (mounted) setState(() {});
+          Navigator.of(ctx).pop();
+          return;
+        }
+        if (ready) {
+          _store.setFontFamily(id);
+          if (mounted) setState(() {});
+          Navigator.of(ctx).pop();
+          return;
+        }
+        final ok = await FontStore.I.ensure(id);
+        if (!ctx.mounted) return;
+        if (ok) {
+          _store.setFontFamily(id);
+          if (mounted) setState(() {});
+          Navigator.of(ctx).pop();
+        } else {
+          _snack(FontStore.I.errorOf(id) ?? '字体下载失败，换个网络再试');
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              size: 18,
+              color: selected ? Brand.green : c.dim,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(f?.name ?? '系统默认',
+                      style: TextStyle(
+                          color: c.fg,
+                          fontSize: 13.5,
+                          fontFamily: ready && f != null ? f.family : null)),
+                  Text(
+                    f == null ? '跟随系统字体' : '${f.note} · ${f.sizeLabel}',
+                    style: TextStyle(color: c.dim, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            if (f != null && !ready)
+              st == FontStatus.downloading
+                  ? ValueListenableBuilder<double>(
+                      valueListenable: FontStore.I.progressOf(id),
+                      builder: (_, v, __) => SizedBox(
+                        width: 56,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LinearProgressIndicator(
+                                value: v <= 0 ? null : v, minHeight: 3),
+                            const SizedBox(height: 3),
+                            Text('${(v * 100).round()}%',
+                                style: TextStyle(color: c.dim, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Text(st == FontStatus.failed ? '重试' : '下载',
+                      style:
+                          const TextStyle(color: Brand.green, fontSize: 12))
+            else if (f != null)
+              Text('已下载', style: TextStyle(color: c.dim, fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _appearanceTab(({Color bg, Color fg, Color dim}) c) => ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
