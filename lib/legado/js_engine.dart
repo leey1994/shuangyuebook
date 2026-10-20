@@ -22,6 +22,7 @@ import 'package:pointycastle/export.dart' as pc;
 import 'package:quickjs_engine/quickjs_engine.dart';
 
 import 'source_vars.dart';
+import 'cookie_jar.dart';
 
 import 'java_compat.dart';
 import 'java_compat_js.dart';
@@ -255,6 +256,37 @@ abstract final class JsBridge {
   static bool _pureJs(String code) =>
       code.length <= 4096 && !_kImpureMarks.any(code.contains);
 
+  // ---------------------------------------------------------------------
+  // 大字符串结果分片取回
+  //
+  // 实测（test/scratch/threshold_test.dart）：桥的 `JS_Eval` 只能带回
+  // 至多 8192 个 UTF-16 单元的字符串，超过即整体拿不到（返回 null 且无错误）。
+  // 这让 `JSON.stringify(整页 JSON)`、`<js>换源后返回整段 HTML</js>` 这类
+  // 规则静默变空（例如魔丸小说的 `bookList: <js>…JSON.stringify(result)</js>`
+  // + `$.data.items`）。对齐 legado 的语义必须能取回任意长度的值，因此在
+  // 脚本末尾把超长字符串挂到全局 `__lgBIG`，只回一个长度标记，Dart 侧再
+  // 按 4000 单元分片取回（分片边界不劈开代理对）。
+  // ---------------------------------------------------------------------
+
+  /// 单次 `JS_Eval` 可安全带回的字符数（远低于 8192 实测上限）。
+  static const int _kMaxEvalChars = 4000;
+
+  /// 超长结果的标记前缀（`\u0001` 不会出现在正常书源结果里）。
+  static const String _kBigMarker = '\u0001LG_BIG:';
+
+  /// 脚本收尾：清理返回值；超长字符串转成标记 + 全局切片器。
+  static const String _finalizeJs = 'var __c = __lgClean(__r);'
+      'var __s = (typeof __c === "string")'
+      ' ? __c : ((__c instanceof String) ? __c.valueOf() : null);'
+      'if (__s !== null && __s.length > $_kMaxEvalChars) {'
+      'globalThis.__lgBIG = __s;'
+      'globalThis.__lgTake = function (a, b) { var s = __lgBIG;'
+      'if (b < s.length) { var c = s.charCodeAt(b - 1);'
+      'if (c >= 0xD800 && c <= 0xDBFF) b -= 1; }'
+      'return s.slice(a, b); };'
+      'return "\\u0001LG_BIG:" + __s.length; }'
+      'return __c;';
+
   /// 上下文签名：任何会影响结果的绑定值变化都必须落进来。
   static String _ctxSig(JsEnv e, Object? input) {
     final b = StringBuffer();
@@ -335,14 +367,14 @@ abstract final class JsBridge {
     _active = e;
     try {
       r = rt.evaluate('${_setup(e, input)}\n'
-          '(function () { var __r = eval(${jsonEncode(code)}); '
-          'return __lgClean(__r); })()');
+          '(function () { var __r = eval(${jsonEncode(code)});'
+          '$_finalizeJs})()');
       // 部分书源在 @js 里直接写顶层 return（legado 的 Rhino 允许），
       // eval 下会 SyntaxError；此时把整段包进函数体再跑一次。
       if (r.isError && '${r.stringResult}'.contains('return not in a function')) {
         r = rt.evaluate('${_setup(e, input)}\n'
-            '(function () { var __r = (function () {\n$code\n})(); '
-            'return __lgClean(__r); })()');
+            '(function () { var __r = (function () {\n$code\n})();'
+            '$_finalizeJs})()');
       }
     } catch (err) {
       debugPrint('[js] evaluate 异常(${e.scopeKey})：$err');
@@ -370,6 +402,12 @@ abstract final class JsBridge {
       lastError = _clip(text);
       return null;
     }
+    // 超长字符串：脚本已把值挂到 __lgBIG，这里分片取回（见 _finalizeJs 注释）。
+    if (text.startsWith(_kBigMarker)) {
+      final out = _readBigString(rt, text.substring(_kBigMarker.length), e);
+      if (out != null) _cacheResult(ckey, out);
+      return out;
+    }
     final raw = r.rawResult;
     if (raw == null) return null;
     String? out;
@@ -392,6 +430,30 @@ abstract final class JsBridge {
     }
     _cacheResult(ckey, out);
     return out;
+  }
+
+  /// 分片取回 `__lgBIG`（单次取回上限见 [_kMaxEvalChars]）。
+  static String? _readBigString(
+      JavascriptRuntime rt, String lenText, JsEnv e) {
+    final total = int.tryParse(lenText.trim()) ?? 0;
+    if (total <= 0) return null;
+    final sb = StringBuffer();
+    var guard = 0;
+    while (sb.length < total && guard++ < 4096) {
+      final from = sb.length;
+      final piece = rt.evaluate('__lgTake($from, ${from + _kMaxEvalChars})');
+      final s = piece.isError ? '' : piece.stringResult;
+      if (s.isEmpty) break;
+      sb.write(s);
+    }
+    rt.evaluate('globalThis.__lgBIG = undefined;');
+    if (sb.length != total) {
+      // 取回不完整（只可能是运行时被回收）：宁可变空也不要半截正文。
+      debugPrint('[js] 大结果取回不完整(${e.scopeKey})：${sb.length}/$total');
+      lastError = 'big-result ${sb.length}/$total';
+      return null;
+    }
+    return sb.toString();
   }
 
   /// 还原挂起请求体：新格式是 JSON（含 method/headers/body），旧格式是裸 URL。
@@ -674,12 +736,15 @@ abstract final class JsBridge {
           {
             // 无参 getVariable()：全部变量序列化成 JSON 串（聚合源 getArguments
             // 会 JSON.parse 它来读「打开参数」）。
+            // 没有任何变量时必须返回空串而不是 `{}` —— legado 的 variable 字段为空，
+            // 聚合源的 getArguments 靠 `JSON.parse('')` 抛错来落回内置默认值，
+            // 返回 `{}` 会让它读到 undefined（地址变成 `undefined/search?...`）。
             final url = env?.sourceUrl ?? '';
             final m = <String, String>{
               ...?SourceVars.shared?.of(url),
               ...?env?.session?.vars,
             };
-            return jsonEncode({'v': jsonEncode(m)});
+            return jsonEncode({'v': m.isEmpty ? '' : jsonEncode(m)});
           }
         case 'source.var.putAll':
           {
@@ -748,6 +813,15 @@ abstract final class JsBridge {
           return jsonEncode({
             'v': env?.getCookie?.call('${p['tag'] ?? ''}', p['key']?.toString()) ?? ''
           });
+        case 'cookie.set':
+          LegadoCookieJar.I.setFor(
+            '${p['tag'] ?? ''}',
+            '${p['v'] ?? ''}',
+          );
+          return jsonEncode({'v': null});
+        case 'cookie.del':
+          LegadoCookieJar.I.removeFor('${p['tag'] ?? ''}');
+          return jsonEncode({'v': null});
         case 'getString':
           return jsonEncode({'v': env?.getString?.call('${p['rule'] ?? ''}')});
         case 'getElement':
@@ -1210,7 +1284,7 @@ abstract final class JsBridge {
   };
   globalThis.cookie = {
     getCookie: function (tag, key) { return java.getCookie(tag, key); },
-    setCookie: function () {},
+    setCookie: function (tag, v) { __lgcall('cookie.set', { tag: String(tag), v: v === null || v === undefined ? '' : String(v) }); },
     removeCookie: function (tag) { __lgcall('cookie.del', { tag: String(tag) }); }
   };
   globalThis.cache = {
