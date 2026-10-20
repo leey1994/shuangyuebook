@@ -685,6 +685,32 @@ $obj.remove = function (k) {
     // 上，这里挂在 globalThis（同一书源共用一个运行时），语义等价。
     b.writeln(_kPutShim.replaceAll(r'$obj', 'source').replaceAll(r'$map', '__lgPut'));
     b.writeln(_kPutShim.replaceAll(r'$obj', 'book').replaceAll(r'$map', '__lgPutB'));
+    // 登录态：上游 BookSource 另有 loginInfo / loginHeader 两个字段，脚本用
+    // getLoginInfoMap / putLoginInfo / getLoginHeader(Map) 读写。落到书源变量表
+    // 里带前缀的键，避免与脚本自己的变量（qma_meta 之类）撞车。
+    b.writeln('source.getLoginInfoMap = function () { '
+        'try { var s = source.getVariable("@loginInfo"); '
+        'return s ? JSON.parse(s) : {}; } catch (e) { return {}; } };');
+    b.writeln('source.getLoginInfo = function () { return source.getLoginInfoMap(); };');
+    b.writeln('source.putLoginInfo = function (m) { '
+        'try { source.setVariable("@loginInfo", '
+        'JSON.stringify(m === null || m === undefined ? {} : m)); } catch (e) {} };');
+    b.writeln('source.getLoginHeader = function () { '
+        'var s = source.getVariable("@loginHeader"); '
+        'return s === "" ? null : s; };');
+    b.writeln('source.getLoginHeaderMap = function () { '
+        'try { var s = source.getVariable("@loginHeader"); '
+        'return s ? JSON.parse(s) : {}; } catch (e) { return {}; } };');
+    // book.getVariable/setVariable：书级变量（legado 按书持久化）。这里按
+    // bookUrl 前缀落到书源变量表，跨卡片/跨章节仍能读到。
+    b.writeln('book.getVariable = function (k, d) { '
+        'var u = (book && book.bookUrl) ? book.bookUrl : ""; '
+        'if (k === undefined || k === null) { return source.getVariable("@book:" + u); } '
+        'return source.getVariable("@book:" + u + ":" + String(k), d); };');
+    b.writeln('book.setVariable = function (k, v) { '
+        'var u = (book && book.bookUrl) ? book.bookUrl : ""; '
+        'if (v === undefined) { return source.setVariable("@book:" + u, k); } '
+        'return source.setVariable("@book:" + u + ":" + String(k), v); };');
     final vs = e.vars;
     if (vs != null) {
       vs.forEach((k, v) {
@@ -766,6 +792,13 @@ $obj.remove = function (k) {
             'v': _aesBase64DecodeToString('${p['str'] ?? ''}', '${p['key'] ?? ''}',
                 '${p['transformation'] ?? 'AES/CBC/PKCS5Padding'}', '${p['iv'] ?? ''}')
           });
+        case 'sym':
+          return jsonEncode({'v': _symCrypto(p)});
+        case 'b64b':
+          // java.base64DecodeToByteArray：返回字节数组（JS 里是 Array<int>）
+          return jsonEncode({'v': _b64Bytes('${p['s'] ?? ''}')?.toList() ?? const <int>[]});
+        case 'deviceid':
+          return jsonEncode({'v': _kDeviceId});
         case 'ua':
           return jsonEncode({'v': _kUA});
         case 'var.get':
@@ -944,6 +977,10 @@ $obj.remove = function (k) {
   static const String _kUA =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+  /// java.deviceID() / java.androidId()：上游取 ANDROID_ID。
+  /// 必须**稳定**——签名类书源把它拼进 sign，每次请求变一个值服务端就不认。
+  static const String _kDeviceId = '9774d56d682e549c';
+
   static String? _b64Decode(String s) {
     final b = _b64Bytes(s);
     if (b == null) return null;
@@ -1084,8 +1121,7 @@ $obj.remove = function (k) {
       crypto.md5.convert(utf8.encode(s)).toString();
 
   static String? _aesBase64DecodeToString(
-      String data, String key, String transformation, String iv) {
-    try {
+      String data, String key, String transformation, String iv) {    try {
       final parts = transformation.toUpperCase().split('/');
       if (parts.isEmpty || parts[0] != 'AES') return null;
       final mode = parts.length > 1 ? parts[1] : 'CBC';
@@ -1127,6 +1163,179 @@ $obj.remove = function (k) {
       debugPrint('[js] AES 解密失败：$e');
       return null;
     }
+  }
+
+  /// `java.createSymmetricCrypto(transformation, key, iv)`：上游返回一个
+  /// SymmetricCrypto 对象（encrypt / encryptBase64 / encryptHex / decrypt /
+  /// decryptStr）。书源里的典型写法：
+  /// ```js
+  /// java.createSymmetricCrypto('AES/CBC/PKCS5Padding', key, iv).decryptStr(ct)
+  /// java.createSymmetricCrypto('AES', key).encryptBase64(json)   // 默认 ECB/PKCS5
+  /// ```
+  /// key/iv 可能是字符串，也可能是 `java.base64DecodeToByteArray()` 的字节数组。
+  static Object? _symCrypto(Map<String, dynamic> p) {
+    final enc = '${p['op'] ?? 'dec'}' == 'enc';
+    final trans = '${p['t'] ?? 'AES/CBC/PKCS5Padding'}'.toUpperCase();
+    final out = '${p['out'] ?? 'str'}';
+    final parts = trans.split('/');
+    final alg = parts[0];
+    // Cipher.getInstance("AES") 的默认值是 AES/ECB/PKCS5Padding
+    final mode = parts.length > 1 && parts[1].isNotEmpty ? parts[1] : 'ECB';
+    final padding =
+        parts.length > 2 && parts[2].isNotEmpty ? parts[2] : 'PKCS5PADDING';
+    final keyRaw = _symBytes(p['key']);
+    if (keyRaw == null || keyRaw.isEmpty) return null;
+    final key = _symFitKey(keyRaw, alg);
+    final engine = _symEngine(alg);
+    final bs = engine.blockSize;
+    final ivRaw = _symBytes(p['iv']);
+    final iv = _symFitIv(ivRaw, bs);
+    final data = '${p['data'] ?? ''}';
+
+    if (enc) {
+      final res = _symRun(true, engine, mode, padding, key, iv,
+          Uint8List.fromList(utf8.encode(data)));
+      if (res == null) return null;
+      switch (out) {
+        case 'bytes':
+          return res.toList();
+        case 'hex':
+          return res
+              .map((b) => b.toRadixString(16).padLeft(2, '0'))
+              .join();
+        default:
+          return base64.encode(res);
+      }
+    }
+
+    // 解密：输入可能是 Base64，也可能是十六进制；模式/填充也可能与声明不符，
+    // 逐个组合试，挑第一个能解出合法 UTF-8 的结果。
+    final inputs = <Uint8List?>[
+      _b64Bytes(data),
+      _hexToBytes(data),
+    ].whereType<Uint8List>().where((b) => b.isNotEmpty).toList();
+    final modes = <String>[mode, mode == 'CBC' ? 'ECB' : 'CBC'];
+    final paddings = <String>[padding, 'NOPADDING'];
+    for (final input in inputs) {
+      for (final m in modes) {
+        for (final pad in paddings) {
+          final r = _symRun(false, engine, m, pad, key, iv, input);
+          if (r == null || r.isEmpty) continue;
+          if (out == 'bytes') return r.toList();
+          String text;
+          try {
+            text = utf8.decode(r);
+          } catch (_) {
+            continue;
+          }
+          return text;
+        }
+      }
+    }
+    return out == 'bytes' ? const <int>[] : null;
+  }
+
+  static pc.BlockCipher _symEngine(String alg) {
+    switch (alg) {
+      // pointycastle 4 没有单 DES（只有 DESede + DesBase 基类）：DES 书源极少，
+      // 用 DESede 兜住（24 字节密钥），CBC/ECB + PKCS5 的封装行为一致。
+      case 'DES':
+      case 'DESEDE':
+      case 'TRIPLEDES':
+      case '3DES':
+        return pc.DESedeEngine();
+      case 'BLOWFISH':
+        return pc.BlowfishEngine();
+      default:
+        return pc.AESEngine();
+    }
+  }
+
+  static Uint8List? _symBytes(dynamic v) {
+    if (v == null) return null;
+    if (v is List) {
+      final out = <int>[];
+      for (final e in v) {
+        if (e is num) out.add(e.toInt() & 0xff);
+      }
+      return out.isEmpty ? null : Uint8List.fromList(out);
+    }
+    final s = '$v';
+    return s.isEmpty ? null : Uint8List.fromList(utf8.encode(s));
+  }
+
+  /// SecretKeySpec 语义：长度不合法就截断/补零到最近的合法长度。
+  static Uint8List _symFitKey(Uint8List k, String alg) {
+    final sizes = switch (alg) {
+      'DES' => const [8],
+      'DESEDE' || 'TRIPLEDES' || '3DES' => const [16, 24],
+      'BLOWFISH' => const [16, 24, 32],
+      _ => const [32, 24, 16],
+    };
+    if (sizes.contains(k.length)) return k;
+    for (final s in sizes) {
+      if (k.length >= s) return Uint8List.sublistView(k, 0, s);
+    }
+    final n = sizes.last;
+    final out = Uint8List(n);
+    out.setRange(0, k.length, k);
+    return out;
+  }
+
+  static Uint8List _symFitIv(Uint8List? iv, int bs) {
+    if (iv == null || iv.isEmpty) return Uint8List(bs);
+    if (iv.length == bs) return iv;
+    if (iv.length > bs) return Uint8List.sublistView(iv, 0, bs);
+    final out = Uint8List(bs);
+    out.setRange(0, iv.length, iv);
+    return out;
+  }
+
+  static Uint8List? _symRun(bool enc, pc.BlockCipher engine, String mode,
+      String padding, Uint8List key, Uint8List iv, Uint8List input) {
+    try {
+      final bs = engine.blockSize;
+      final noPad = padding == 'NOPADDING' || padding == 'NO';
+      var data = input;
+      if (enc && !noPad) {
+        final pad = bs - (data.length % bs);
+        data = Uint8List.fromList([...data, ...List<int>.filled(pad, pad)]);
+      }
+      if (data.isEmpty || data.length % bs != 0) return null;
+      final core = mode == 'ECB'
+          ? pc.ECBBlockCipher(engine)
+          : pc.CBCBlockCipher(engine);
+      core.init(
+          enc,
+          mode == 'ECB'
+              ? pc.KeyParameter(key)
+              : pc.ParametersWithIV(pc.KeyParameter(key), iv));
+      final out = Uint8List(data.length);
+      for (var off = 0; off + bs <= data.length; off += bs) {
+        core.processBlock(data, off, out, off);
+      }
+      if (!enc && !noPad) {
+        final pad = out.last;
+        if (pad >= 1 && pad <= bs && pad <= out.length) {
+          return Uint8List.sublistView(out, 0, out.length - pad);
+        }
+        return null;
+      }
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static Uint8List? _hexToBytes(String s) {
+    final t = s.replaceAll(RegExp(r'\s'), '');
+    if (t.length < 2 || t.length.isOdd) return null;
+    if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(t)) return null;
+    final out = Uint8List(t.length ~/ 2);
+    for (var i = 0; i < out.length; i++) {
+      out[i] = int.parse(t.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------
@@ -1302,7 +1511,7 @@ $obj.remove = function (k) {
     hexDecodeToString: function (s) { return __lgv(__lgcall('hexd', { s: s === null || s === undefined ? '' : String(s) })); },
     hexEncodeToString: function (s) { return __lgv(__lgcall('hexe', { s: s === null || s === undefined ? '' : String(s) })); },
     encodeURI: function (s, enc) { return __lgv(__lgcall('encuri', { s: s === null || s === undefined ? '' : String(s), enc: enc === null || enc === undefined ? null : String(enc) })); },
-    timeFormat: function (time) { return __lgv(__lgcall('timeFmt', { time: time, utc: false })); },
+    timeFormat: function (time, format) { return __lgv(__lgcall('timeFmt', { time: time, utc: false, format: format === null || format === undefined ? null : String(format) })); },
     timeFormatUTC: function (time, format, sh) { return __lgv(__lgcall('timeFmt', { time: time, utc: true, format: format === null || format === undefined ? null : String(format), sh: sh })); },
     md5Encode: function (s) { return __lgv(__lgcall('md5', { s: String(s) })); },
     md5Encode16: function (s) { return __lgv(__lgcall('md5_16', { s: String(s) })); },
@@ -1310,6 +1519,37 @@ $obj.remove = function (k) {
       return __lgv(__lgcall('aes', { str: String(str), key: String(key), transformation: String(transformation), iv: iv === null || iv === undefined ? '' : String(iv) }), null);
     },
     getString: function (rule) { return __lgv(__lgcall('getString', { rule: String(rule) })); },
+    // ---- 加密（SymmetricCrypto）：书源用它解接口密文/加密请求体 ----
+    createSymmetricCrypto: function (transformation, key, iv) {
+      function mat(x) {
+        if (x === null || x === undefined) return null;
+        if (typeof x === 'string') return x;
+        if (x.length !== undefined) return Array.prototype.slice.call(x);
+        return String(x);
+      }
+      var t = transformation === null || transformation === undefined ? 'AES/CBC/PKCS5Padding' : String(transformation);
+      var k = mat(key), v = mat(iv);
+      function call(op, data, out) {
+        return __lgcall('sym', { op: op, t: t, key: k, iv: v, data: String(data), out: out });
+      }
+      return {
+        encrypt: function (s) { return __lgv(call('enc', s, 'bytes'), []); },
+        encryptBase64: function (s) { return __lgv(call('enc', s, 'b64'), null); },
+        encryptHex: function (s) { return __lgv(call('enc', s, 'hex'), null); },
+        decrypt: function (d) { return __lgv(call('dec', d, 'bytes'), []); },
+        decryptStr: function (d) { return __lgv(call('dec', d, 'str'), null); }
+      };
+    },
+    base64DecodeToByteArray: function (s) { return __lgv(__lgcall('b64b', { s: s === null || s === undefined ? '' : String(s) }), []); },
+    deviceID: function () { return __lgv(__lgcall('deviceid', {})); },
+    androidId: function () { return java.deviceID(); },
+    // 以下在 legado 里要么弹 UI、要么只有安卓端才有；给稳定返回值即可，
+    // 让脚本继续往下跑（缺成员是 TypeError，整条规则直接空）。
+    showBrowser: function () { return true; },
+    showReadingBrowser: function () { return true; },
+    startBrowserDp: function () { return true; },
+    reLoginView: function () { return true; },
+    qread: function () { return true; },
     getElement: function (rule) { return __lgv(__lgcall('getElement', { rule: String(rule) })); },
     put: function (key, value) { __lgcall('var.put', { k: String(key), v: value === null || value === undefined ? null : String(value) }); return value; },
     log: function (msg) { __lgcall('log', { msg: msg === null || msg === undefined ? '' : String(msg) }); },
@@ -1322,6 +1562,7 @@ $obj.remove = function (k) {
   };
   globalThis.cookie = {
     getCookie: function (tag, key) { return java.getCookie(tag, key); },
+    getKey: function (tag) { return String(tag); },
     setCookie: function (tag, v) { __lgcall('cookie.set', { tag: String(tag), v: v === null || v === undefined ? '' : String(v) }); },
     removeCookie: function (tag) { __lgcall('cookie.del', { tag: String(tag) }); }
   };

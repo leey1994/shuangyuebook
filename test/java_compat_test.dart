@@ -308,4 +308,81 @@ void main() {
     expect(ev("source.get('k') === null", scope: e), 'true');
     expect(ev("book.get('k')", scope: e), 'b1');
   });
+
+  // 上游 java.createSymmetricCrypto(transformation, key, iv) 返回 SymmetricCrypto，
+  // 书源用它解接口密文 / 加密请求体（74小说网、书豪小说网、爱丽丝书屋…）。
+  // 期望值来自 .NET Aes（独立实现，避免自证）。
+  test('java.createSymmetricCrypto（AES CBC/ECB + PKCS5）', () {
+    const k = '0123456789abcdef';
+    const iv = 'abcdefghijklmnop';
+    const cbc = 'LhWZ3icXB83uRhrCT+jm6DARZP2tvOQL15ifaUu+YvY=';
+    expect(
+        ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding','$k','$iv')"
+            ".encryptBase64('shuangyue-legado')"),
+        cbc);
+    expect(
+        ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding','$k','$iv')"
+            ".decryptStr('$cbc')"),
+        'shuangyue-legado');
+    // 中文 → UTF-8 多字节
+    expect(
+        ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding','$k','$iv')"
+            ".encryptBase64('斗破苍穹')"),
+        'lDk4Bg7swad3ykkp2YoNCA==');
+    // 只写 'AES' → Java Cipher.getInstance("AES") 默认 ECB/PKCS5Padding
+    expect(
+        ev("java.createSymmetricCrypto('AES','$k')"
+            ".encryptBase64('shuangyue-legado')"),
+        '/R5caNYTEKxxi6nkL6PRSDdyIuBhqSTFkc2cJ+oWPtQ=');
+    // 十六进制输出 / 输入
+    final hex = ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding','$k','$iv')"
+        ".encryptHex('shuangyue-legado')");
+    expect(hex!.length, 64);
+    expect(
+        ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding','$k','$iv')"
+            ".decryptStr('$hex')"),
+        'shuangyue-legado');
+    // key/iv 也可以是字节数组（爱丽丝书屋：java.base64DecodeToByteArray(...)）
+    expect(
+        ev("java.createSymmetricCrypto('AES/CBC/PKCS5Padding',"
+            "java.base64DecodeToByteArray('MDEyMzQ1Njc4OWFiY2RlZg=='),"
+            "java.base64DecodeToByteArray('YWJjZGVmZ2hpamtsbW5vcA=='))"
+            ".encryptBase64('shuangyue-legado')"),
+        cbc);
+    expect(ev("java.base64DecodeToByteArray('aGVsbG8=').join(',')"),
+        '104,101,108,108,111');
+  });
+
+  test('java.deviceID / androidId 稳定，timeFormat 支持格式串', () {
+    final id = ev('java.deviceID()');
+    expect(id, isNotEmpty);
+    expect(ev('java.androidId()'), id);
+    expect(ev('java.deviceID()'), id);
+    // timeFormat(t, format) 的第二参必须生效（原先被忽略）
+    expect(ev("java.timeFormat(1700000000000,'yyyy')"), '2023');
+    expect(ev("java.timeFormat(1700000000000,'yyyy-MM-dd').length"), '10');
+  });
+
+  test('source 登录态与 book 变量（持久层）', () async {
+    final tmp = await Directory.systemTemp.createTemp('svars_login_');
+    final prev = SourceVars.shared;
+    SourceVars.shared =
+        SourceVars(dirsOverride: AppDirs(files: tmp.path, cache: tmp.path));
+    try {
+      const url = 'https://login.example.com';
+      String? e(String code) => JsBridge.evalCode(code,
+          env: JsEnv(scopeKey: url, sourceUrl: url));
+      expect(e('JSON.stringify(source.getLoginInfoMap())'), '{}');
+      expect(e('source.getLoginHeader() === null'), 'true');
+      e("source.putLoginInfo({user:'u1',pass:'p1'})");
+      expect(e('source.getLoginInfoMap().user'), 'u1');
+      // book 级变量：按 bookUrl 前缀落到书源变量表
+      e("book.setVariable('durChapter','12')");
+      expect(e("book.getVariable('durChapter')"), '12');
+      expect(e("book.getVariable('nope','默认')"), '默认');
+    } finally {
+      SourceVars.shared = prev;
+      await tmp.delete(recursive: true);
+    }
+  });
 }
