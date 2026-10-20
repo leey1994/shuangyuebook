@@ -46,7 +46,11 @@ class LegadoSource extends NovelSource {
       _repo ?? OnlineRepo(store: SourceStore(initial: [source]));
 
   /// 本源是否支持发现页（有可静态解析的 exploreUrl）。
-  bool get hasExplore => OnlineRepo.parseExploreCategories(source).isNotEmpty;
+  /// 是否有发现页：同步能算出分类，或脚本形态（联网后由
+  /// [OnlineRepo.exploreCategoriesAsync] 补全）。
+  bool get hasExplore =>
+      OnlineRepo.parseExploreCategories(source).isNotEmpty ||
+      OnlineRepo.hasJsExplore(source);
 
   /// 本源 exploreUrl 是否为 JS 脚本（静态解析不了，发现页会明确提示）。
   bool get exploreNeedsJs => OnlineRepo.hasJsExplore(source);
@@ -71,7 +75,9 @@ class LegadoSource extends NovelSource {
   Future<List<Book>> fetchHome() async {
     if (!hasExplore) return const [];
     try {
-      final cat = OnlineRepo.parseExploreCategories(source).first;
+      final cats = await _r.exploreCategoriesAsync(source);
+      if (cats.isEmpty) return const [];
+      final cat = cats.first;
       final res = await _r.exploreSource(source, cat);
       if (res.error != null) return const [];
       return [
@@ -97,17 +103,17 @@ class LegadoSource extends NovelSource {
   Future<Booklist> fetchBooklist(BooklistEntry entry) async =>
       const Booklist(title: '', paragraphs: [], books: []);
 
-  /// 发现页分类 ← exploreUrl（`标题::地址` / JSON 数组两种写法都支持）。
+  /// 发现页分类 ← exploreUrl（`标题::地址` / JSON 数组 / JS 脚本三种写法）。
   @override
   Future<List<RankTab>> fetchRankTabs() async => [
-        for (final c in OnlineRepo.parseExploreCategories(source))
+        for (final c in await _r.exploreCategoriesAsync(source))
           RankTab(title: c.title, url: c.url),
       ];
 
   /// 分类书单 ← ruleExplore（缺失时引擎内部回退 ruleSearch）。
   @override
   Future<Paged<Book>> fetchRank(RankTab tab, {String? nextUrl}) async {
-    final cats = OnlineRepo.parseExploreCategories(source);
+    final cats = await _r.exploreCategoriesAsync(source);
     if (cats.isEmpty) return const Paged(items: []);
     final cat = cats.firstWhere(
       (c) => c.url == tab.url || c.title == tab.title,

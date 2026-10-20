@@ -532,14 +532,18 @@ class OnlineRepo {
   @visibleForTesting
   static void debugClearCategoryCache() => _catCache.clear();
 
+  static void _rememberCategories(String raw, List<ExploreCategory> cats) {
+    if (_catCache.length >= 64) _catCache.remove(_catCache.keys.first);
+    _catCache[raw] = cats;
+  }
+
   static List<ExploreCategory> parseExploreCategories(BookSource source) {
     final raw = source.exploreUrl?.trim();
     if (raw == null || raw.isEmpty) return const [];
     final hit = _catCache[raw];
     if (hit != null) return hit;
     final res = _parseExploreCategoriesUncached(source, raw);
-    if (_catCache.length >= 64) _catCache.remove(_catCache.keys.first);
-    _catCache[raw] = res;
+    _rememberCategories(raw, res);
     return res;
   }
 
@@ -591,10 +595,10 @@ class OnlineRepo {
   /// 我们按「首次打开」处理：infoMap 先取已存值，缺项用选择器的 `default` 补，
   /// 补到新值就再跑一遍脚本，等价于原版用默认选项渲染的首屏。
   static List<ExploreCategory> _categoriesFromJs(
-      BookSource source, String code) {
+      BookSource source, String code, {JsEnv? env}) {
     if (!JsBridge.available) return const [];
     final stored = _loadExploreInfo(source);
-    var tabs = _evalExploreTabs(source, code, stored);
+    var tabs = _evalExploreTabs(source, code, stored, env: env);
     if (tabs.isEmpty) return const [];
     final defaults = <String, String>{};
     for (final t in tabs) {
@@ -607,7 +611,7 @@ class OnlineRepo {
     }
     if (defaults.isNotEmpty) {
       final merged = {...stored, ...defaults};
-      final again = _evalExploreTabs(source, code, merged);
+      final again = _evalExploreTabs(source, code, merged, env: env);
       if (again.isNotEmpty) {
         tabs = again;
         _saveExploreInfo(source, merged);
@@ -616,11 +620,40 @@ class OnlineRepo {
     return _tabsToCategories(tabs);
   }
 
+  /// 异步补全发现分类：脚本里要联网（`java.ajax`、`source.getVariable()` 里再请求）
+  /// 才算得出 tab 的源，同步路径只能拿到空列表。
+  ///
+  /// 抛出的挂起交给 [runWithJsSession] 补网重放，和搜索/正文完全同一条链路。
+  Future<List<ExploreCategory>> exploreCategoriesAsync(BookSource source) async {
+    final sync = parseExploreCategories(source);
+    if (sync.isNotEmpty) return sync;
+    final raw = (source.exploreUrl ?? '').trim();
+    final body = _exploreJsBody(raw);
+    if (body == null) return sync;
+    final session = JsSession();
+    final env = jsEnvFor(source, session);
+    try {
+      final cats = await runWithJsSession(
+        session,
+        () async => _categoriesFromJs(source, body, env: env),
+        (e) => _resolveSuspend(source, session, e),
+      ).timeout(const Duration(seconds: 25));
+      if (cats.isNotEmpty) _rememberCategories(raw, cats);
+      return cats;
+    } catch (_) {
+      return sync;
+    }
+  }
+
   /// 跑一遍发现页脚本，拿到**原始 tab 数组**（含选择器项）。
   static List<Map> _evalExploreTabs(
-      BookSource source, String code, Map<String, String> info) {
+    BookSource source,
+    String code,
+    Map<String, String> info, {
+    JsEnv? env,
+  }) {
     try {
-      final env = JsEnv(
+      env ??= JsEnv(
         scopeKey: source.bookSourceUrl,
         sourceUrl: source.bookSourceUrl,
         sourceName: source.bookSourceName,
@@ -661,11 +694,17 @@ class OnlineRepo {
       final rawList = t.startsWith('[')
           ? jsonDecode(t)
           : (t.startsWith('{') ? jsonDecode('[$t]') : null);
-      if (rawList is! List) return const [];
+      if (rawList is! List) {
+        debugPrint('[explore] 脚本输出非数组：'
+            '${t.length > 120 ? t.substring(0, 120) : t}');
+        return const [];
+      }
       return [
         for (final e in rawList)
           if (e is Map) Map<String, dynamic>.from(e),
       ];
+    } on JsSuspendException {
+      rethrow; // 脚本要联网：交给 runWithJsSession 补网重跑
     } catch (_) {
       return const [];
     }

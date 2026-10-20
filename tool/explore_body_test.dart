@@ -35,7 +35,9 @@ void main() {
       jsLib: s.jsLib,
     );
     final out = JsBridge.evalCode(body, env: env);
-    print('OUT=${out == null ? "null" : out.substring(0, out.length > 200 ? 200 : out.length)}');
+    final head = raw.length > 60 ? raw.substring(0, 60) : raw;
+    print('RAW len=${raw.length} head=${head.replaceAll("\n", "<n>")}');
+    print('OUT=${out == null ? "null" : out.substring(0, out.length > 300 ? 300 : out.length).replaceAll("\n", "<n>")}');
     print('LAST=${JsBridge.lastError}');
   });
 }
