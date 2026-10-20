@@ -16,6 +16,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../models.dart';
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
+import 'cookie_jar.dart';
 import 'http_client.dart';
 import 'js_engine.dart';
 import 'models.dart';
@@ -75,6 +76,7 @@ class OnlineBookService {
         nextChapterUrl: nextChapterUrl,
         // legado：脚本里的 baseUrl 是「当前解析页地址」，不是书源地址。
         baseUrl: baseUrl,
+        getCookie: (tag, key) => LegadoCookieJar.I.getFor(tag, key),
       );
 
   /// 挂起补网：抓取目标写入会话缓存后重跑脚本。

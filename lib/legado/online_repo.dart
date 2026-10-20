@@ -12,6 +12,7 @@ import 'package:xml/xml.dart' as xml;
 
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
+import 'cookie_jar.dart';
 import 'http_client.dart';
 import 'js_engine.dart';
 import 'models.dart';
@@ -176,6 +177,8 @@ class OnlineRepo {
         sourceHeader: source.header,
         jsLib: source.jsLib,
         session: session,
+        // legado：java.getCookie(url[, key]) 读 Cookie 仓库（登录态/会话跨请求）
+        getCookie: (tag, key) => LegadoCookieJar.I.getFor(tag, key),
       );
 
   /// 挂起补网：抓取目标写入会话缓存后重跑脚本。

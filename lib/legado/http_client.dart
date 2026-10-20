@@ -13,6 +13,8 @@ import 'dart:typed_data';
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:http/http.dart' as http;
 
+import 'cookie_jar.dart';
+
 /// 一次请求的响应。
 class SourceResponse {
   SourceResponse({
@@ -63,7 +65,8 @@ class SourceHttpClient {
 
   final http.Client _client;
   final Duration defaultTimeout;
-  final _CookieJar _cookies = _CookieJar();
+  /// 进程级 Cookie 仓库（落盘到 <files>/cookies.json，脚本也能读写）。
+  LegadoCookieJar get _cookies => LegadoCookieJar.I;
 
   /// GET。
   Future<SourceResponse> get(
@@ -374,35 +377,3 @@ String _decodeWith(Uint8List bytes, String? cs) {
   return utf8.decode(bytes, allowMalformed: true);
 }
 
-// ---------- 极简 Cookie 暂存 ----------
-
-class _CookieJar {
-  final Map<String, Map<String, String>> _byHost = {};
-
-  void absorb(Uri uri, Map<String, String> headers) {
-    final setCookie = headers['set-cookie'] ?? headers['Set-Cookie'];
-    if (setCookie == null || setCookie.isEmpty) return;
-    final host = uri.host;
-    final jar = _byHost.putIfAbsent(host, () => {});
-    // 粗粒度解析：按 ", " 拆分多枚 Cookie（忽略 Expires 内的逗号误差）
-    for (final raw in setCookie.split(RegExp(r',(?=[^;=]+=)'))) {
-      final first = raw.split(';').first.trim();
-      final eq = first.indexOf('=');
-      if (eq <= 0) continue;
-      final name = first.substring(0, eq).trim();
-      final value = first.substring(eq + 1).trim();
-      if (name.isEmpty) continue;
-      if (value.isEmpty) {
-        jar.remove(name);
-      } else {
-        jar[name] = value;
-      }
-    }
-  }
-
-  String? headerFor(Uri uri) {
-    final jar = _byHost[uri.host];
-    if (jar == null || jar.isEmpty) return null;
-    return jar.entries.map((e) => '${e.key}=${e.value}').join('; ');
-  }
-}

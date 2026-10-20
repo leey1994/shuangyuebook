@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import 'announcement.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
+import 'legado/cookie_jar.dart';
 import 'legado/source_health.dart';
 import 'legado/source_store.dart';
 import 'legado/source_vars.dart';
@@ -96,6 +97,10 @@ Future<void> main(List<String> args) async {
     final vars = SourceVars();
     await vars.load();
     SourceVars.shared = vars;
+    // Cookie 仓库（同 legado 的 CookieManager）：登录态/会话跨请求、跨重启保留。
+    final cookies = LegadoCookieJar();
+    await cookies.load();
+    LegadoCookieJar.shared = cookies;
     syncImportedSources(sources.enabled);
     sources.addListener(() => syncImportedSources(sources.enabled));
   } catch (_) {}

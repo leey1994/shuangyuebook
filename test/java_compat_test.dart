@@ -9,6 +9,7 @@ import 'dart:io' show ZLibEncoder, gzip, Directory;
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shuangyue/legado/cookie_jar.dart';
 import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/source_vars.dart';
 import 'package:shuangyue/platform/native_bridge.dart';
@@ -211,6 +212,8 @@ void main() {
       final all = JsBridge.evalCode(
           "JSON.parse(source.getVariable())['token']", env: e1);
       expect(all, 'v1');
+      // 没有任何变量时必须返回空串（聚合源靠 JSON.parse 抛错落回默认值）
+      expect(JsBridge.evalCode("source.getVariable()", env: e3), '');
       // 缺失时可给默认值
       expect(
           JsBridge.evalCode("source.getVariable('nope','dft')", env: e1), 'dft');
@@ -223,6 +226,39 @@ void main() {
       try {
         await tmp.delete(recursive: true);
       } catch (_) {}
+    }
+  });
+
+  test('java.getCookie / cookie.setCookie / removeCookie 走 Cookie 仓库', () {
+    final prev = LegadoCookieJar.shared;
+    final jar = LegadoCookieJar();
+    LegadoCookieJar.shared = jar;
+    try {
+      jar.setFor('https://a.com/', 'sid=S1; uid=U9');
+      final env = JsEnv(
+        scopeKey: 'https://a.com',
+        sourceUrl: 'https://a.com',
+        session: JsSession(),
+        getCookie: (tag, key) => LegadoCookieJar.I.getFor(tag, key),
+      );
+      expect(JsBridge.evalCode("java.getCookie('https://a.com/')", env: env),
+          contains('sid=S1'));
+      expect(
+          JsBridge.evalCode("java.getCookie('https://a.com/','uid')", env: env),
+          'U9');
+      // 跨站读不到
+      expect(
+          JsBridge.evalCode("java.getCookie('https://b.com/','uid')", env: env),
+          '');
+      // 写：脚本 setCookie → 仓库可见
+      JsBridge.evalCode(
+          "cookie.setCookie('https://a.com/','new=N9')", env: env);
+      expect(jar.getFor('https://a.com/', 'new'), 'N9');
+      // 删：removeCookie 清空该地址
+      JsBridge.evalCode("cookie.removeCookie('https://a.com/')", env: env);
+      expect(jar.getFor('https://a.com/'), '');
+    } finally {
+      LegadoCookieJar.shared = prev;
     }
   });
 
