@@ -11,6 +11,7 @@ import 'data/stats_store.dart';
 import 'feed_cache.dart';
 import 'legado/source_health.dart';
 import 'legado/source_store.dart';
+import 'legado/source_vars.dart';
 import 'legado/webview_engine.dart';
 import 'pet/pet_store.dart';
 import 'pet/pet_view.dart';
@@ -90,6 +91,11 @@ Future<void> main(List<String> args) async {
     await sources.load();
     await sources.syncBuiltinSources();
     SourceStore.shared = sources;
+    // 书源变量（脚本里 source.getVariable/setVariable 的持久层）：要在任何
+    // 抓取之前就绪，否则「搜索存 token → 正文取 token」的源会拿到空值。
+    final vars = SourceVars();
+    await vars.load();
+    SourceVars.shared = vars;
     syncImportedSources(sources.enabled);
     sources.addListener(() => syncImportedSources(sources.enabled));
   } catch (_) {}

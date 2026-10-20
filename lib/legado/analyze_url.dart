@@ -143,6 +143,53 @@ String _renderJsonQuoted(String s, Map<String, dynamic> vars) {
   return eng.render(s, encodeValues: true);
 }
 
+/// 请求描述对象：书源规则直接返回
+/// `{"method":"POST","url":"https://…","body":"…"}` 时，等价于
+/// 「地址 `,{…}` 选项」写法（可乐小说等 POST 源就是这么写的）。
+const List<String> _urlObjectKeys = [
+  'method',
+  'charset',
+  'headers',
+  'body',
+  'webView',
+  'webJs',
+  'bodyJs',
+  'origin',
+  'retry',
+  'type',
+  'timeout',
+  'followRedirects',
+  'js',
+];
+
+/// 把「请求描述对象」字符串翻译回 `url,{options}` 规范串；不是对象则返回 null。
+String? _urlObjectToTemplate(String s) {
+  final t = s.trim();
+  if (!t.startsWith('{') || !t.endsWith('}')) return null;
+  dynamic d;
+  try {
+    d = jsonDecode(t);
+  } catch (_) {
+    try {
+      d = jsonDecode(_stripTrailingCommas(_singleToDouble(t)));
+    } catch (_) {
+      return null;
+    }
+  }
+  if (d is! Map) return null;
+  final url = (d['url'] ?? d['URL'] ?? d['地址'])?.toString().trim() ?? '';
+  if (url.isEmpty) return null;
+  final opts = <String, dynamic>{};
+  for (final k in _urlObjectKeys) {
+    final v = d[k];
+    if (v == null) continue;
+    // body 允许直接写对象/数组（legado 的 UrlOption.body 是 Any）
+    opts[k] = (v is Map || v is List) ? jsonEncode(v) : v;
+  }
+  if (opts.isEmpty) return url;
+  return '$url,${jsonEncode(opts)}';
+}
+
 // ---------- 渲染与补全 ----------
 
 /// 渲染模板变量（URL 语境：按 charset 百分号编码）。
@@ -234,6 +281,8 @@ UrlTemplate buildRequest(
     s = _stripJsPrelude(s);
     s = RuleAnalyzer.stripTrailingJs(s);
   }
+  // 规则（多半是 JS）可能直接返回请求描述对象：{method,url,body,…}
+  s = _urlObjectToTemplate(s) ?? s;
   final split = _splitOptions(s, vars);
   var t = _withLegacyOptions(UrlTemplate(split.$1, split.$2));
   var options = Map<String, dynamic>.from(t.options);

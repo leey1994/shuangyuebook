@@ -21,6 +21,8 @@ import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:quickjs_engine/quickjs_engine.dart';
 
+import 'source_vars.dart';
+
 import 'java_compat.dart';
 import 'java_compat_js.dart';
 
@@ -564,10 +566,23 @@ abstract final class JsBridge {
     b.writeln('source.getKey = function () { return this.bookSourceUrl; };');
     // legado BaseSource.getVariable/setVariable（书源级变量，脚本常用于缓存 token）
     // 注意：上下文注入在每次求值的独立作用域里，桥函数只能走 globalThis 取。
+    // - getVariable()        无参 → 返回全部变量的 JSON 串（聚合源用来读「打开参数」）
+    // - getVariable(k)       有参 → 单值；可带默认值 getVariable(k, default)
+    // - setVariable(k, v)    写单值；只给一个参数时按「整体覆盖」解析 JSON
     b.writeln('source.getVariable = function (k) { '
-        'var d = globalThis.__lgcall("source.var.get", { k: String(k) }); '
-        'return d ? (d.v === null || d.v === undefined ? "" : String(d.v)) : ""; };');
+        'var d; '
+        'if (k === undefined || k === null) { '
+        'd = globalThis.__lgcall("source.var.all", {}); '
+        'return d && d.v !== undefined && d.v !== null ? String(d.v) : ""; } '
+        'd = globalThis.__lgcall("source.var.get", { k: String(k) }); '
+        'var v = d ? (d.v === null || d.v === undefined ? "" : String(d.v)) : ""; '
+        'if (v === "" && arguments.length > 1 && arguments[1] !== undefined '
+        '&& arguments[1] !== null) { return String(arguments[1]); } '
+        'return v; };');
     b.writeln('source.setVariable = function (k, v) { '
+        'if (v === undefined) { '
+        'globalThis.__lgcall("source.var.putAll", '
+        '{ s: k === null || k === undefined ? "" : String(k) }); return; } '
         'globalThis.__lgcall("source.var.put", { k: String(k), '
         'v: v === null || v === undefined ? null : String(v) }); };');
     final vs = e.vars;
@@ -655,11 +670,69 @@ abstract final class JsBridge {
           return jsonEncode({'v': _kUA});
         case 'var.get':
           return jsonEncode({'v': env?.session?.vars['${p['k'] ?? ''}']});
+        case 'source.var.all':
+          {
+            // 无参 getVariable()：全部变量序列化成 JSON 串（聚合源 getArguments
+            // 会 JSON.parse 它来读「打开参数」）。
+            final url = env?.sourceUrl ?? '';
+            final m = <String, String>{
+              ...?SourceVars.shared?.of(url),
+              ...?env?.session?.vars,
+            };
+            return jsonEncode({'v': jsonEncode(m)});
+          }
+        case 'source.var.putAll':
+          {
+            // 单参 setVariable(<json>)：整体覆盖
+            final url = env?.sourceUrl ?? '';
+            dynamic decoded;
+            try {
+              decoded = jsonDecode('${p['s'] ?? ''}');
+            } catch (_) {
+              decoded = null;
+            }
+            if (decoded is Map) {
+              decoded.forEach((k, v) {
+                final key = '$k';
+                final val = v == null ? '' : '$v';
+                env?.session?.vars[key] = val;
+                if (url.isNotEmpty) {
+                  SourceVars.shared?.set(url, key, val.isEmpty ? null : val);
+                }
+              });
+            }
+            return jsonEncode({'v': null});
+          }
         case 'source.var.get':
-          return jsonEncode({'v': env?.session?.vars['${p['k'] ?? ''}']});
+          {
+            // 先看会话内（同一次操作里 set 过的最新鲜），再落到书源级持久化
+            // （legado 把变量存在书源数据库里，重启后仍在）。
+            final sk = '${p['k'] ?? ''}';
+            final sess = env?.session?.vars;
+            var sVal = sess?[sk];
+            if (sVal == null || sVal.isEmpty) {
+              final url = env?.sourceUrl ?? '';
+              if (url.isNotEmpty) {
+                final stored = SourceVars.shared?.get(url, sk) ?? '';
+                if (stored.isNotEmpty) {
+                  sess?[sk] = stored;
+                  sVal = stored;
+                }
+              }
+            }
+            return jsonEncode({'v': sVal});
+          }
         case 'source.var.put':
-          env?.session?.vars['${p['k'] ?? ''}'] = '${p['v'] ?? ''}';
-          return jsonEncode({'v': null});
+          {
+            final pk = '${p['k'] ?? ''}';
+            final pv = '${p['v'] ?? ''}';
+            env?.session?.vars[pk] = pv;
+            final purl = env?.sourceUrl ?? '';
+            if (purl.isNotEmpty) {
+              SourceVars.shared?.set(purl, pk, pv.isEmpty ? null : pv);
+            }
+            return jsonEncode({'v': null});
+          }
         case 'var.put':
           env?.session?.vars['${p['k'] ?? ''}'] = '${p['v'] ?? ''}';
           return jsonEncode({'v': null});

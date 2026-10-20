@@ -21,7 +21,7 @@ import 'source_store.dart';
 const String kProbeKeyword = '斗破苍穹';
 
 /// 单源探测的硬超时。超时不判死刑，只记为异常。
-const Duration kProbeTimeout = Duration(seconds: 12);
+const Duration kProbeTimeout = Duration(seconds: 25);
 
 /// 一次检测的结论。
 class SourceHealth {

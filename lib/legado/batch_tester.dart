@@ -80,7 +80,7 @@ String _brief(Object e) {
 class BatchTester {
   BatchTester({
     this.concurrency = 2,
-    this.timeout = const Duration(seconds: 15),
+    this.timeout = const Duration(seconds: 45),
     this.keywords = const ['斗破苍穹', '凡人修仙传'],
   });
 

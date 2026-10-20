@@ -553,6 +553,32 @@ void main() {
       expect(t.options['charset'], 'gbk');
     });
 
+    test('规则直接返回请求描述对象（{method,url,body}）', () {
+      // 可乐小说一类 POST 源的写法：searchUrl 返回 JSON 对象而不是地址串
+      final t = buildRequest(
+        '{"method":"POST","url":"https://a.com/?action=search",'
+        '"body":"keyword={{key}}&page={{page}}"}',
+        'https://a.com',
+        {'key': '斗破苍穹', 'page': 1},
+      );
+      expect(t.url, 'https://a.com/?action=search');
+      expect(t.options['method'], 'POST');
+      expect(t.options['body'], 'keyword=斗破苍穹&page=1');
+    });
+
+    test('请求描述对象：单引号 / 对象体 / headers 也能用', () {
+      final t = buildRequest(
+        "{'method':'POST','url':'/s.php','headers':{'X-A':'1'},"
+        "'body':{'keyword':'{{key}}'}}",
+        'https://b.com',
+        {'key': '凡人修仙传', 'page': 1},
+      );
+      expect(t.url, 'https://b.com/s.php');
+      expect(t.options['method'], 'POST');
+      expect(t.options['headers'], {'X-A': '1'});
+      expect(t.options['body'], contains('凡人修仙传'));
+    });
+
     test('buildRequest：body 模板按原始值渲染（不百分号编码）', () {
       final t = buildRequest(
         'https://a.com/s,{"method":"POST","body":"keyword={{key}}&p={{page}}"}',

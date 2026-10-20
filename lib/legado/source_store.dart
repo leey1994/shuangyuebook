@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../platform/native_bridge.dart';
 import 'models.dart';
+import 'source_vars.dart';
 
 /// 导入结果统计。
 class SourceImportReport {
@@ -55,6 +56,15 @@ class SourceStore extends ChangeNotifier {
   File? _file;
   Timer? _saveTimer;
 
+  /// 内置资产清理的版本号：同一版本只清理一次。
+  ///
+  /// 历史版本预置过的书源地址清单（`legacyBuiltinUrls`）只在**升级后首次启动**
+  /// 生效一次；否则用户手动重新导入同址书源后，每次启动都会被再删一遍。
+  int _builtinSyncVersion = 0;
+
+  /// 当前资产清理逻辑的版本。改清理规则时 +1。
+  static const int kBuiltinSyncVersion = 1;
+
   List<BookSource> get sources => List.unmodifiable(_sources);
 
   int get enabledCount => _sources.where((s) => s.enabled).length;
@@ -80,6 +90,11 @@ class SourceStore extends ChangeNotifier {
       if (await _file!.exists()) {
         final data = jsonDecode(await _file!.readAsString());
         if (data is Map && data['sources'] is List) {
+          // 老版本文件没有该字段：它在那些版本里已经按旧清单清理过了，
+          // 视为“已清理”，避免升级后又删一遍用户手动重新导入的书源。
+          final v = data['builtinSyncVersion'];
+          _builtinSyncVersion =
+              v is num ? v.toInt() : kBuiltinSyncVersion;
           for (final item in data['sources'] as List) {
             try {
               final s = BookSource.fromJson(item);
@@ -126,6 +141,8 @@ class SourceStore extends ChangeNotifier {
     final before = _sources.length;
     _sources.removeWhere((s) => s.bookSourceUrl == url);
     if (_sources.length != before) {
+      // 连带清掉该源的脚本变量（legado 删除书源时同样清 BookSourceVariable）
+      SourceVars.shared?.removeSource(url);
       _saveSoon();
       notifyListeners();
     }
@@ -167,6 +184,9 @@ class SourceStore extends ChangeNotifier {
     _sources.removeWhere((s) => targets.contains(s.bookSourceUrl));
     final removed = before - _sources.length;
     if (removed > 0) {
+      for (final u in targets) {
+        SourceVars.shared?.removeSource(u);
+      }
       _saveSoon();
       notifyListeners();
     }
@@ -229,20 +249,27 @@ class SourceStore extends ChangeNotifier {
   /// - `sources`：预置清单，当前为空；
   /// - `legacyBuiltinUrls`：历史版本预置过的地址。这些从旧版本升级上来的用户
   ///   本地已经有它们，启动时按地址删掉，导入区才能真正回到「默认为空」。
-  ///   只删地址完全一致的条目，用户自己导入的同名站点不受影响。
+  ///   只删地址完全一致的条目，用户自己导入的同名站点不受影响；
+  ///   且按 [kBuiltinSyncVersion] **只清一次**，用户重新导入后不会再被删。
   Future<int> syncBuiltinSources() async {
     try {
       final text = await rootBundle.loadString(
         'assets/sources/builtin_sources.json',
       );
-      final removed = _dropLegacyBuiltinSources(text);
+      var removed = 0;
+      var cleaned = false;
+      if (_builtinSyncVersion < kBuiltinSyncVersion) {
+        removed = _dropLegacyBuiltinSources(text);
+        _builtinSyncVersion = kBuiltinSyncVersion;
+        cleaned = true;
+      }
       var added = 0;
       final seeded = _seededFrom(text);
       if (seeded.isNotEmpty) {
         final report = importFromText(seeded);
         added = report.added + report.updated;
       }
-      if (removed > 0 || added > 0) await flush();
+      if (removed > 0 || added > 0 || cleaned) await flush();
       return added + removed;
     } catch (_) {
       return 0;
@@ -315,6 +342,7 @@ class SourceStore extends ChangeNotifier {
       await tmp.writeAsString(
         jsonEncode({
           'version': 1,
+          'builtinSyncVersion': _builtinSyncVersion,
           'sources': _sources.map((s) => s.toJson()).toList(),
         }),
       );

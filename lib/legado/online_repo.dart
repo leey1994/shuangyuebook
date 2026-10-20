@@ -146,7 +146,8 @@ class OnlineRepo {
     required this.store,
     SourceHttpClient? client,
     this.concurrency = 8,
-    this.perSourceTimeout = const Duration(seconds: 15),
+    this.requestTimeout = const Duration(seconds: 15),
+    this.perSourceTimeout = const Duration(seconds: 60),
   }) : _client = client ?? SourceHttpClient();
 
   final SourceStore store;
@@ -155,7 +156,11 @@ class OnlineRepo {
   /// 全局并发上限。
   final int concurrency;
 
-  /// 单源超时。
+  /// 单次 HTTP 请求超时（含挂起补网的 ajax）。
+  final Duration requestTimeout;
+
+  /// 单源总预算：聚合成百上千次 `java.ajax` 的源（墨阅聚合、大灰狼聚合）
+  /// 需要更长时间；超预算后放弃该源，不阻塞其他源。
   final Duration perSourceTimeout;
 
   final Map<String, RateGate> _gates = {};
@@ -191,14 +196,14 @@ class OnlineRepo {
           ? await _client.get(
               e.target,
               headers: headers,
-              timeout: perSourceTimeout,
+              timeout: requestTimeout,
               retries: 0,
             )
           : await _client.post(
               e.target,
               headers: headers,
               body: e.body,
-              timeout: perSourceTimeout,
+              timeout: requestTimeout,
               retries: 0,
             );
       session.ajaxCache[key] = resp.ok ? resp.body : '';
@@ -258,12 +263,20 @@ class OnlineRepo {
   }) async {
     final session = JsSession();
     final env = jsEnvFor(source, session);
-    return runWithJsSession(
-      session,
-      () =>
-          _searchOneInner(source, key, page: page, js: env, session: session),
-      (e) => _resolveSuspend(source, session, e),
-    );
+    try {
+      return await runWithJsSession(
+        session,
+        () =>
+            _searchOneInner(source, key, page: page, js: env, session: session),
+        (e) => _resolveSuspend(source, session, e),
+      ).timeout(perSourceTimeout);
+    } on TimeoutException {
+      return SourceSearchResult(
+        source: source,
+        error: '超时：单源超过 ${perSourceTimeout.inSeconds}s',
+        elapsedMs: perSourceTimeout.inMilliseconds,
+      );
+    }
   }
 
   /// 单源搜索主体（供挂起重跑整体重放）。
@@ -315,14 +328,14 @@ class OnlineRepo {
           headers: headers,
           body: body,
           charset: charset,
-          timeout: perSourceTimeout,
+          timeout: requestTimeout,
         );
       } else {
         resp = await _client.get(
           req.url,
           headers: headers,
           charset: charset,
-          timeout: perSourceTimeout,
+          timeout: requestTimeout,
         );
       }
       if (!resp.ok) {
@@ -595,11 +608,15 @@ class OnlineRepo {
   }) async {
     final session = JsSession();
     final env = jsEnvFor(source, session);
-    return runWithJsSession(
-      session,
-      () => _exploreOneInner(source, category, page: page, js: env),
-      (e) => _resolveSuspend(source, session, e),
-    );
+    try {
+      return await runWithJsSession(
+        session,
+        () => _exploreOneInner(source, category, page: page, js: env),
+        (e) => _resolveSuspend(source, session, e),
+      ).timeout(perSourceTimeout);
+    } on TimeoutException {
+      throw SourceHttpException('超时：单源超过 ${perSourceTimeout.inSeconds}s');
+    }
   }
 
   Future<List<SearchBook>> _exploreOneInner(
@@ -615,7 +632,7 @@ class OnlineRepo {
     final resp = await _client.get(
       url,
       headers: headers,
-      timeout: perSourceTimeout,
+      timeout: requestTimeout,
     );
     if (!resp.ok) throw SourceHttpException('HTTP ${resp.statusCode}');
     return parseExplorePage(source, resp.body, js: js, pageUrl: url);
@@ -877,7 +894,7 @@ class OnlineRepo {
         await _client.get(
           url,
           headers: headers,
-          timeout: perSourceTimeout,
+          timeout: requestTimeout,
           retries: 0,
         );
       } catch (_) {

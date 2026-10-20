@@ -5,11 +5,13 @@
 //               "C:\Users\leey1\Desktop\A\A1\shuangyue\build\windows\x64\plugins\quickjs_engine\Release;" + $env:PATH
 //   flutter test test/java_compat_test.dart -r expanded
 import 'dart:convert';
-import 'dart:io' show ZLibEncoder, gzip;
+import 'dart:io' show ZLibEncoder, gzip, Directory;
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/js_engine.dart';
+import 'package:shuangyue/legado/source_vars.dart';
+import 'package:shuangyue/platform/native_bridge.dart';
 
 /// 在一个共享运行时里求值（与真实书源一致：同 scope 复用全局）。
 String? ev(String code, {String scope = 'compat-test'}) {
@@ -182,6 +184,46 @@ void main() {
         ev("(function(){var result=$r;"
             "return result.select('td').get(1).select('a').text();})()"),
         '书名');
+  });
+
+  test('source.setVariable 跨会话可见（持久层）', () async {
+    final tmp = await Directory.systemTemp.createTemp('svars_js_');
+    final prev = SourceVars.shared;
+    SourceVars.shared =
+        SourceVars(dirsOverride: AppDirs(files: tmp.path, cache: tmp.path));
+    try {
+      const url = 'https://example.com';
+      final e1 = JsEnv(scopeKey: url, sourceUrl: url, session: JsSession());
+      expect(
+          JsBridge.evalCode("source.setVariable('token','v1'); 'ok'",
+              env: e1),
+          'ok');
+      // 新会话（模拟「正文阶段另起一次操作」）仍能读到
+      final e2 = JsEnv(scopeKey: url, sourceUrl: url, session: JsSession());
+      expect(JsBridge.evalCode("source.getVariable('token')", env: e2), 'v1');
+      // 其它书源读不到
+      final e3 = JsEnv(
+          scopeKey: 'https://other.com',
+          sourceUrl: 'https://other.com',
+          session: JsSession());
+      expect(JsBridge.evalCode("source.getVariable('token')", env: e3), '');
+      // 无参 getVariable() 返回全部变量的 JSON（聚合源 getArguments 靠它）
+      final all = JsBridge.evalCode(
+          "JSON.parse(source.getVariable())['token']", env: e1);
+      expect(all, 'v1');
+      // 缺失时可给默认值
+      expect(
+          JsBridge.evalCode("source.getVariable('nope','dft')", env: e1), 'dft');
+      // 单参 setVariable 整体覆盖
+      JsBridge.evalCode(
+          "source.setVariable(JSON.stringify({a:'1',b:'2'}))", env: e1);
+      expect(JsBridge.evalCode("source.getVariable('b')", env: e1), '2');
+    } finally {
+      SourceVars.shared = prev;
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    }
   });
 
   test('System / UUID / Integer / StringBuilder', () {
