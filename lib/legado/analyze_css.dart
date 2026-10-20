@@ -155,6 +155,93 @@ String _normalizeSelector(String p) {
 /// 解析 HTML 文本为文档对象（容错）。
 dom.Document parseHtml(String html) => html_parser.parse(html);
 
+/// 按顶层的兄弟组合子（`~` 后继兄弟 / `+` 紧邻兄弟）切段。
+/// 括号、中括号与引号内的 `~`/`+` 不切（`[href~=x]`、`:contains(a+b)`）。
+List<(String, String)>? _splitSiblingChain(String s) {
+  final parts = <(String, String)>[];
+  var depth = 0;
+  String? quote;
+  var start = 0;
+  var comb = '';
+  for (var i = 0; i < s.length; i++) {
+    final ch = s[i];
+    if (quote != null) {
+      if (ch == quote) quote = null;
+      continue;
+    }
+    if (ch == '"' || ch == "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch == '(' || ch == '[') {
+      depth++;
+      continue;
+    }
+    if (ch == ')' || ch == ']') {
+      if (depth > 0) depth--;
+      continue;
+    }
+    if (depth == 0 && (ch == '~' || ch == '+')) {
+      parts.add((s.substring(start, i).trim(), comb));
+      comb = ch;
+      start = i + 1;
+    }
+  }
+  if (parts.isEmpty) return null;
+  parts.add((s.substring(start).trim(), comb));
+  return parts.isEmpty ? null : parts;
+}
+
+/// `A ~ B C`：A 的后继兄弟里挑出 B，再在 B 内取 C（jsoup 的 `~` 语义）。
+///
+/// package:html 不认 jsoup 的 `:contains`，两者同时出现时整条选择器会静默 0
+/// 命中（抖音小说目录 `#list dt:contains(正文) ~ dd a` 就是这样丢的）。
+List<dom.Element> _selectBySiblingChain(
+  dom.Node context,
+  List<(String, String)> parts,
+) {
+  var set = selectElements(context, parts.first.$1);
+  for (var i = 1; i < parts.length; i++) {
+    final comb = parts[i].$2;
+    final seg = parts[i].$1;
+    if (seg.isEmpty || set.isEmpty) return const [];
+    final sp = _splitTopLevelSpaces(seg);
+    final head = sp.first;
+    final rest = sp.length > 1 ? sp.sublist(1).join(' ') : '';
+    final matched = selectElements(context, head).toSet();
+    final picked = <dom.Element>[];
+    for (final e in set) {
+      if (comb == '+') {
+        final n = e.nextElementSibling;
+        if (n != null && matched.contains(n)) picked.add(n);
+      } else {
+        var n = e.nextElementSibling;
+        while (n != null) {
+          if (matched.contains(n)) picked.add(n);
+          n = n.nextElementSibling;
+        }
+      }
+    }
+    if (rest.isEmpty) {
+      set = picked;
+    } else {
+      final out = <dom.Element>[];
+      for (final e in picked) {
+        out.addAll(selectElements(e, rest));
+      }
+      set = out;
+    }
+  }
+  // jsoup 的 select 每个元素只出现一次：多个兄弟起点会重复命中同一批元素
+  // （两个 `dt ~ dd` 起点各带一遍 dd），这里按身份去重保序。
+  final seen = <dom.Element>{};
+  final uniq = <dom.Element>[];
+  for (final e in set) {
+    if (seen.add(e)) uniq.add(e);
+  }
+  return uniq;
+}
+
 /// 在上下文节点（Document 或 Element）内执行 CSS 元素选择。
 ///
 /// package:html/csslib 不支持的常见形态由本函数降级实现：
@@ -168,6 +255,13 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
   final filter = _splitTrailingFilter(s);
   if (filter != null) {
     return _applyListFilter(selectElements(context, filter.$1), filter.$2);
+  }
+  // 兄弟组合子 `~`/`+`：命中靠自实现的链式求值，能与 jsoup 伪类共存。
+  // 非空即采用；为空时继续走原路径（兼容 package:html 自己的语义）。
+  final chain = _splitSiblingChain(s);
+  if (chain != null) {
+    final out = _selectBySiblingChain(context, chain);
+    if (out.isNotEmpty) return out;
   }
   final has = _splitTrailingHas(s);
   if (has != null) {

@@ -15,9 +15,13 @@ import 'package:shuangyue/legado/online_repo.dart';
 const _src = String.fromEnvironment('SRC');
 const _name = String.fromEnvironment('NAME');
 const _book = String.fromEnvironment('BOOK');
+// 逗号分隔的临时 CSS 规则，用来逐段定位选择器在哪一级断掉。
+const _css = String.fromEnvironment('CSS');
 
 Future<String> _get(String url) async =>
     (await SourceHttpClient().get(url)).body;
+
+AnalyzeRule eng0(String html) => AnalyzeRule(html, baseUrl: _book);
 
 void main() {
   test('toc rule probe', () async {
@@ -39,6 +43,11 @@ void main() {
     final hits2 = RegExp(r'href="[^"]*/book/(\d+)/(\d+)\.html"').allMatches(html).length;
     print('正则命中(任意前缀)=$hits2');
     print('章节链接样本=$sample');
+    if (_css.isNotEmpty) {
+      for (final r in _css.split('||')) {
+        print('CSS[$r] → ${eng0(html).getStrings(r).length} 条');
+      }
+    }
     final session = JsSession();
     final env = OnlineRepo.jsEnvFor(s, session);
     session.ajaxCache[JsBridge.ajaxKey('GET', _book, null)] = html;
