@@ -18,6 +18,7 @@ import 'js_engine.dart';
 import 'models.dart';
 import 'online_book_service.dart';
 import 'source_store.dart';
+import 'webview_engine.dart';
 
 /// 单源搜索的结果（或错误）。
 class SourceSearchResult {
@@ -189,8 +190,28 @@ class OnlineRepo {
     JsSuspendException e,
   ) async {
     if (e.kind == 'webview') {
-      // WebView 渲染规则为 P2：先以空响应继续，避免死循环
-      session.webViewCache[e.target] = '';
+      // legado `java.webView(url)` = WebView 打开后返回渲染 HTML。
+      // 探索/搜索脚本（七猫聚合、起点、智能书库…）都靠它拿 JS 生成的内容。
+      var html = '';
+      try {
+        html = await WebViewEngine.instance.fetchRenderedHtml(url: e.target);
+      } catch (_) {
+        html = '';
+      }
+      if (html.trim().isEmpty) {
+        try {
+          final resp = await _client.get(
+            e.target,
+            headers: _mergeHeaders(source, e.headers),
+            timeout: requestTimeout,
+            retries: 0,
+          );
+          if (resp.ok) html = resp.body;
+        } catch (_) {
+          html = '';
+        }
+      }
+      session.webViewCache[e.target] = html;
       return;
     }
     final key = JsBridge.ajaxKey(e.method, e.target, e.body);

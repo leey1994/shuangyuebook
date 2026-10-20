@@ -87,8 +87,23 @@ class OnlineBookService {
     JsSuspendException e,
   ) async {
     if (e.kind == 'webview') {
-      // WebView 渲染规则为 P2：先以空响应继续，避免死循环
-      session.webViewCache[e.target] = '';
+      // legado `java.webView(url)` = 「用 WebView 打开并返回渲染后的 HTML」。
+      // Android 有 WebView 内核时真渲染；桌面端（或渲染为空）退回 HTTP 抓取，
+      // 至少让不依赖 JS 的站点还能出内容，而不是直接空串。
+      var html = '';
+      try {
+        html = await WebViewEngine.instance.fetchRenderedHtml(url: e.target);
+      } catch (_) {
+        html = '';
+      }
+      if (html.trim().isEmpty) {
+        try {
+          html = await _getHtml(source, e.target);
+        } catch (_) {
+          html = '';
+        }
+      }
+      session.webViewCache[e.target] = html;
       return;
     }
     final key = JsBridge.ajaxKey(e.method, e.target, e.body);
@@ -407,9 +422,27 @@ class OnlineBookService {
     final raw = source.contentRule?.content ?? '';
     if (raw.trim().isEmpty) return '';
 
-    final html = await _getHtml(source, chapterUrl);
+    // 章网址尾缀里的请求选项（塔读 `,{"webView":true}`）同样要开渲染：
+    // 这类站点的正文由页面 JS 注入，静态抓只能拿到壳页。
+    final (plainUrl, suffix) = splitUrlSuffix(chapterUrl);
+    final suffixWebView = suffix.contains('webView');
+    String? rendered;
+    if (suffixWebView && !(_flag(source.extra['webView']) && WebViewEngine.supported)) {
+      try {
+        rendered = await WebViewEngine.instance.fetchRenderedHtml(
+          url: webViewChapterUrl(source, plainUrl),
+        );
+      } catch (_) {
+        rendered = null;
+      }
+    }
+
+    final html = (rendered != null && rendered.trim().isNotEmpty)
+        ? rendered
+        : await _getHtml(source, suffixWebView ? plainUrl : chapterUrl);
+    final pageUrl = suffixWebView ? plainUrl : chapterUrl;
     engine =
-        AnalyzeRule(html, baseUrl: chapterUrl, vars: vars, js: env);
+        AnalyzeRule(html, baseUrl: pageUrl, vars: vars, js: env);
     // 正文通常是多段：取规则命中的**全部**结果并按段拼回（getString 只会取第一段）
     var text = cleanChapterText(engine.getStrings(raw).join('\n'));
 

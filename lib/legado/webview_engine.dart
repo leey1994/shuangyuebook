@@ -175,6 +175,53 @@ class WebViewEngine {
     return s;
   }
 
+  /// 测试/Windows 用的渲染替身：设置后 [fetchRenderedHtml] 直接走它。
+  ///
+  /// 书源脚本里的 `java.webView` 在桌面端没有 WebView 内核，靠它把
+  /// 「渲染结果」注入进来做回归（生产环境保持 null）。
+  static Future<String> Function(String url)? debugRenderer;
+
+  /// 打开 [url] 并返回**渲染后的整页 HTML**（legado `java.webView` 语义）。
+  ///
+  /// 与 [fetchRenderedText] 的区别：这里不做正文抽取，把 DOM 原样交回，
+  /// 由书源的 `ruleContent.content` 规则去解析——塔读 `#partContent@html`、
+  /// 17k `id.Context@article@p@html` 都依赖这条链路。
+  Future<String> fetchRenderedHtml({
+    required String url,
+    Duration settle = const Duration(milliseconds: 800),
+    Duration totalWait = const Duration(seconds: 20),
+    int minChars = 200,
+  }) {
+    final hook = debugRenderer;
+    if (hook != null) return hook(url);
+    if (!supported) return Future<String>.value('');
+    return _enqueue(() async {
+      final c = ensureController();
+      await _ensureWarm(c);
+      final done = Completer<void>();
+      _pageFinished = done;
+      try {
+        await c.loadRequest(Uri.parse(url));
+      } catch (_) {}
+      await done.future.timeout(const Duration(seconds: 15), onTimeout: () {});
+      _pageFinished = null;
+      await Future<void>.delayed(settle);
+      const js = 'String(document.documentElement ? '
+          'document.documentElement.outerHTML : "")';
+      final deadline = DateTime.now().add(totalWait);
+      var last = '';
+      while (DateTime.now().isBefore(deadline)) {
+        try {
+          final html = _decodeJsString(await c.runJavaScriptReturningResult(js));
+          if (html.length > last.length) last = html;
+          if (html.length >= minChars) return html;
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+      return last;
+    });
+  }
+
   /// 注入脚本：只从「明确候选容器」里取正文，并做质量校验。
   ///
   /// 质量校验（任一不通过即视为“抓到的不是正文”）：
