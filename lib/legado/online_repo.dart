@@ -198,14 +198,14 @@ class OnlineRepo {
       } catch (_) {
         html = '';
       }
-      if (html.trim().isEmpty) {
+      if (html.trim().isEmpty && WebViewEngine.supported) {
         try {
           final resp = await _client.get(
             e.target,
             headers: _mergeHeaders(source, e.headers),
             timeout: requestTimeout,
             retries: 0,
-          );
+          ).timeout(const Duration(seconds: 6));
           if (resp.ok) html = resp.body;
         } catch (_) {
           html = '';

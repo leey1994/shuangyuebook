@@ -42,4 +42,18 @@ void main() {
     expect(_texts('span a').length, 3);
     expect(_texts('.g').map((t) => t).toList(), ['耽美']);
   });
+
+  // jsoup 文本伪类：9 个书源在用（书豪小说网、速读谷、抖音小说…）。
+  test('contains / containsOwn 文本伪类', () {
+    expect(_texts('a:contains(斗破)'), ['斗破苍穹']);
+    expect(_texts('a:contains(斗破)').length, 1);
+    expect(_texts('span a:contains(千里)'), ['千里']);
+    // 大小写不敏感 + 引号包裹
+    expect(_texts('a:contains("耽美")'), ['耽美']);
+    // 未命中返回空，不抛
+    expect(_texts('a:contains(不存在)'), isEmpty);
+    // containsOwn 只看自身直接文本：`<em>斗破</em>苍穹` 的 a 自身文本是「苍穹」
+    expect(_texts('a:containsOwn(苍穹)'), ['斗破苍穹']);
+    expect(_texts('a:containsOwn(斗破)'), isEmpty);
+  });
 }

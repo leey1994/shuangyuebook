@@ -96,9 +96,12 @@ class OnlineBookService {
       } catch (_) {
         html = '';
       }
-      if (html.trim().isEmpty) {
+      if (html.trim().isEmpty && WebViewEngine.supported) {
         try {
-          html = await _getHtml(source, e.target);
+          // 仅在「有 WebView 内核但渲染失败」时降级抓取：桌面端没有内核，
+          // 抓也是壳页/超时，反而把书源整体拖到平台超时之外。
+          html = await _getHtml(source, e.target)
+              .timeout(const Duration(seconds: 6));
         } catch (_) {
           html = '';
         }

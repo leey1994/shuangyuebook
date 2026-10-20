@@ -176,6 +176,26 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
         if (e.querySelector(has.$2) != null) e,
     ];
   }
+  // jsoup 文本伪类 `:contains(text)` / `:containsOwn(text)`（9 个源在用）：
+  // package:html 不认识，静默 0 命中。语义对齐 jsoup——`contains` 看整棵
+  // 子树的 `text`，`containsOwn` 只看元素自身直接文本，均大小写不敏感。
+  final cont = _containsPseudo.firstMatch(s);
+  if (cont != null) {
+    final own = cont.group(1) != null;
+    final needle = cont
+        .group(2)!
+        .trim()
+        .replaceAll(RegExp(r'''^["']+|["']+$'''), '')
+        .trim()
+        .toLowerCase();
+    final base = (s.substring(0, cont.start) + s.substring(cont.end)).trim();
+    if (needle.isEmpty) return selectElements(context, base);
+    final pool = base.isEmpty ? _allElements(context) : selectElements(context, base);
+    return [
+      for (final e in pool)
+        if ((own ? _ownText(e) : e.text).toLowerCase().contains(needle)) e,
+    ];
+  }
   final attrRe = _splitAttrRegex(s);
   if (attrRe != null) {
     final base = selectElements(context, attrRe.$1);
@@ -235,6 +255,18 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
 }
 
 // ---------- 组合选择器里的位置伪类 ----------
+
+/// jsoup 文本伪类：`:contains(x)` / `:containsOwn(x)`。
+final RegExp _containsPseudo =
+    RegExp(r':contains(own)?\(\s*([^)]*)\)', caseSensitive: false);
+
+/// 上下文下的全部元素（Document / Element 统一入口）。
+List<dom.Element> _allElements(dom.Node context) {
+  if (context is dom.Document) return context.querySelectorAll('*');
+  if (context is dom.Element) return context.querySelectorAll('*');
+  return const [];
+}
+
 
 final RegExp _posPseudo = RegExp(
     r':(nth-child|nth-last-child|nth-of-type|eq|lt|gt)\s*\('
