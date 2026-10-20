@@ -1,8 +1,8 @@
 {
-  "id": "20261020-v103",
-  "version": "v1.0.3",
-  "title": "爽阅 V1.0.3：书源解析更准 + 进章翻页更快",
-  "body": "【更新内容】\n· 书源解析：XPath 的相对路径（./ ../ .//）、and/or/not/starts-with/string() 现在都认；目录用 XPath、字段用 CSS 写法的源不再把整页链接当成章节（那类源以前会莫名只剩 1 章）；@Json:/@XPath: 等大写前缀也认；## 替换链不再提前吃掉换行，多行正文保持原结构。\n· 速度：正文分页改成先排第一屏、其余逐帧补算，进章不再先白屏卡 200~300 毫秒；规则只解析一次（整页解析快约 30%，## 链快约 2.7 倍）；发现页请求头与分类 1 分钟内复用；空搜索结果不再进缓存。\n· 存储：章节缓存改一章一文件，进章更快、写盘更小，旧缓存自动迁移；清理缓存保留听书音频；章内翻页只写一条进度，掉帧更少。\n\n【下载与更新】\n在线更新地址是 GitHub：应用内「我的 → 检查更新」从 GitHub Releases 拉最新版，能连上就直接一键升级。\n部分网络下 GitHub 打不开（下载龟速、反复失败、或提示「检查更新失败」），这种情况请改用网盘下载，安装包与 GitHub 上的完全相同：\nhttps://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe\n上面这张二维码就是该网盘地址，扫码或长按下方地址复制都可以。\n\n安装包按手机架构分包：64 位手机用 arm64-v8a（约 24 MB），32 位老机型装不上时再换 armeabi-v7a（约 22 MB）；Windows 解压后双击 novel_reader.exe。均为覆盖安装，书架、书源、进度、听书音频都不会丢。\n\n 网盘下载（GitHub 不通时用）https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe",
+  "id": "20261021-v104",
+  "version": "v1.0.4",
+  "title": "爽阅 V1.0.4：能换字体了 · 1000 条书源不卡 · 切章不干等",
+  "body": "【更新内容】\n· 字体：应用不再内置字体文件（装包体积不变），新增「思源宋体 / 思源黑体 / 霞鹜文楷」三款可选，点了才下载（约 8~13 MB，面板里显示进度），下完自动生效；字体存在本机，清理阅读缓存不会删，断网也能用；入口在阅读器「排版」页与「我的 → 阅读 → 阅读字体」。\n· 切章速度：同一章只抓一次（预取与正文共用同一请求）、最近 8 章留在内存来回翻是瞬开、预取给前台让路、慢源只预取一章、滚动模式离章末一屏半就提前备粮。\n· 书源性能：书源管理页只画看得见的行（1000 条不再每帧全建），新增搜索（名称/地址/分组 + 仅看已启用）、改一条书源不再全表重算、批量启用删除只通知一次、导入导出与开机读 1000 条的 JSON 处理挪到后台线程，界面不再僵住。\n· 流畅度：桌宠待机不再每帧重画整屏（切后台/省电动画/关闭桌宠时停表）、阅读页脚时间不再拖着整页重建、封面加隔离层、开机时磁盘缓存与统计挪到界面出来之后再做。\n· 书源脚本：发现页 JS 形态 exploreUrl（含 infoMap 分栏选择器、分类异步补全）；jsoup 节点树导航 children/parent/nextElementSibling/previousElementSibling/ownText；java.getElement(s)/setContent/字节与交互类成员；Packages.java 加密链路修复；createSymmetricCrypto；@loginInfo / @loginHeader / book 变量；data: URI 本地响应；java.webView 与章网址 {\"webView\":true} 真实渲染；:contains() / :containsOwn()；CSS 兄弟组合子 ~ / +。\n· 规则：目录顺序前缀 - / +；字符串上下文里的子规则按片段解析；JS 里 try/catch 吞掉的「挂起」不再丢（目录只出 1 章的源恢复）；请求头含中文占位不再整条源报错。\n· 其他：124 条真实书源探针四项命中数持平或更好；站点侧 403/超时不算回归。\n\n【下载与更新】\n在线更新地址是 GitHub：应用内「我的 → 检查更新」从 GitHub Releases 拉最新版，能连上就直接一键升级。\n部分网络下 GitHub 打不开（下载龟速、反复失败、或提示「检查更新失败」），这种情况请改用网盘下载，安装包与 GitHub 上的完全相同：\nhttps://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe\n上面这张二维码就是该网盘地址，扫码或长按下方地址复制都可以。\n\n安装包按手机架构分包：64 位手机用 arm64-v8a（约 25 MB），32 位老机型装不上时再换 armeabi-v7a（约 23 MB）；Windows 解压后双击 novel_reader.exe。均为覆盖安装，书架、书源、进度、听书音频都不会丢。\n\n 网盘下载（GitHub 不通时用）https://www.doubao.com/drive/shr/Ae8Lf3gNdl2AuJd9GVWcGD3VnTe",
   "image": "assets/qr-doubao-drive.png",
   "links": [
     {
@@ -16,5 +16,5 @@
   ],
   "enabled": true,
   "min_version": "0.0.4",
-  "updated_at": "2026-10-20"
+  "updated_at": "2026-10-21"
 }

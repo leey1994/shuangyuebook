@@ -128,7 +128,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
     <div class="grid">
       <div class="card">
         <h3>书源</h3>
-        <p class="muted">内置 13 个书源（全部手写原生适配、随包内置）：搜索、详情、目录、正文全链路直连各站点；也支持导入「阅读 3.0」格式书源，可批量启停、删除与导出。导入后自动体检，失效的直接移除并说明原因。</p>
+        <p class="muted">内置 13 个书源（全部手写原生适配、随包内置）：搜索、详情、目录、正文全链路直连各站点；也支持导入「阅读 3.0」格式书源，可批量启停、删除与导出，支持按名称 / 地址 / 分组搜索。导入上千条也不卡（列表只画看得见的行，解析在后台线程）。导入后自动体检，失效的直接移除并说明原因。</p>
       </div>
       <div class="card">
         <h3>排行发现</h3>
@@ -136,7 +136,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
       </div>
       <div class="card">
         <h3>阅读</h3>
-        <p class="muted">四种翻页、行距字距主题、六档护眼背景、离线缓存、整本下载与断点续传；换源续读按章节名自动对齐进度。</p>
+        <p class="muted">四种翻页、行距字距主题、六档护眼背景、可下载更换的正文字体（思源宋体 / 思源黑体 / 霞鹜文楷）、离线缓存、整本下载与断点续传；换源续读按章节名自动对齐进度。</p>
       </div>
       <div class="card">
         <h3>本地书</h3>
@@ -198,6 +198,36 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 
 <section>
   <div class="wrap">
+    <h2>本版更新（V1.0.4）</h2>
+    <p class="muted">切章不再干等、能换字体了，导入上千条书源也不卡。覆盖安装即可升级，书架、书源、进度、缓存、听书音频全部保留。</p>
+    <div class="grid">
+      <div class="card">
+        <h3>字体 · 不用再忍受系统默认</h3>
+        <p class="muted">应用不再内置字体文件（装包体积一点没涨）。新增思源宋体 / 思源黑体 / 霞鹜文楷三款，<b>点了才下载</b>（约 8~13 MB，面板里显示进度），下完自动生效；字体存在本机，清理阅读缓存不会删，断网也能用。入口在阅读器「排版」页与「我的 → 阅读 → 阅读字体」。</p>
+      </div>
+      <div class="card">
+        <h3>切章 · 不再干等</h3>
+        <p class="muted">同一章只抓一次（预取与正文共用同一请求）；最近 8 章留在内存，来回翻是瞬开；预取给前台让路，不再抢同一个站点的限速；滚动模式离章末一屏半就提前备粮。</p>
+      </div>
+      <div class="card">
+        <h3>书源 · 1000 条也不卡</h3>
+        <p class="muted">书源管理页只画看得见的那几行；新增搜索（名称 / 地址 / 分组 + 仅看已启用）；改一条书源不再全表重算；批量启用删除只通知一次；导入导出与开机读 1000 条的 JSON 处理挪到后台线程。</p>
+      </div>
+      <div class="card">
+        <h3>流畅度 · 低端机也跟得上</h3>
+        <p class="muted">桌宠待机不再每帧重画整屏（切后台 / 省电动画 / 关掉桌宠时直接停表）；阅读页脚时间不再拖着整页重建；封面加隔离层；开机时磁盘缓存与统计挪到界面出来之后再做。</p>
+      </div>
+      <div class="card">
+        <h3>书源脚本 · 更像原版</h3>
+        <p class="muted">发现页 JS 形态 exploreUrl（含 infoMap 分栏选择器、分类异步补全）；jsoup 节点树导航；java.* 接口补齐；Packages.java 加密链路修复；WebView 真实渲染；:contains() / :containsOwn()；CSS 兄弟组合子 ~ / +；目录顺序前缀 - / +。</p>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:14px">完整清单见 <a href="https://github.com/leey1994/shuangyuebook/blob/main/docs/release-notes-v1.0.4.md">docs/release-notes-v1.0.4.md</a>。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>从源码构建</h2>
     <p class="muted">需要 Flutter 3.47 或更高。发版请带 <code>--dart-define=APP_VERSION=&lt;版本号&gt;</code>，自动更新靠它判断新旧。</p>
     <p><code>git clone https://github.com/leey1994/shuangyuebook</code></p>
@@ -216,7 +246,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 // announcement.json 里的 version，最后才用页面里写死的默认值。
 // 这样发一次版，网页自己就跟上，不用再改一次 HTML。
 (function () {
-  var FALLBACK = 'v1.0.3';
+  var FALLBACK = 'v1.0.4';
   var REPO = 'leey1994/shuangyuebook';
 
   function apply(v) {
