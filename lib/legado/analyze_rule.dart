@@ -356,6 +356,7 @@ class AnalyzeRule {
       baseUrl: b?.baseUrl ?? baseUrl,
       sourceName: b?.sourceName ?? '',
       sourceHeader: b?.sourceHeader,
+      sourceJson: b?.sourceJson,
       jsLib: b?.jsLib,
       book: b?.book ??
           (vars['book'] is Map

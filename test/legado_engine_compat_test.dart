@@ -856,4 +856,28 @@ java.base64Encode(plain) + '|' + (typeof org.jsoup.Jsoup.connect);
     final s = JsBridge.evalCode('[String(123), new String("a") + "b", String.fromCharCode(66)]');
     expect('$s'.contains('123'), true);
   });
+
+  // 上游把整个 BookSource 实体绑成脚本里的 source，不少源靠它自举：
+  // 爱丽丝书屋的 searchUrl 是 `{{eval(String(source.loginUrl));GetUL();}}/search.html…`，
+  // 拿不到 loginUrl 就只能拼出相对地址，最后报「无效的地址：/search.html…」。
+  test('source 实体字段（loginUrl / searchUrl / comment）注入脚本', () {
+    final env = JsEnv(
+      scopeKey: 'src-fields',
+      sourceUrl: 'https://a.com',
+      sourceJson: {
+        'loginUrl': "source.setVariable(JSON.stringify({sourl:'https://a.com'}))",
+        'searchUrl': '/search.html?q={{key}}',
+        'bookSourceComment': '说明文字',
+        'enabledCookieJar': false,
+      },
+    );
+    expect(JsBridge.evalCode('source.loginUrl', env: env),
+        "source.setVariable(JSON.stringify({sourl:'https://a.com'}))");
+    expect(JsBridge.evalCode('source.searchUrl', env: env),
+        '/search.html?q={{key}}');
+    expect(JsBridge.evalCode('source.bookSourceComment', env: env), '说明文字');
+    expect(JsBridge.evalCode('typeof source.enabledCookieJar', env: env), 'boolean');
+    // 本次求值的绑定值优先于实体字段
+    expect(JsBridge.evalCode('source.bookSourceUrl', env: env), 'https://a.com');
+  });
 }

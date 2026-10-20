@@ -94,6 +94,7 @@ class JsEnv {
     this.baseUrl,
     this.sourceName = '',
     this.sourceHeader,
+    this.sourceJson,
     this.jsLib,
     this.book,
     this.chapter,
@@ -116,6 +117,13 @@ class JsEnv {
 
   final String sourceName;
   final String? sourceHeader;
+
+  /// 书源实体字段（`source.loginUrl` / `source.searchUrl` / `source.bookSourceComment`…）。
+  ///
+  /// 上游把整个 BookSource 实体绑给脚本，很多源靠它自举：例如爱丽丝书屋的
+  /// `{{eval(String(source.loginUrl));GetUL();}}`（用 loginUrl 里的脚本初始化
+  /// 站源变量），没有 loginUrl 就只能拼出相对地址 `/search.html?…`。
+  final Map<String, dynamic>? sourceJson;
 
   /// 书源 jsLib：首次使用时在运行时内求值一次。
   final String? jsLib;
@@ -148,6 +156,7 @@ class JsEnv {
     String? baseUrl,
     String? sourceName,
     String? sourceHeader,
+    Map<String, dynamic>? sourceJson,
     String? jsLib,
     Map<String, dynamic>? book,
     Map<String, dynamic>? chapter,
@@ -165,6 +174,7 @@ class JsEnv {
         baseUrl: baseUrl ?? this.baseUrl,
         sourceName: sourceName ?? this.sourceName,
         sourceHeader: sourceHeader ?? this.sourceHeader,
+        sourceJson: sourceJson ?? this.sourceJson,
         jsLib: jsLib ?? this.jsLib,
         book: book ?? this.book,
         chapter: chapter ?? this.chapter,
@@ -599,6 +609,26 @@ abstract final class JsBridge {
 
   static final RegExp _identRe = RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*$');
 
+  /// `BaseSource.put/get/remove` 的最小实现（`$obj`/`$map` 由 [_setup] 替换）。
+  ///
+  /// 上游这三者是「只在运行期存在」的键值表，书源脚本用它跨卡片传状态
+  /// （例如七猫聚合 `source.put('qma_status', …)`、`source.get('qma_meta')`）。
+  static const String _kPutShim = r'''
+globalThis.$map = globalThis.$map || {};
+$obj.put = function (k, v) {
+  if (k === undefined || k === null) return;
+  globalThis.$map[String(k)] = (v === undefined || v === null) ? '' : String(v);
+};
+$obj.get = function (k) {
+  if (k === undefined || k === null) return null;
+  var v = globalThis.$map[String(k)];
+  return v === undefined ? null : v;
+};
+$obj.remove = function (k) {
+  if (k === undefined || k === null) return;
+  try { delete globalThis.$map[String(k)]; } catch (e) {}
+};''';
+
   /// 保留名：上下文装配中已固定赋值，禁止被 vars 覆盖（避免把对象当字符串注入）。
   static const Set<String> _kReserved = {
     'result', 'baseUrl', 'nextChapterUrl', 'title', 'book', 'source',
@@ -621,6 +651,9 @@ abstract final class JsBridge {
         '${e.chapter == null ? 'null' : _jsonOrString(e.chapter!)};');
     b.writeln(
         'var source = ${jsonEncode(<String, dynamic>{
+      // 书源实体字段先铺开（loginUrl / searchUrl / exploreUrl / bookSourceComment…），
+      // 再覆盖成本次求值的绑定值，语义与上游「source 就是 BookSource 实体」一致。
+      ...?e.sourceJson,
       'bookSourceUrl': e.sourceUrl,
       'bookSourceName': e.sourceName,
       'header': e.sourceHeader ?? '',
@@ -647,6 +680,11 @@ abstract final class JsBridge {
         '{ s: k === null || k === undefined ? "" : String(k) }); return; } '
         'globalThis.__lgcall("source.var.put", { k: String(k), '
         'v: v === null || v === undefined ? null : String(v) }); };');
+    // legado BaseSource 的 put/get/remove：会话期内存键值（书源脚本用来跨卡片
+    // 传状态，例如七猫聚合 `source.put('qma_status', …)`）。上游存在 source 实例
+    // 上，这里挂在 globalThis（同一书源共用一个运行时），语义等价。
+    b.writeln(_kPutShim.replaceAll(r'$obj', 'source').replaceAll(r'$map', '__lgPut'));
+    b.writeln(_kPutShim.replaceAll(r'$obj', 'book').replaceAll(r'$map', '__lgPutB'));
     final vs = e.vars;
     if (vs != null) {
       vs.forEach((k, v) {

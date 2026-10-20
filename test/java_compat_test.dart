@@ -279,4 +279,33 @@ void main() {
     expect(ev("(function(){var imp=new JavaImporter();"
         "return Packages.java.util.Arrays.toString([1]);})()"), '[1]');
   });
+
+  // 上游 BaseSource 有三个「只在运行期存在」的键值方法，书源脚本靠它们跨卡片
+  // 传状态：七猫聚合在 QMA.list 里 `source.put('qma_status', …)`，缺了会直接
+  // TypeError: not a function（整个搜索变空）。
+  test('source / book 的 put·get·remove（BaseSource 会话期键值）', () {
+    const e = 'qma-put';
+    expect(ev('typeof source.put', scope: e), 'function');
+    expect(ev('typeof source.get', scope: e), 'function');
+    expect(ev('typeof source.remove', scope: e), 'function');
+    expect(ev('typeof book.put', scope: e), 'function');
+
+    expect(ev("source.put('qma_status','搜索完成'); source.get('qma_status')",
+        scope: e), '搜索完成');
+    // 跨求值仍在（同一书源共用一个运行时）
+    expect(ev("source.get('qma_status')", scope: e), '搜索完成');
+    // 未设置返回 null（上游 putMap 语义）
+    expect(ev("source.get('nope') === null", scope: e), 'true');
+    // null / undefined 按空串存
+    expect(ev("source.put('nil', null); source.get('nil')", scope: e), '');
+    // remove 后回到 null
+    expect(
+        ev("source.remove('qma_status'); source.get('qma_status') === null",
+            scope: e),
+        'true');
+    // book 与 source 是两张表，互不干扰
+    ev("book.put('k','b1')", scope: e);
+    expect(ev("source.get('k') === null", scope: e), 'true');
+    expect(ev("book.get('k')", scope: e), 'b1');
+  });
 }

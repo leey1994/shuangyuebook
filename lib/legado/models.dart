@@ -568,6 +568,13 @@ class BookSource {
         if (contentRule != null) 'ruleContent': contentRule!.toJson(),
       };
 
+  /// 注入 JS 的 `source` 实体字段。
+  ///
+  /// 上游 `source` 就是 BookSource 实体（脚本可读 loginUrl / searchUrl /
+  /// bookSourceComment / ruleSearch…）。这里去掉 jsLib：它已是独立运行时
+  /// 资源，塞进每次求值的上下文只会白白拉长脚本。
+  Map<String, dynamic> get jsSourceFields => toJson()..remove('jsLib');
+
   /// 复制并替换部分字段（当前用于启用状态切换）。
   BookSource copyWith({bool? enabled}) => BookSource(
         bookSourceUrl: bookSourceUrl,

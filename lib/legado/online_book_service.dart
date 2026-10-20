@@ -69,6 +69,7 @@ class OnlineBookService {
         sourceUrl: source.bookSourceUrl,
         sourceName: source.bookSourceName,
         sourceHeader: source.header,
+        sourceJson: source.jsSourceFields,
         jsLib: source.jsLib,
         session: session,
         book: book,

@@ -175,6 +175,7 @@ class OnlineRepo {
         sourceUrl: source.bookSourceUrl,
         sourceName: source.bookSourceName,
         sourceHeader: source.header,
+        sourceJson: source.jsSourceFields,
         jsLib: source.jsLib,
         session: session,
         // legado：java.getCookie(url[, key]) 读 Cookie 仓库（登录态/会话跨请求）

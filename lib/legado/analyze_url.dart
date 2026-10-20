@@ -247,6 +247,8 @@ String resolveUrl(String url, String baseUrl) {
   final u = url.trim();
   if (u.isEmpty) return u;
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  // data: URI 是脚本回传的「本地响应」，不能被 baseUrl 解析掉（上游同语义）。
+  if (u.startsWith('data:')) return u;
   final base = RuleAnalyzer.cleanBaseUrl(baseUrl);
   if (base.isEmpty) return u;
   try {

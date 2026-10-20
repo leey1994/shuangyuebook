@@ -104,6 +104,42 @@ class SourceHttpClient {
         retries: retries,
       );
 
+  /// 解析 `data:[<mediatype>][;base64],<payload>`，本地生成响应。
+  ///
+  /// 对齐上游 `AnalyzeUrl.getByteArrayIfDataUri`：只处理带 `;base64` 的形式，
+  /// 解出的字节再按 响应头/meta → UTF-8 的顺序解码成正文。
+  static SourceResponse? _decodeDataUri(String url, String? charset) {
+    if (!url.startsWith('data:')) return null;
+    final comma = url.indexOf(',');
+    if (comma < 0) {
+      throw SourceHttpException('无效的 data URI（缺少逗号）：${_clipUrl(url)}');
+    }
+    final meta = url.substring(5, comma);
+    final payload = url.substring(comma + 1);
+    Uint8List bytes;
+    try {
+      if (meta.toLowerCase().contains(';base64')) {
+        final raw = payload.replaceAll(RegExp(r'\s'), '');
+        bytes = base64Decode(base64Url.normalize(raw));
+      } else {
+        bytes = Uint8List.fromList(utf8.encode(Uri.decodeFull(payload)));
+      }
+    } catch (err) {
+      throw SourceHttpException('无效的 data URI（base64 解码失败）：${_clipUrl(url)}');
+    }
+    final cs = charset ?? _charsetFromContentType(meta) ?? _sniffCharset(bytes);
+    return SourceResponse(
+      statusCode: 200,
+      body: _decodeWith(bytes, cs),
+      bytes: bytes,
+      headers: {if (meta.isNotEmpty) 'content-type': meta},
+      // 空串让调用方回退到书源里的原始地址做 baseUrl（data: 没有可用的主机）。
+      finalUrl: '',
+    );
+  }
+
+  static String _clipUrl(String u) => u.length <= 80 ? u : '${u.substring(0, 80)}…';
+
   /// 通用请求（带重试与 Cookie）。
   Future<SourceResponse> request(
     String method,
@@ -117,6 +153,11 @@ class SourceHttpClient {
     // 协议相对地址（//host/path）按 https 补全：老缓存与少数书源会漏掉 scheme，
     // 这里兜底，避免整章/整本书因为「无效的地址」打不开。
     final u = url.trim();
+    // legado 的 data: URI：脚本（番茄小说 fqSearchUrl、七猫聚合等）自己用
+    // java.ajax 拿到数据后，把结果以 base64 塞进 data: URI 交回规则管线，
+    // 由上游 AnalyzeUrl.getByteArrayIfDataUri 本地解码、完全不发请求。
+    final inline = _decodeDataUri(u, charset);
+    if (inline != null) return inline;
     final normalized = u.startsWith('//') ? 'https:$u' : u;
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme) {
