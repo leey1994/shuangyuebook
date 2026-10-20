@@ -242,22 +242,46 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 </footer>
 
 <script>
-// 版本号不再手写：优先读 GitHub 最新 Release 的 tag，读不到就退回
-// announcement.json 里的 version，最后才用页面里写死的默认值。
+// 版本号不再手写：读 GitHub 最新 Release 的 tag 与 announcement.json 里的
+// version，取其中更高的一个，都读不到才用页面里写死的默认值。
 // 这样发一次版，网页自己就跟上，不用再改一次 HTML。
 (function () {
   var FALLBACK = 'v1.0.4';
   var REPO = 'leey1994/shuangyuebook';
 
-  function apply(v) {
-    if (!v) return;
-    document.getElementById('verline').textContent = '爽阅 ' + v;
-    document.getElementById('foot-ver').textContent = '当前版本 ' + v;
-  }
-
   function clean(tag) {
     if (!tag) return '';
     return /^v/i.test(tag) ? tag : 'v' + tag;
+  }
+
+  // 版本号比较：a > b → 1，相等 → 0，a < b → -1（与 App 内 compareVersion 同口径，
+  // 按 '.' 分段做数值比较，所以 v1.0.10 > v1.0.9）。
+  function cmpVer(a, b) {
+    function parts(s) {
+      return String(s).replace(/^[vV]/, '').split('+')[0].split('.')
+        .map(function (e) { var n = parseInt(e, 10); return isNaN(n) ? 0 : n; });
+    }
+    var pa = parts(a), pb = parts(b);
+    var n = Math.max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      var x = pa[i] || 0, y = pb[i] || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+
+  // 取两个候选里更高的那个。
+  //
+  // 为什么要比而不是「谁读到用谁」：Release tag 与 announcement.json 是两个
+  // 独立来源。发版前后两者可能不一致（tag 还是旧的、公告已经是新的），
+  // 直接用后读到的那份会出现「页头写着 V1.0.3、下面却在讲 V1.0.4 更新」。
+  var best = '';
+  function apply(v) {
+    if (!v) return;
+    v = clean(v);
+    if (!best || cmpVer(v, best) > 0) best = v;
+    document.getElementById('verline').textContent = '爽阅 ' + best;
+    document.getElementById('foot-ver').textContent = '当前版本 ' + best;
   }
 
   // 同步 XHR：这段脚本在 <body> 末尾执行，元素已存在，且要保证
