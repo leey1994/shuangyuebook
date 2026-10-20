@@ -116,6 +116,13 @@ const String kJavaCompatShim = r'''
     if (neg) x -= (BigInt(1) << BigInt(b.length * 8));
     return x;
   }
+  // `new BigInteger(1, md5Bytes)`：签名号 + 字节数组，**无符号**解释；
+  // 这是签名类书源最常见的写法（5 源在用），必须与 Java 一致。
+  function bytesToUnsigned(b) {
+    var x = BigInt(0);
+    for (var i = 0; i < b.length; i++) x = (x << BigInt(8)) | BigInt(b[i] & 0xff);
+    return x;
+  }
   function bigToBytes(x) {
     if (x === BigInt(0)) return [0];
     var neg = x < BigInt(0);
@@ -134,10 +141,19 @@ const String kJavaCompatShim = r'''
     return out;
   }
   function BigInteger(v, radix) {
+    // 两个参数且第二参是字节数组 → Java 的 BigInteger(int signum, byte[] magnitude)
+    var pair = arguments.length >= 2 && radix !== null && radix !== undefined &&
+      typeof radix === 'object' && typeof radix.length === 'number';
     if (!(this instanceof BigInteger)) {
+      if (pair) return new BigInteger(v, radix);
       if (typeof v === 'string') return parseBig(v, radix);
       if (typeof v === 'number') return BigInt(Math.trunc(v));
       return bytesToBig(arr(v));
+    }
+    if (pair) {
+      var mag = bytesToUnsigned(arr(radix));
+      this.__v = (typeof v === 'number' && v < 0) ? -mag : mag;
+      return;
     }
     if (v === null || v === undefined) { this.__v = BigInt(0); return; }
     if (typeof v === 'bigint') { this.__v = v; return; }

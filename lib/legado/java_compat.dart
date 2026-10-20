@@ -197,11 +197,16 @@ class JavaCompat {
       );
       return gcm.process(Uint8List.fromList(data));
     }
-    if (mode == 'CTR' || mode == 'CFB' || mode == 'OFB') {
-      // 三者对「整段数据」语义一致（无填充、无块对齐要求）
+    if (mode == 'CTR') {
+      // CTR 是流式模式，process 会处理整段
       final c = pc.CTRStreamCipher(pc.AESEngine());
       c.init(encrypt, pc.ParametersWithIV(kp, Uint8List.fromList(ivBytes)));
       return c.process(Uint8List.fromList(data));
+    }
+    if (mode == 'CFB' || mode == 'OFB') {
+      // pointycastle 的 CFB/OFB 只接受整块，这里按逐块密钥流自己走
+      return _cfbOfb(mode == 'CFB', Uint8List.fromList(key),
+          Uint8List.fromList(ivBytes), Uint8List.fromList(data), encrypt);
     }
     if (mode != 'CBC' && mode != 'ECB') {
       throw StateError('不支持的 AES 模式：$mode');
@@ -217,10 +222,12 @@ class JavaCompat {
       final n = 16 - input.length % 16;
       final padded = Uint8List(input.length + n)..setAll(0, input);
       padded.fillRange(input.length, padded.length, n);
-      return cipher.process(padded);
+      // 注意：pointycastle 4.x 的 process() 只处理**一个块**，必须自己循环，
+      // 否则 32 字节明文只返回 16 字节密文（曾导致 AES 解密全错、书源全空）。
+      return _blocks(cipher, padded);
     }
     if (wantsPad) {
-      final out = cipher.process(input);
+      final out = _blocks(cipher, input);
       if (out.isEmpty) return out;
       final n = out[out.length - 1];
       if (n <= 0 || n > 16 || n > out.length) return out; // 非法填充：原样返回
@@ -230,7 +237,44 @@ class JavaCompat {
       final n = 16 - input.length % 16;
       input = Uint8List(input.length + n)..setAll(0, input);
     }
-    return cipher.process(input);
+    return _blocks(cipher, input);
+  }
+
+  /// 逐块调用 processBlock（pointycastle 的 process() 在 4.x 只返回首块）。
+  static Uint8List _blocks(pc.BlockCipher cipher, Uint8List input) {
+    final bs = cipher.blockSize;
+    final out = Uint8List(input.length);
+    for (var off = 0; off + bs <= input.length; off += bs) {
+      cipher.processBlock(input, off, out, off);
+    }
+    return out;
+  }
+
+  /// CFB/OFB：用 AES-ECB 单块产生密钥流（正式用法里两者都是流模式）。
+  static Uint8List _cfbOfb(bool cfb, Uint8List key, Uint8List iv,
+      Uint8List data, bool encrypt) {
+    final aes = pc.AESEngine()..init(true, pc.KeyParameter(key));
+    var fb = Uint8List.fromList(iv.length == 16 ? iv : List<int>.filled(16, 0));
+    final out = Uint8List(data.length);
+    final ks = Uint8List(16);
+    for (var off = 0; off < data.length; off += 16) {
+      aes.processBlock(fb, 0, ks, 0);
+      final n = data.length - off < 16 ? data.length - off : 16;
+      for (var i = 0; i < n; i++) {
+        out[off + i] = data[off + i] ^ ks[i];
+      }
+      if (cfb) {
+        final src = encrypt ? out : data;
+        final next = Uint8List.fromList(fb);
+        for (var i = 0; i < n; i++) {
+          next[i] = src[off + i];
+        }
+        fb = next;
+      } else {
+        fb = Uint8List.fromList(ks);
+      }
+    }
+    return out;
   }
 
   // ------------------------------------------------------------------

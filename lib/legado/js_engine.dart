@@ -794,6 +794,13 @@ $obj.remove = function (k) {
           });
         case 'sym':
           return jsonEncode({'v': _symCrypto(p)});
+        case 'digest':
+          return jsonEncode({'v': _digest('${p['alg'] ?? 'MD5'}', p['data'])});
+        case 'hmac':
+          return jsonEncode({
+            'v': _hmac(
+                '${p['alg'] ?? 'HmacSHA256'}', p['key'], p['data'])
+          });
         case 'b64b':
           // java.base64DecodeToByteArray：返回字节数组（JS 里是 Array<int>）
           return jsonEncode({'v': _b64Bytes('${p['s'] ?? ''}')?.toList() ?? const <int>[]});
@@ -1190,11 +1197,14 @@ $obj.remove = function (k) {
     final bs = engine.blockSize;
     final ivRaw = _symBytes(p['iv']);
     final iv = _symFitIv(ivRaw, bs);
-    final data = '${p['data'] ?? ''}';
+    final dataRaw = p['data'];
 
     if (enc) {
-      final res = _symRun(true, engine, mode, padding, key, iv,
-          Uint8List.fromList(utf8.encode(data)));
+      // data 可能是字符串，也可能是 byte[]（Cipher.doFinal(byte[])）
+      final plain = dataRaw is List
+          ? (_symBytes(dataRaw) ?? Uint8List(0))
+          : Uint8List.fromList(utf8.encode('${dataRaw ?? ''}'));
+      final res = _symRun(true, engine, mode, padding, key, iv, plain);
       if (res == null) return null;
       switch (out) {
         case 'bytes':
@@ -1208,12 +1218,13 @@ $obj.remove = function (k) {
       }
     }
 
-    // 解密：输入可能是 Base64，也可能是十六进制；模式/填充也可能与声明不符，
-    // 逐个组合试，挑第一个能解出合法 UTF-8 的结果。
-    final inputs = <Uint8List?>[
-      _b64Bytes(data),
-      _hexToBytes(data),
-    ].whereType<Uint8List>().where((b) => b.isNotEmpty).toList();
+    // 解密：输入可能是 Base64、十六进制，或已经是 byte[]；模式/填充也可能与
+    // 声明不符，逐个组合试，挑第一个能解出合法 UTF-8 的结果。
+    final inputs = dataRaw is List
+        ? <Uint8List>[_symBytes(dataRaw) ?? Uint8List(0)]
+        : <Uint8List?>[_b64Bytes(dataRaw?.toString() ?? ''), _hexToBytes(dataRaw?.toString() ?? '')]
+            .whereType<Uint8List>()
+            .toList();
     final modes = <String>[mode, mode == 'CBC' ? 'ECB' : 'CBC'];
     final paddings = <String>[padding, 'NOPADDING'];
     for (final input in inputs) {
@@ -1235,8 +1246,36 @@ $obj.remove = function (k) {
     return out == 'bytes' ? const <int>[] : null;
   }
 
-  static pc.BlockCipher _symEngine(String alg) {
-    switch (alg) {
+  /// java.security.MessageDigest.getInstance(alg).digest(bytes)：
+  /// 与 Java 逐字节一致（digest 返回 byte[]，书源常接着 new BigInteger(1, …)）。
+  static List<int> _digest(String alg, dynamic data) {
+    final bytes = _symBytes(data) ?? Uint8List(0);
+    switch (alg.toUpperCase().replaceAll(RegExp(r'[-_]'), '')) {
+      case 'SHA1':
+        return crypto.sha1.convert(bytes).bytes;
+      case 'SHA256':
+        return crypto.sha256.convert(bytes).bytes;
+      case 'SHA384':
+        return crypto.sha384.convert(bytes).bytes;
+      case 'SHA512':
+        return crypto.sha512.convert(bytes).bytes;
+      default:
+        return crypto.md5.convert(bytes).bytes;
+    }
+  }
+
+  /// javax.crypto.Mac（HmacSHA1 / HmacSHA256 / HmacSHA512）。
+  static List<int> _hmac(String alg, dynamic key, dynamic data) {
+    final a = alg.toUpperCase().replaceAll(RegExp(r'[-_]'), '');
+    final digest = a.contains('SHA1')
+        ? pc.SHA1Digest()
+        : (a.contains('SHA512') ? pc.SHA512Digest() : pc.SHA256Digest());
+    final mac = pc.HMac(digest, 64)
+      ..init(pc.KeyParameter(_symBytes(key) ?? Uint8List(0)));
+    return mac.process(_symBytes(data) ?? Uint8List(0));
+  }
+
+  static pc.BlockCipher _symEngine(String alg) {    switch (alg) {
       // pointycastle 4 没有单 DES（只有 DESede + DesBase 基类）：DES 书源极少，
       // 用 DESede 兜住（24 字节密钥），CBC/ECB + PKCS5 的封装行为一致。
       case 'DES':
@@ -1763,7 +1802,8 @@ $obj.remove = function (k) {
   g.String = Str;
 
   function DESKeySpec(bytes) { this.__key = (bytes || []).slice(0, 8); }
-  function IvParameterSpec(bytes) { this.__iv = bytes || []; }
+  function IvParameterSpec(bytes) { this.__iv = toBytes(bytes); }
+  function SecretKeySpec(bytes, alg) { this.__key = toBytes(bytes); this.__alg = alg ? $String(alg) : ''; }
   var secretKeyFactory = {
     getInstance: function (alg) {
       return {
@@ -1771,38 +1811,327 @@ $obj.remove = function (k) {
       };
     }
   };
-  var cipher = {
+
+  // ---------- 字节数组工具（书源里 byte[] 到处传） ----------
+  function toBytes(v) {
+    if (v === null || v === undefined) return [];
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'object' && v.length !== undefined) return Array.prototype.slice.call(v);
+    if (typeof v === 'string') return utf8Encode(v);
+    return [];
+  }
+  function bytesToHex(b) {
+    var s = '';
+    for (var i = 0; i < b.length; i++) {
+      var x = (b[i] | 0) & 0xff;
+      s += (x < 16 ? '0' : '') + x.toString(16);
+    }
+    return s;
+  }
+  function b64Encode(b) {
+    var s = '', i;
+    for (i = 0; i + 2 < b.length; i += 3) {
+      var n = ((b[i] & 255) << 16) | ((b[i + 1] & 255) << 8) | (b[i + 2] & 255);
+      s += B64A[(n >> 18) & 63] + B64A[(n >> 12) & 63] + B64A[(n >> 6) & 63] + B64A[n & 63];
+    }
+    if (i < b.length) {
+      var rem = b.length - i;
+      var n2 = ((b[i] & 255) << 16) | (rem > 1 ? ((b[i + 1] & 255) << 8) : 0);
+      s += B64A[(n2 >> 18) & 63] + B64A[(n2 >> 12) & 63] +
+        (rem > 1 ? B64A[(n2 >> 6) & 63] : '=') + '=';
+    }
+    return s;
+  }
+
+  // ---------- java.security.MessageDigest ----------
+  // 上游：getInstance(alg) → update(byte[]) → digest() 返回 byte[]。
+  // 摘要走 Dart 侧 package:crypto（与 Java 逐字节一致）。
+  function MessageDigest(alg) { this.__alg = $String(alg).toUpperCase(); this.__buf = []; }
+  MessageDigest.prototype.update = function (v) { this.__buf = this.__buf.concat(toBytes(v)); };
+  MessageDigest.prototype.reset = function () { this.__buf = []; };
+  MessageDigest.prototype.digest = function (v) {
+    if (arguments.length > 0 && v !== undefined) this.update(v);
+    var d = g.__lgcall('digest', { alg: this.__alg, data: this.__buf });
+    this.__buf = [];
+    return d && d.v ? d.v : [];
+  };
+  MessageDigest.getInstance = function (alg) { return new MessageDigest(alg); };
+
+  // ---------- java.math.BigInteger ----------
+  // 签名书源几乎都写成 new BigInteger(1, md5bytes).toString(16)。
+  function BigInteger(a, b) {
+    var hex = '0';
+    if (b !== undefined) hex = bytesToHex(toBytes(b));
+    else if (typeof a === 'number') hex = Math.abs(a).toString(16);
+    else if (Array.isArray(a)) hex = bytesToHex(toBytes(a));
+    else {
+      var s = $String(a === undefined || a === null ? '0' : a).trim();
+      if (/^0x/i.test(s)) hex = s.substring(2).toLowerCase();
+      else if (/^-?[0-9]+$/.test(s)) hex = BigInt(s).toString(16);
+      else hex = '0';
+      if (/^-/.test(s)) hex = '0';
+    }
+    hex = hex.replace(/^0+/, '');
+    this.__hex = hex === '' ? '0' : hex;
+  }
+  BigInteger._of = function (h) {
+    var o = Object.create(BigInteger.prototype);
+    var x = (h || '0').replace(/^0+/, '');
+    o.__hex = x === '' ? '0' : x;
+    return o;
+  };
+  BigInteger._big = function (v) { return BigInt('0x' + (v.__hex || '0')); };
+  BigInteger.prototype.toString = function (radix) {
+    var r = radix === undefined || radix === null ? 10 : radix | 0;
+    if (r === 16) return this.__hex;
+    return BigInteger._big(this).toString(r);
+  };
+  BigInteger.prototype.bitLength = function () { return BigInteger._big(this).toString(2).length; };
+  BigInteger.prototype.toByteArray = function () {
+    var h = this.__hex.length % 2 ? '0' + this.__hex : this.__hex;
+    var out = [];
+    for (var i = 0; i < h.length; i += 2) out.push(parseInt(h.substring(i, i + 2), 16));
+    return out;
+  };
+  BigInteger.prototype.add = function (o) { return BigInteger._of((BigInteger._big(this) + BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.subtract = function (o) { return BigInteger._of((BigInteger._big(this) - BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.multiply = function (o) { return BigInteger._of((BigInteger._big(this) * BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.divide = function (o) { return BigInteger._of((BigInteger._big(this) / BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.remainder = function (o) { return BigInteger._of((BigInteger._big(this) % BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.mod = function (o) { return this.remainder(o); };
+  BigInteger.prototype.modPow = function (e, m) {
+    return BigInteger._of(BigInteger._big(this).toString(16) ? powmod(BigInteger._big(this), BigInteger._big(e), BigInteger._big(m)).toString(16) : '0');
+  };
+  BigInteger.prototype.xor = function (o) { return BigInteger._of((BigInteger._big(this) ^ BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.and = function (o) { return BigInteger._of((BigInteger._big(this) & BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.or = function (o) { return BigInteger._of((BigInteger._big(this) | BigInteger._big(o)).toString(16)); };
+  BigInteger.prototype.shiftLeft = function (n) { return BigInteger._of((BigInteger._big(this) << BigInt(n | 0)).toString(16)); };
+  BigInteger.prototype.shiftRight = function (n) { return BigInteger._of((BigInteger._big(this) >> BigInt(n | 0)).toString(16)); };
+  BigInteger.prototype.compareTo = function (o) {
+    var a = BigInteger._big(this), b = BigInteger._big(o);
+    return a < b ? -1 : (a > b ? 1 : 0);
+  };
+  BigInteger.prototype.signum = function () { return this.__hex === '0' ? 0 : 1; };
+  BigInteger.ZERO = BigInteger._of('0');
+  BigInteger.ONE = BigInteger._of('1');
+  BigInteger.TWO = BigInteger._of('2');
+  function powmod(b, e, m) { var r = BigInt(1); b = b % m; while (e > BigInt(0)) { if (e & BigInt(1)) r = (r * b) % m; e = e >> BigInt(1); b = (b * b) % m; } return r; }
+
+  // ---------- javax.crypto.Cipher ----------
+  // AES/DESede/Blowfish 走 Dart 侧 pointycastle（'sym'），单 DES 走纯 JS。
+  function newCipher(trans) {
+    return {
+      __t: $String(trans),
+      init: function (mode, key, iv) {
+        this.__mode = (mode === 2 || mode === cipher.DECRYPT_MODE) ? 2 : 1;
+        this.__k = (key && key.__key !== undefined) ? key.__key : toBytes(key);
+        this.__iv = (iv && iv.__iv !== undefined) ? iv.__iv : toBytes(iv);
+        return this;
+      },
+      doFinal: function (data) {
+        var input = toBytes(data);
+        var up = this.__t.toUpperCase();
+        if (up.indexOf('DES') >= 0 && up.indexOf('EDE') < 0) {
+          return desCbc(input, this.__k, this.__iv, this.__mode === 2);
+        }
+        var d = g.__lgcall('sym', {
+          op: this.__mode === 2 ? 'dec' : 'enc', t: this.__t,
+          key: this.__k, iv: this.__iv, data: input, out: 'bytes'
+        });
+        return d && d.v ? d.v : [];
+      },
+      update: function (data) { return this.doFinal(data); }
+    };
+  }
+  var cipher = { getInstance: function (t) { return newCipher(t); } };
+  cipher.DECRYPT_MODE = 2;
+  cipher.ENCRYPT_MODE = 1;
+
+  // ---------- javax.crypto.Mac（HMAC-SHA1/SHA256） ----------
+  var mac = {
     getInstance: function (alg) {
       return {
-        init: function (mode, key, iv) {
-          this.__k = key.__key; this.__iv = iv.__iv;
-          this.__dec = (mode === Cipher.DECRYPT_MODE || mode === 2);
-        },
+        init: function (spec) { this.__k = (spec && spec.__key !== undefined) ? spec.__key : toBytes(spec); },
         doFinal: function (data) {
-          return desCbc(Array.isArray(data) ? data : g.__lgUtf8Encode($String(data)),
-            this.__k, this.__iv, this.__dec);
+          var d = g.__lgcall('hmac', { alg: $String(alg), key: this.__k, data: toBytes(data) });
+          return d && d.v ? d.v : [];
         }
       };
     }
   };
-  cipher.DECRYPT_MODE = 2;
-  cipher.ENCRYPT_MODE = 1;
-  var base64 = { getDecoder: function () { return { decode: function (v) { return b64Decode(Array.isArray(v) ? v : g.__lgUtf8Encode($String(v))); } }; } };
 
+  // ---------- java.util.Base64 / Arrays / UUID / HashMap / ArrayList ----------
+  var base64 = {
+    decode: function (v) { return b64Decode(toBytes(v)); },
+    encode: function (b) { return toBytes(b); },
+    encodeToString: function (b) { return b64Encode(toBytes(b)); },
+    getDecoder: function () { return { decode: function (v) { return b64Decode(toBytes(v)); } }; },
+    getEncoder: function () { return { encodeToString: function (b) { return b64Encode(toBytes(b)); } }; },
+    getUrlDecoder: function () {
+      return { decode: function (v) { return b64Decode(toBytes($String(v).replace(/-/g, '+').replace(/_/g, '/'))); } };
+    },
+    getUrlEncoder: function () {
+      return { encodeToString: function (b) { return b64Encode(toBytes(b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); } };
+    }
+  };
+  var Arrays = {
+    toString: function (a) { return a === null || a === undefined ? 'null' : '[' + Array.prototype.join.call(a, ', ') + ']'; },
+    equals: function (a, b) {
+      if (a === b) return true;
+      if (!a || !b || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    },
+    copyOf: function (a, n) { var o = new Array(n); for (var i = 0; i < n; i++) o[i] = i < a.length ? a[i] : 0; return o; },
+    copyOfRange: function (a, f, t) { var o = []; for (var i = f; i < t; i++) o.push(i < a.length ? a[i] : 0); return o; },
+    fill: function (a, v) { for (var i = 0; i < a.length; i++) a[i] = v; return a; },
+    sort: function (a) { Array.prototype.sort.call(a, function (x, y) { return x - y; }); return a; }
+  };
+  var UUID = {
+    randomUUID: function () {
+      return {
+        toString: function () {
+          return hex4() + hex4() + '-' + hex4() + '-4' + hex4().substring(1) + '-a' +
+            hex4().substring(1) + '-' + hex4() + hex4() + hex4();
+        }
+      };
+    }
+  };
+  function hex4() { return ('000' + Math.floor(Math.random() * 0x10000).toString(16)).slice(-4); }
+  function HashMap() { this.__m = {}; this.__o = []; }
+  HashMap.prototype.put = function (k, v) {
+    var s = $String(k);
+    if (!(s in this.__m)) this.__o.push(s);
+    var old = this.__m[s];
+    this.__m[s] = v;
+    return old;
+  };
+  HashMap.prototype.get = function (k) { var s = $String(k); return (s in this.__m) ? this.__m[s] : null; };
+  HashMap.prototype.containsKey = function (k) { return $String(k) in this.__m; };
+  HashMap.prototype.keySet = function () { return this.__o.slice(); };
+  HashMap.prototype.values = function () {
+    var o = [];
+    for (var i = 0; i < this.__o.length; i++) o.push(this.__m[this.__o[i]]);
+    return o;
+  };
+  HashMap.prototype.size = function () { return this.__o.length; };
+  HashMap.prototype.remove = function (k) {
+    var s = $String(k); delete this.__m[s];
+    var i = this.__o.indexOf(s); if (i >= 0) this.__o.splice(i, 1);
+  };
+  function ArrayList(a) { this.__a = a ? Array.prototype.slice.call(a) : []; }
+  ArrayList.prototype.add = function (v) { this.__a.push(v); return true; };
+  ArrayList.prototype.get = function (i) { return this.__a[i]; };
+  ArrayList.prototype.size = function () { return this.__a.length; };
+  ArrayList.prototype.toArray = function () { return this.__a.slice(); };
+  ArrayList.prototype.join = function (sep) { return this.__a.join(sep === undefined ? ',' : sep); };
+  ArrayList.prototype.iterator = function () {
+    var a = this.__a, i = 0;
+    return { hasNext: function () { return i < a.length; }, next: function () { return a[i++]; } };
+  };
+
+  // ---------- java.io ----------
+  function ByteArrayOutputStream() { this.__b = []; }
+  ByteArrayOutputStream.prototype.write = function (v, off, len) {
+    if (Array.isArray(v)) {
+      var s = off || 0, e = (len === undefined) ? v.length : (s + len);
+      for (var i = s; i < e && i < v.length; i++) this.__b.push(v[i] & 0xff);
+    } else if (typeof v === 'string') {
+      for (var j = 0; j < v.length; j++) this.__b.push(v.charCodeAt(j) & 0xff);
+    } else this.__b.push(v & 0xff);
+  };
+  ByteArrayOutputStream.prototype.writeBytes = function (v) { this.write(toBytes(v)); };
+  ByteArrayOutputStream.prototype.toByteArray = function () { return this.__b.slice(); };
+  ByteArrayOutputStream.prototype.size = function () { return this.__b.length; };
+  ByteArrayOutputStream.prototype.reset = function () { this.__b = []; };
+  ByteArrayOutputStream.prototype.toString = function () { return utf8Decode(this.__b); };
+  function ByteArrayInputStream(b) { this.__b = toBytes(b); this.__p = 0; }
+  ByteArrayInputStream.prototype.read = function () { return this.__p < this.__b.length ? this.__b[this.__p++] : -1; };
+  ByteArrayInputStream.prototype.available = function () { return this.__b.length - this.__p; };
+  ByteArrayInputStream.prototype.close = function () { };
+  function InputStreamReader(is) { this.__is = is; }
+  InputStreamReader.prototype.read = function () { return this.__is && this.__is.read ? this.__is.read() : -1; };
+  function BufferedReader(r) { this.__r = r; this.__lines = null; this.__i = 0; }
+  BufferedReader.prototype.__init = function () {
+    if (this.__lines !== null) return;
+    var src = this.__r && this.__r.__is ? this.__r.__is.__b : toBytes(this.__r);
+    this.__lines = utf8Decode(src).split(/\r?\n/);
+  };
+  BufferedReader.prototype.readLine = function () {
+    this.__init();
+    return this.__i < this.__lines.length ? this.__lines[this.__i++] : null;
+  };
+  BufferedReader.prototype.close = function () { };
+
+  // ---------- java.lang.System / Thread / StringBuilder ----------
+  var System = {
+    currentTimeMillis: function () { return Date.now(); },
+    nanoTime: function () { return Date.now() * 1000000; },
+    arraycopy: function (src, sp, dst, dp, n) { for (var i = 0; i < n; i++) dst[dp + i] = src[sp + i]; },
+    getProperty: function (k) { return k === 'line.separator' ? '\n' : ''; },
+    getenv: function () { return null; },
+    out: { println: function (s) { g.__lgcall('log', { msg: s === undefined ? '' : $String(s) }); }, print: function (s) { g.__lgcall('log', { msg: s === undefined ? '' : $String(s) }); } },
+    exit: function () { }
+  };
+  function StringBuilder() { this.__a = []; }
+  StringBuilder.prototype.append = function (s) { this.__a.push($String(s === null || s === undefined ? '' : s)); return this; };
+  StringBuilder.prototype.toString = function () { return this.__a.join(''); };
+  StringBuilder.prototype.reverse = function () { this.__a.reverse(); return this; };
+
+  // ---------- java.net.URLEncoder / URLDecoder ----------
+  var URLEncoder = {
+    encode: function (s, cs) {
+      return encodeURIComponent($String(s)).replace(/%20/g, '+')
+        .replace(/[!'()~*]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase(); });
+    }
+  };
+  var URLDecoder = { decode: function (s, cs) { return decodeURIComponent($String(s).replace(/\+/g, ' ')); } };
+
+  // ---------- 装配 ----------
   g.DESKeySpec = DESKeySpec;
   g.IvParameterSpec = IvParameterSpec;
+  g.SecretKeySpec = SecretKeySpec;
   g.SecretKeyFactory = secretKeyFactory;
   g.Cipher = cipher;
   g.Base64 = base64;
+  g.MessageDigest = MessageDigest;
+  g.BigInteger = BigInteger;
+  g.Arrays = Arrays;
+  g.UUID = UUID;
+  g.HashMap = HashMap;
+  g.ArrayList = ArrayList;
+  g.ByteArrayOutputStream = ByteArrayOutputStream;
+  g.ByteArrayInputStream = ByteArrayInputStream;
+  g.InputStreamReader = InputStreamReader;
+  g.BufferedReader = BufferedReader;
+  g.System = System;
+  g.StringBuilder = StringBuilder;
+  g.URLEncoder = URLEncoder;
+  g.URLDecoder = URLDecoder;
   g.JavaImporter = function () {
     var o = { importPackage: function () { }, importClass: function () { } };
-    for (var k in { DESKeySpec: 1, IvParameterSpec: 1, SecretKeyFactory: 1, Cipher: 1, Base64: 1 }) o[k] = g[k];
+    var ks = ['DESKeySpec', 'IvParameterSpec', 'SecretKeySpec', 'SecretKeyFactory', 'Cipher', 'Base64',
+      'MessageDigest', 'BigInteger', 'Arrays', 'UUID', 'HashMap', 'ArrayList',
+      'ByteArrayOutputStream', 'ByteArrayInputStream', 'InputStreamReader', 'BufferedReader',
+      'System', 'StringBuilder', 'URLEncoder', 'URLDecoder'];
+    for (var i = 0; i < ks.length; i++) o[ks[i]] = g[ks[i]];
     return o;
   };
-  g.Packages = {
-    java: { lang: {}, util: {}, security: {}, net: {} },
-    javax: { crypto: {}, 'crypto.spec': {} }
+  var nioCharset = {
+    Charset: {
+      forName: function (n) { return { name: function () { return $String(n); } }; },
+      isSupported: function () { return true; }
+    },
+    ByteBuffer: { wrap: function (b) { return b; } }
   };
+  // 注意：`Packages` 由 java_compat_js.dart 的完整命名空间树负责（后加载，
+  // 覆盖面更大）；这里只补**裸全局**（importPackage 后的写法），避免两套树打架。
+  g.__lgBareJava = nioCharset;
+  function SecureRandom() { }
+  SecureRandom.prototype.nextBytes = function (a) { for (var i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256); };
+  SecureRandom.prototype.nextInt = function (n) { return n === undefined ? Math.floor(Math.random() * 2147483647) : Math.floor(Math.random() * n); };
+  SecureRandom.prototype.nextLong = function () { return Math.floor(Math.random() * 9007199254740991); };
+  g.SecureRandom = SecureRandom;
   g.org = {
     jsoup: {
       Jsoup: {

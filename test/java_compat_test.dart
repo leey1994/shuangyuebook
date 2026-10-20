@@ -385,4 +385,90 @@ void main() {
       await tmp.delete(recursive: true);
     }
   });
+
+  // 签名类书源的固定套路：MessageDigest → byte[] → BigInteger.toString(16)。
+  // 期望值取自 .NET（MD5/SHA256/HMAC 均为标准向量）。
+  group('Packages.java 加密/摘要工具链', () {
+    test('MessageDigest + BigInteger（签名串）', () {
+      expect(
+          ev("(function(){var b=Packages.java.security.MessageDigest"
+              ".getInstance('MD5').digest([97,98,99]);"
+              "return new Packages.java.math.BigInteger(1,b).toString(16);})()"),
+          '900150983cd24fb0d6963f7d28e17f72');
+      expect(
+          ev("(function(){var b=MessageDigest"
+              ".getInstance('SHA-256').digest([97,98,99]);"
+              "return new BigInteger(1,b).toString(16);})()"),
+          'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+      // 十进制 / 其他进制
+      expect(ev("new BigInteger('255').toString(16)"), 'ff');
+      expect(ev("new BigInteger('255').toString()"), '255');
+      expect(ev("new BigInteger(1,[1,0]).toString(16)"), '100');
+      // xor / shiftLeft 等位运算
+      expect(ev("new BigInteger(1,[255]).xor(new BigInteger(1,[15])).toString(16)"),
+          'f0');
+      expect(ev("new BigInteger('1').shiftLeft(8).toString(16)"), '100');
+    });
+
+    test('Arrays / Base64 / UUID / URLEncoder / System', () {
+      expect(ev('Packages.java.util.Arrays.toString([1,2,3])'), '[1, 2, 3]');
+      expect(ev('Packages.java.util.Arrays.equals([1,2],[1,2])'), 'true');
+      expect(
+          ev('Packages.java.util.Base64.getEncoder()'
+              '.encodeToString([104,101,108,108,111])'),
+          'aGVsbG8=');
+      expect(
+          ev('Packages.java.util.Base64.getDecoder().decode("aGVsbG8=").length'),
+          '5');
+      expect(ev("Packages.java.util.UUID.randomUUID().toString().length"), '36');
+      expect(ev("Packages.java.net.URLEncoder.encode('斗破 苍穹','UTF-8')"),
+          '%E6%96%97%E7%A0%B4+%E8%8B%8D%E7%A9%B9');
+      expect(ev("Packages.java.net.URLDecoder.decode('%E6%96%97%E7%A0%B4','UTF-8')"),
+          '斗破');
+      expect(ev("Packages.java.lang.System.currentTimeMillis() > 0"), 'true');
+      expect(
+          ev("(function(){var o=new Packages.java.io.ByteArrayOutputStream();"
+              "o.write([1,2,3]);o.write(4);return o.toByteArray().join(',');})()"),
+          '1,2,3,4');
+    });
+
+    test('Cipher（AES/CBC/PKCS5Padding）与 javax.crypto 组合', () {
+      const c = "var kb='0123456789abcdef'.split('').map(function(x){return x.charCodeAt(0)});"
+          "var vb='abcdefghijklmnop'.split('').map(function(x){return x.charCodeAt(0)});"
+          "var data='shuangyue-legado'.split('').map(function(x){return x.charCodeAt(0)});";
+      // 加密 → Base64（与 createSymmetricCrypto 同一向量）
+      expect(
+          ev("(function(){$c"
+              "var ci=Packages.javax.crypto.Cipher.getInstance('AES/CBC/PKCS5Padding');"
+              "ci.init(Packages.javax.crypto.Cipher.ENCRYPT_MODE,"
+              "new Packages.javax.crypto.spec.SecretKeySpec(kb,'AES'),"
+              "new Packages.javax.crypto.spec.IvParameterSpec(vb));"
+              "return Packages.java.util.Base64.getEncoder()"
+              ".encodeToString(ci.doFinal(data));})()"),
+          'LhWZ3icXB83uRhrCT+jm6DARZP2tvOQL15ifaUu+YvY=');
+      // 解密 → 明文（byte[] 进、byte[] 出）
+      expect(
+          ev("(function(){$c"
+              "var ci=Packages.javax.crypto.Cipher.getInstance('AES/CBC/PKCS5Padding');"
+              "ci.init(Packages.javax.crypto.Cipher.DECRYPT_MODE,"
+              "new Packages.javax.crypto.spec.SecretKeySpec(kb,'AES'),"
+              "new Packages.javax.crypto.spec.IvParameterSpec(vb));"
+              "var out=ci.doFinal(Packages.java.util.Base64.getDecoder()"
+              ".decode('LhWZ3icXB83uRhrCT+jm6DARZP2tvOQL15ifaUu+YvY='));"
+              "return String.fromCharCode.apply(null,out);})()"),
+          'shuangyue-legado');
+    });
+
+    test('javax.crypto.Mac（HmacSHA256）', () {
+      expect(
+          ev("(function(){var m=Packages.javax.crypto.Mac"
+              "  .getInstance('HmacSHA256');"
+              "m.init(new Packages.javax.crypto.spec.SecretKeySpec("
+              "'key'.split('').map(function(x){return x.charCodeAt(0)}),'HmacSHA256'));"
+              "var b=m.doFinal('The quick brown fox jumps over the lazy dog'"
+              ".split('').map(function(x){return x.charCodeAt(0)}));"
+              "return new BigInteger(1,b).toString(16);})()"),
+          'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8');
+    });
+  });
 }
