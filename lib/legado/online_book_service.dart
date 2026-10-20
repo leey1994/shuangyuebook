@@ -85,10 +85,12 @@ class OnlineBookService {
       session.webViewCache[e.target] = '';
       return;
     }
+    final key = JsBridge.ajaxKey(e.method, e.target, e.body);
     try {
-      session.ajaxCache[e.target] = await _getHtml(source, e.target);
+      session.ajaxCache[key] = await _getHtml(source, e.target);
+      session.ajaxMeta[key] = {'code': 200, 'url': e.target, 'headers': const {}};
     } catch (_) {
-      session.ajaxCache[e.target] = '';
+      session.ajaxCache[key] = '';
     }
   }
 

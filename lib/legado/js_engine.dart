@@ -21,6 +21,9 @@ import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:quickjs_engine/quickjs_engine.dart';
 
+import 'java_compat.dart';
+import 'java_compat_js.dart';
+
 /// 书源 JS 求值会话：一次高层操作（搜索/详情/目录/正文/URL 构建）内共享。
 ///
 /// 承载挂起补网缓存、变量与冻结时钟；服务层用 [runWithJsSession] 驱动重跑。
@@ -31,8 +34,11 @@ class JsSession {
   /// 避免“脚本用时间戳拼 URL → 重跑时 URL 变化 → 缓存永远 miss”的死循环。
   final int frozenNow;
 
-  /// java.ajax 补网缓存：url → 响应文本。
+  /// java.ajax 补网缓存：请求键 → 响应文本。
   final Map<String, String> ajaxCache = {};
+
+  /// java.ajax 补网元信息（请求键 → {code,url,headers}），供 Response 对象使用。
+  final Map<String, Map<String, dynamic>> ajaxMeta = {};
 
   /// java.webView 渲染缓存（P2 规则化后由服务层写入）。
   final Map<String, String> webViewCache = {};
@@ -49,7 +55,13 @@ class JsSession {
 
 /// 脚本挂起：等待服务层异步补网（ajax/webView）后重跑。
 class JsSuspendException implements Exception {
-  JsSuspendException(this.kind, this.target);
+  JsSuspendException(
+    this.kind,
+    this.target, {
+    this.method = 'GET',
+    this.headers = const {},
+    this.body,
+  });
 
   /// ajax | webview
   final String kind;
@@ -57,8 +69,18 @@ class JsSuspendException implements Exception {
   /// 补网目标 URL。
   final String target;
 
+  /// 请求方法（java.ajax({method:'POST'}) / java.post）。
+  final String method;
+
+  /// 请求头（书源显式指定，服务层再与书源公共头合并）。
+  final Map<String, String> headers;
+
+  /// 请求体（POST）。
+  final String? body;
+
   @override
-  String toString() => 'JsSuspendException($kind, $target)';
+  String toString() =>
+      'JsSuspendException($kind, $method $target${body == null ? '' : ' body=${body!.length}B'})';
 }
 
 /// JS 求值环境：书源/书籍/章节上下文 + 会话。
@@ -307,12 +329,16 @@ abstract final class JsBridge {
     if (rt == null) return null;
     // 对齐 legado 求值作用域：每次求值都是全新作用域（var/let/const 不跨调用泄漏，
     // 直接顶层求值会撞 `let data` 重复声明）；jsLib 顶层声明落在全局，脚本仍可见。
-    final src =
-        '${_setup(e, input)}\n(function () { return eval(${jsonEncode(code)}); })()';
     JsEvalResult r;
     _active = e;
     try {
-      r = rt.evaluate(src);
+      r = rt.evaluate('${_setup(e, input)}\n'
+          '(function () { return eval(${jsonEncode(code)}); })()');
+      // 部分书源在 @js 里直接写顶层 return（legado 的 Rhino 允许），
+      // eval 下会 SyntaxError；此时把整段包进函数体再跑一次。
+      if (r.isError && '${r.stringResult}'.contains('return not in a function')) {
+        r = rt.evaluate('${_setup(e, input)}\n(function () {\n$code\n})()');
+      }
     } catch (err) {
       debugPrint('[js] evaluate 异常(${e.scopeKey})：$err');
       lastError = '$err';
@@ -326,9 +352,9 @@ abstract final class JsBridge {
       final m = _suspRe.firstMatch(text) ?? _suspRe.firstMatch('${r.rawResult}');
       if (m != null) {
         final kind = m.group(1)!;
-        final target =
+        final payload =
             utf8.decode(base64Url.decode(_padB64(m.group(2)!)), allowMalformed: true);
-        throw JsSuspendException(kind, target);
+        throw _decodeSuspend(kind, payload);
       }
       debugPrint('[js] 脚本错误(${e.scopeKey})：${_clip(text)}');
       lastError = _clip(text);
@@ -337,7 +363,12 @@ abstract final class JsBridge {
     final raw = r.rawResult;
     if (raw == null) return null;
     String? out;
-    if (raw is String) {
+    final sobj = _asJsStringObject(raw);
+    if (sobj != null) {
+      // java.lang.String(bytes, charset) 的 `new String(…)` 结果是 String 对象，
+      // 经 FFI 会退化成 {0:'a',1:'b'}，这里还原成普通字符串（书源只会当字符串用）。
+      out = sobj;
+    } else if (raw is String) {
       out = raw;
     } else if (raw is num || raw is bool) {
       out = raw.toString();
@@ -351,6 +382,62 @@ abstract final class JsBridge {
     }
     _cacheResult(ckey, out);
     return out;
+  }
+
+  /// 还原挂起请求体：新格式是 JSON（含 method/headers/body），旧格式是裸 URL。
+  static JsSuspendException _decodeSuspend(String kind, String payload) {
+    final t = payload.trim();
+    if (t.startsWith('{')) {
+      try {
+        final o = jsonDecode(t);
+        if (o is Map) {
+          final h = <String, String>{};
+          final rawH = o['h'];
+          if (rawH is Map) {
+            rawH.forEach((k, v) => h['$k'] = '$v');
+          }
+          final b = o['b'];
+          return JsSuspendException(
+            kind,
+            '${o['u'] ?? ''}',
+            method: '${o['m'] ?? 'GET'}'.toUpperCase(),
+            headers: h,
+            body: b == null ? null : '$b',
+          );
+        }
+      } catch (_) {}
+    }
+    return JsSuspendException(kind, payload);
+  }
+
+  /// 补网缓存键：GET 无体时等于 URL，否则叠加方法与请求体指纹。
+  static String ajaxKey(String method, String url, String? body) {
+    final m = method.toUpperCase();
+    if (m == 'GET' && body == null) return url;
+    final h = body == null
+        ? ''
+        : base64Url.encode(utf8.encode(body)).replaceAll('=', '');
+    return '$m $url${h.isEmpty ? '' : ' #$h'}';
+  }
+
+  /// 识别 JS String 对象的序列化形状（键恰好是 0..n-1 的连续整数）。
+  static String? _asJsStringObject(Object? raw) {
+    if (raw is! Map || raw.isEmpty) return null;
+    final idx = <int>[];
+    for (final k in raw.keys) {
+      final i = int.tryParse('$k');
+      if (i == null) return null;
+      idx.add(i);
+    }
+    idx.sort();
+    for (var i = 0; i < idx.length; i++) {
+      if (idx[i] != i) return null;
+    }
+    final sb = StringBuffer();
+    for (final i in idx) {
+      sb.write('${raw['$i']}');
+    }
+    return sb.toString();
   }
 
   /// 丢弃某书源的运行时（异常恢复 / 测试清理）。
@@ -387,6 +474,10 @@ abstract final class JsBridge {
       rt.onMessage('jsbridge', _dispatch);
       rt.evaluate(_prelude);
       rt.evaluate(_javaLibShim);
+      // 原版书源脚本依赖真实 Java 类（Packages.java.*）：注入兼容层，
+      // 覆盖 java.lang/util/security/nio/io/net/util.zip、javax.crypto、
+      // android.util.Base64、cn.hutool、org.jsoup。
+      rt.evaluate(kJavaCompatShim);
     } catch (e) {
       _libFailed = true;
       debugPrint('[js] QuickJS 引擎不可用（书源 JS 将降级为空结果）：$e');
@@ -463,6 +554,14 @@ abstract final class JsBridge {
       'header': e.sourceHeader ?? '',
     })};');
     b.writeln('source.getKey = function () { return this.bookSourceUrl; };');
+    // legado BaseSource.getVariable/setVariable（书源级变量，脚本常用于缓存 token）
+    // 注意：上下文注入在每次求值的独立作用域里，桥函数只能走 globalThis 取。
+    b.writeln('source.getVariable = function (k) { '
+        'var d = globalThis.__lgcall("source.var.get", { k: String(k) }); '
+        'return d ? (d.v === null || d.v === undefined ? "" : String(d.v)) : ""; };');
+    b.writeln('source.setVariable = function (k, v) { '
+        'globalThis.__lgcall("source.var.put", { k: String(k), '
+        'v: v === null || v === undefined ? null : String(v) }); };');
     final vs = e.vars;
     if (vs != null) {
       vs.forEach((k, v) {
@@ -510,7 +609,14 @@ abstract final class JsBridge {
       final env = _active;
       switch (fn) {
         case 'ajax':
-          return _remote(env, 'ajax', '${p['url'] ?? ''}');
+          return _remote(
+            env,
+            'ajax',
+            '${p['url'] ?? ''}',
+            method: '${p['method'] ?? 'GET'}',
+            headers: _strMap(p['headers']),
+            body: p['body'] == null ? null : '${p['body']}',
+          );
         case 'webview':
           return _remote(env, 'webview', '${p['url'] ?? ''}');
         case 'b64d':
@@ -541,6 +647,11 @@ abstract final class JsBridge {
           return jsonEncode({'v': _kUA});
         case 'var.get':
           return jsonEncode({'v': env?.session?.vars['${p['k'] ?? ''}']});
+        case 'source.var.get':
+          return jsonEncode({'v': env?.session?.vars['${p['k'] ?? ''}']});
+        case 'source.var.put':
+          env?.session?.vars['${p['k'] ?? ''}'] = '${p['v'] ?? ''}';
+          return jsonEncode({'v': null});
         case 'var.put':
           env?.session?.vars['${p['k'] ?? ''}'] = '${p['v'] ?? ''}';
           return jsonEncode({'v': null});
@@ -568,6 +679,9 @@ abstract final class JsBridge {
           return jsonEncode({'v': null});
         case 'toast':
           return jsonEncode({'v': null});
+        case 'jcompat':
+          // Packages.* 兼容层：摘要/HMAC/AES/压缩/字符集/选择器下沉到 Dart。
+          return jsonEncode(JavaCompat.dispatch(p));
         default:
           return jsonEncode({'v': null});
       }
@@ -577,21 +691,46 @@ abstract final class JsBridge {
     }
   }
 
-  static dynamic _remote(JsEnv? env, String kind, String url) {
+  static Map<String, String> _strMap(Object? raw) {
+    final out = <String, String>{};
+    if (raw is Map) {
+      raw.forEach((k, v) {
+        if (v != null) out['$k'] = '$v';
+      });
+    }
+    return out;
+  }
+
+  static dynamic _remote(
+    JsEnv? env,
+    String kind,
+    String url, {
+    String method = 'GET',
+    Map<String, String> headers = const {},
+    String? body,
+  }) {
     if (url.isEmpty) return jsonEncode({'v': ''});
     final ses = env?.session;
+    final key = ajaxKey(method, url, body);
     final cache = kind == 'ajax' ? ses?.ajaxCache : ses?.webViewCache;
-    if (cache != null && cache.containsKey(url)) {
-      return jsonEncode({'v': cache[url]});
+    if (cache != null && cache.containsKey(key)) {
+      final meta = kind == 'ajax' ? ses?.ajaxMeta[key] : null;
+      return jsonEncode({'v': cache[key], 'meta': meta ?? const {}});
     }
     if (ses == null) {
       // 无会话（模板等场景）：显式降级为空串，交由脚本自行容错。
       return jsonEncode({'v': ''});
     }
+    final payload = jsonEncode({
+      'u': url,
+      'm': method.toUpperCase(),
+      'h': headers,
+      'b': body,
+    });
     return jsonEncode({
       'suspend': true,
       'kind': kind,
-      'b64': base64Url.encode(utf8.encode(url)),
+      'b64': base64Url.encode(utf8.encode(payload)),
     });
   }
 
@@ -821,15 +960,109 @@ abstract final class JsBridge {
     if (d && d.v !== null && d.v !== undefined) return d.v;
     return dft === undefined ? '' : dft;
   }
+  // java.ajax / java.get / java.post 的统一返回：Legado StrResponse 形状。
+  // 同时实现 toString，兼容把结果直接当字符串用的脚本。
+  function __lgResp(d) {
+    var body = d && d.v !== null && d.v !== undefined ? String(d.v) : '';
+    var meta = (d && d.meta) || {};
+    var hm = meta.headers || {};
+    var resp = {
+      body: function () { return body; },
+      string: function () { return body; },
+      bytes: function () { return __lgBytes(body); },
+      byteArray: function () { return __lgBytes(body); },
+      url: function () { return meta.url ? String(meta.url) : ''; },
+      code: function () { return meta.code === undefined || meta.code === null ? 200 : (meta.code | 0); },
+      status: function () { return resp.code(); },
+      header: function (k) {
+        if (k === undefined || k === null) return '';
+        var kk = String(k).toLowerCase(), v = hm[kk];
+        if (v === undefined) {
+          for (var key in hm) { if (String(key).toLowerCase() === kk) { v = hm[key]; break; } }
+        }
+        return v === undefined || v === null ? '' : String(v);
+      },
+      headers: function () {
+        var out = [];
+        for (var key in hm) out.push([key, String(hm[key])]);
+        return out;
+      },
+      headerMap: function () {
+        var m = {};
+        for (var key in hm) m[key] = String(hm[key]);
+        return m;
+      },
+      toString: function () { return body; },
+      valueOf: function () { return body; }
+    };
+    return resp;
+  }
+  globalThis.__lgResp = __lgResp;
+  function __lgBytes(s) {
+    var a = [], i, c, d;
+    for (i = 0; i < s.length; i++) {
+      c = s.charCodeAt(i);
+      if (c < 0x80) a.push(c);
+      else if (c < 0x800) a.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      else if (c >= 0xd800 && c < 0xdc00) {
+        d = s.charCodeAt(++i);
+        c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00);
+        a.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+      } else a.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+    return a;
+  }
   globalThis.java = {
-    ajax: function (url, options) {
-      var d = __lgcall('ajax', { url: String(url) });
+    __http: function (method, url, body, headers) {
+      var d = __lgcall('ajax', {
+        url: String(url),
+        method: String(method || 'GET').toUpperCase(),
+        headers: headers === null || headers === undefined ? null : headers,
+        body: body === null || body === undefined ? null : String(body)
+      });
       if (d && d.suspend) __lgsusp(d);
-      return d && d.v !== null && d.v !== undefined ? d.v : '';
+      return __lgResp(d);
     },
-    connect: function (url) {
-      return { body: java.ajax(url), url: String(url), headers: '', headerMap: {} };
+    ajax: function (a, b) {
+      if (a !== null && a !== undefined && typeof a === 'object') {
+        return java.__http(a.method ? a.method : 'GET', a.url, a.body, a.headers);
+      }
+      return java.__http('GET', a, null, b);
     },
+    connect: function (url, headers) { return java.__http('GET', url, null, headers); },
+    getStrResponse: function (url, a, b, c) {
+      // (url) | (url, headers) | (url, method, body, headers)
+      if (a !== null && a !== undefined && typeof a === 'object') {
+        return java.__http('GET', url, null, a);
+      }
+      if (a === null || a === undefined) return java.__http('GET', url, null, null);
+      return java.__http(String(a), url, b, c);
+    },
+    postStrResponse: function (url, body, headers) { return java.__http('POST', url, body, headers); },
+    get: function (a, b) {
+      if (b !== undefined) return java.__http('GET', a, null, b);
+      var s = String(a);
+      if (/^https?:\/\//i.test(s)) return java.__http('GET', s, null, null);
+      return __lgv(__lgcall('var.get', { k: s }), null);
+    },
+    post: function (url, body, headers) { return java.__http('POST', url, body, headers); },
+    webView: function (url, opts) {
+      var d = __lgcall('webview', { url: String(url), opts: opts === null || opts === undefined ? null : opts });
+      if (d && d.suspend) __lgsusp(d);
+      return __lgResp(d);
+    },
+    startBrowserAwait: function (url, opts) { return java.webView(url, opts); },
+    startBrowser: function (url, opts) { return java.webView(url, opts); },
+    ajaxAll: function (urls) {
+      var out = [];
+      if (urls) { for (var i = 0; i < urls.length; i++) out.push(java.ajax(urls[i])); }
+      return out;
+    },
+    longToast: function (msg) { __lgcall('toast', { msg: msg === null || msg === undefined ? '' : String(msg) }); },
+    // 繁→简：书源多用于标题去重/比较，原样返回不会造成解析失败
+    t2s: function (s) { return s === null || s === undefined ? '' : String(s); },
+    s2t: function (s) { return s === null || s === undefined ? '' : String(s); },
+    refreshExplore: function () { return true; },
     base64Decode: function (s) { return __lgv(__lgcall('b64d', { s: s === null || s === undefined ? '' : String(s) })); },
     base64Encode: function (s) { return __lgv(__lgcall('b64e', { s: s === null || s === undefined ? '' : String(s) })); },
     hexDecodeToString: function (s) { return __lgv(__lgcall('hexd', { s: s === null || s === undefined ? '' : String(s) })); },
@@ -844,7 +1077,6 @@ abstract final class JsBridge {
     },
     getString: function (rule) { return __lgv(__lgcall('getString', { rule: String(rule) })); },
     getElement: function (rule) { return __lgv(__lgcall('getElement', { rule: String(rule) })); },
-    get: function (key) { return __lgv(__lgcall('var.get', { k: String(key) }), null); },
     put: function (key, value) { __lgcall('var.put', { k: String(key), v: value === null || value === undefined ? null : String(value) }); return value; },
     log: function (msg) { __lgcall('log', { msg: msg === null || msg === undefined ? '' : String(msg) }); },
     toast: function (msg) { __lgcall('toast', { msg: msg === null || msg === undefined ? '' : String(msg) }); },

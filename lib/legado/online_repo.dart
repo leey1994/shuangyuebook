@@ -184,16 +184,31 @@ class OnlineRepo {
       session.webViewCache[e.target] = '';
       return;
     }
+    final key = JsBridge.ajaxKey(e.method, e.target, e.body);
     try {
-      final resp = await _client.get(
-        e.target,
-        headers: _mergeHeaders(source, const {}),
-        timeout: perSourceTimeout,
-        retries: 0,
-      );
-      session.ajaxCache[e.target] = resp.ok ? resp.body : '';
+      final headers = _mergeHeaders(source, e.headers);
+      final resp = e.method == 'GET'
+          ? await _client.get(
+              e.target,
+              headers: headers,
+              timeout: perSourceTimeout,
+              retries: 0,
+            )
+          : await _client.post(
+              e.target,
+              headers: headers,
+              body: e.body,
+              timeout: perSourceTimeout,
+              retries: 0,
+            );
+      session.ajaxCache[key] = resp.ok ? resp.body : '';
+      session.ajaxMeta[key] = {
+        'code': resp.statusCode,
+        'url': resp.finalUrl.isEmpty ? e.target : resp.finalUrl,
+        'headers': resp.headers,
+      };
     } catch (_) {
-      session.ajaxCache[e.target] = '';
+      session.ajaxCache[key] = '';
     }
   }
 
@@ -277,7 +292,9 @@ class OnlineRepo {
         throw const FormatException('搜索入口由 JS 脚本构建（JS 引擎不可用，可手动替换搜索地址）');
       }
       if (req.url.trim().isEmpty) {
-        throw const FormatException('搜索地址渲染为空（searchUrl 可能由 JS 表达式构建）');
+        final err = JsBridge.lastError;
+        throw FormatException('搜索地址渲染为空（searchUrl 可能由 JS 表达式构建）'
+            '${err == null || err.isEmpty ? '' : '：$err'}');
       }
       final headers = _mergeHeaders(source, req.options);
       final method = (req.options['method']?.toString() ?? 'GET').toUpperCase();
@@ -867,7 +884,7 @@ class OnlineRepo {
     BookSource source,
     Map<String, dynamic> options,
   ) {
-    final out = OnlineBookService.headerMap(source);
+    final out = Map<String, String>.from(OnlineBookService.headerMap(source));
     final opts = options['headers'];
     if (opts is Map) {
       opts.forEach((k, v) => out[k.toString()] = v.toString());
