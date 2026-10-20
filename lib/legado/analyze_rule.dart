@@ -372,8 +372,16 @@ class AnalyzeRule {
       vars: Map<String, dynamic>.from(vars),
       getString: (r) => _getStringNoJs(r, ctx: ctx),
       getElement: (r) => _getStringNoJs(r, ctx: ctx),
+      getElements: (r) => getElements(r, ctx: ctx).map(_elemHtml).toList(),
       getCookie: b?.getCookie,
     );
+  }
+
+  /// 元素 → outerHtml（`java.getElements` 回给脚本的形状）。
+  static String _elemHtml(Object e) {
+    if (e is dom.Element) return e.outerHtml;
+    if (e is xml.XmlElement) return e.toXmlString();
+    return '$e';
   }
 
   /// 模板渲染后的字面值兜底（应用 `##` 替换链；整条 JS 规则除外）。

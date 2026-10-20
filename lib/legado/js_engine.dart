@@ -104,6 +104,7 @@ class JsEnv {
     this.vars,
     this.getString,
     this.getElement,
+    this.getElements,
     this.getCookie,
   });
 
@@ -146,6 +147,12 @@ class JsEnv {
   /// java.getElement(rule)：元素规则求值（v1 降级为 getString，P2 升级外链元素 Html）。
   final String? Function(String rule)? getElement;
 
+  /// java.getElements(rule)：多元素规则求值，返回各元素 outerHtml。
+  ///
+  /// 上游 `getElements` 返回 jsoup `Elements`（可 `.size()/.get(i)` 迭代），
+  /// 巴卡漫画的目录规则靠它一次拿全部章节 `li`，只给首个元素会丢章节。
+  final List<String> Function(String rule)? getElements;
+
   /// cookie.getCookie(tag, key)：由服务层注入 CookieJar 读取器。
   final String? Function(String tag, String? key)? getCookie;
 
@@ -166,6 +173,7 @@ class JsEnv {
     Map<String, dynamic>? vars,
     String? Function(String rule)? getString,
     String? Function(String rule)? getElement,
+    List<String> Function(String rule)? getElements,
     String? Function(String tag, String? key)? getCookie,
   }) =>
       JsEnv(
@@ -184,6 +192,7 @@ class JsEnv {
         vars: vars ?? this.vars,
         getString: getString ?? this.getString,
         getElement: getElement ?? this.getElement,
+        getElements: getElements ?? this.getElements,
         getCookie: getCookie ?? this.getCookie,
       );
 }
@@ -371,13 +380,17 @@ abstract final class JsBridge {
     }
     final rt = _obtain(e);
     if (rt == null) return null;
-    // 对齐 legado 求值作用域：每次求值都是全新作用域（var/let/const 不跨调用泄漏，
-    // 直接顶层求值会撞 `let data` 重复声明）；jsLib 顶层声明落在全局，脚本仍可见。
+    // 对齐 legado 求值作用域：脚本当作「全局脚本」执行。Rhino 的
+    // ScriptEngine.eval 就是全局作用域，rule 里 `var helper = function…` 落全局，
+    // 之后别的规则（或 jsLib 里的函数）还能调到。所以这里用间接 eval
+    // （`(0,eval)`，ECMAScript 规定间接调用走全局作用域），而不是 `eval`——
+    // 直接调用会把 var 关进本函数作用域，jsLib 函数就看不见了。
+    // let/const 每次求值各有全新声明环境，不会跨调用撞名。
     JsEvalResult r;
     _active = e;
     try {
       r = rt.evaluate('${_setup(e, input)}\n'
-          '(function () { var __r = eval(${jsonEncode(code)});'
+          '(function () { var __r = (0, eval)(${jsonEncode(code)});'
           '$_finalizeJs})()');
       // 部分书源在 @js 里直接写顶层 return（legado 的 Rhino 允许），
       // eval 下会 SyntaxError；此时把整段包进函数体再跑一次。
@@ -906,6 +919,14 @@ $obj.remove = function (k) {
           final r = '${p['rule'] ?? ''}';
           return jsonEncode({
             'v': env?.getElement?.call(r) ?? env?.getString?.call(r)
+          });
+        case 'getElements':
+          final r = '${p['rule'] ?? ''}';
+          final hook = env?.getElements;
+          if (hook != null) return jsonEncode({'v': hook(r)});
+          final one = env?.getElement?.call(r) ?? env?.getString?.call(r);
+          return jsonEncode({
+            'v': one == null || one.isEmpty ? const <String>[] : <String>[one]
           });
         case 'log':
           debugPrint('[js.log] ${_clip('${p['msg'] ?? ''}')}');
@@ -1468,6 +1489,88 @@ $obj.remove = function (k) {
     return out;
   };
   globalThis.__lgResp = __lgResp;
+  // legado 规则 → CSS：`@css:x` 直取；`class.a@b` → `.a b`；`id.x` → `#x`；
+  // 末尾 `@text/@html/@attr` 对取元素无意义，丢掉。
+  function __lgRuleCss(rule) {
+    var r = String(rule === null || rule === undefined ? '' : rule);
+    if (/^@css:/i.test(r)) return r.replace(/^@css:/i, '');
+    var parts = r.split('@');
+    var head = parts[0];
+    var tail = [];
+    for (var i = 1; i < parts.length; i++) {
+      var p = parts[i];
+      if (/^(text|html|outerHtml|ownText|all)$/i.test(p)) break;
+      tail.push(p);
+    }
+    function one(seg) {
+      var m = /^class\.(.+)$/.exec(seg);
+      if (m) return '.' + m[1];
+      m = /^id\.(.+)$/.exec(seg);
+      if (m) return '#' + m[1];
+      m = /^tag\.(.+)$/.exec(seg);
+      if (m) return m[1];
+      return seg;
+    }
+    var css = one(head);
+    for (var j = 0; j < tail.length; j++) css += ' ' + one(tail[j]);
+    return css;
+  }
+  function __lgSelectAll(html, css) {
+    var d = __lgcall('jcompat', {
+      op: 'selector', html: String(html), css: String(css || 'html')
+    });
+    var arr = (d && d.v) || [];
+    var out = [];
+    for (var i = 0; i < arr.length; i++) {
+      var h = arr[i] && arr[i].html;
+      if (h) out.push(String(h));
+    }
+    if (typeof globalThis.__lgElementsFromHtml === 'function') {
+      return globalThis.__lgElementsFromHtml(out);
+    }
+    return out;
+  }
+  // 预置脚本里没有 javaLibShim 的 b64/toBytes 工具（那份在独立的 IIFE 作用域里），
+  // java.strToBytes/bytesToStr 要自己转字节数组。
+  function __lgArr(v) {
+    if (v === null || v === undefined) return [];
+    if (typeof v === 'string') return __lgBytes(v);
+    if (v.length !== undefined) return Array.prototype.slice.call(v);
+    return [];
+  }
+  var __lgB64A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function __lgB64d(s) {
+    var t = String(s === null || s === undefined ? '' : s).replace(/[^A-Za-z0-9+/=]/g, '');
+    var out = [], i, n = 0, bits = 0;
+    for (i = 0; i < t.length; i++) {
+      var c = t.charAt(i);
+      if (c === '=') break;
+      var v = __lgB64A.indexOf(c);
+      if (v < 0) continue;
+      n = (n << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out.push((n >> bits) & 0xff);
+      }
+    }
+    return out;
+  }
+  function __lgB64e(arr) {
+    var s = '', i;
+    for (i = 0; i + 2 < arr.length; i += 3) {
+      var n = ((arr[i] & 255) << 16) | ((arr[i + 1] & 255) << 8) | (arr[i + 2] & 255);
+      s += __lgB64A.charAt((n >> 18) & 63) + __lgB64A.charAt((n >> 12) & 63) +
+        __lgB64A.charAt((n >> 6) & 63) + __lgB64A.charAt(n & 63);
+    }
+    if (i < arr.length) {
+      var rem = arr.length - i;
+      var n2 = ((arr[i] & 255) << 16) | (rem > 1 ? ((arr[i + 1] & 255) << 8) : 0);
+      s += __lgB64A.charAt((n2 >> 18) & 63) + __lgB64A.charAt((n2 >> 12) & 63) +
+        (rem > 1 ? __lgB64A.charAt((n2 >> 6) & 63) : '=') + '=';
+    }
+    return s;
+  }
   function __lgBytes(s) {
     var a = [], i, c, d;
     for (i = 0; i < s.length; i++) {
@@ -1590,11 +1693,121 @@ $obj.remove = function (k) {
     reLoginView: function () { return true; },
     qread: function () { return true; },
     getElement: function (rule) { return __lgv(__lgcall('getElement', { rule: String(rule) })); },
+    // 上游返回 jsoup Elements（`java.getElements('class.x@li')` → 可迭代）。
+    // 元素包装交给 Packages 层：那边有 jsoup 节点代理与集合方法。
+    getElements: function (rule) {
+      var list;
+      var over = globalThis.__lgContent;
+      if (typeof over === 'string' && over) {
+        list = __lgSelectAll(over, __lgRuleCss(String(rule)));
+      } else {
+        var d = __lgcall('getElements', { rule: String(rule) });
+        list = (d && d.v) || [];
+      }
+      if (typeof globalThis.__lgElementsFromHtml === 'function') {
+        return globalThis.__lgElementsFromHtml(list);
+      }
+      return list;
+    },
+    // HTML 美化：上游 HtmlFormatter 会缩进。源脚本常拿它跑正则，
+    // 这里在标签边界换行（属性内部不动），形状一致即可。
+    htmlFormat: function (html) {
+      var s = html === null || html === undefined ? '' : String(html);
+      s = s.replace(/>\s*</g, '>\n<');
+      var lines = s.split('\n');
+      var out = '', depth = 0;
+      for (var i = 0; i < lines.length; i++) {
+        var ln = lines[i].replace(/^\s+|\s+$/g, '');
+        if (!ln) continue;
+        if (/^<\//.test(ln)) depth = depth > 0 ? depth - 1 : 0;
+        out += new Array(depth + 1).join('  ') + ln + '\n';
+        if (/^<[^!?/][^>]*[^/]>$/.test(ln) && !/^<(br|hr|img|input|meta|link|source)\b/i.test(ln)) {
+          if (ln.indexOf('</') < 0) depth++;
+        }
+      }
+      return out;
+    },
+    strToBytes: function (s, cs) {
+      var b64 = __lgv(__lgcall('jcompat', {
+        op: 'toBytes', text: s === null || s === undefined ? '' : String(s),
+        cs: cs === null || cs === undefined ? 'UTF-8' : String(cs)
+      }), '');
+      return __lgB64d(b64);
+    },
+    bytesToStr: function (b, cs) {
+      return __lgv(__lgcall('jcompat', {
+        op: 'fromBytes', data: __lgB64e(__lgArr(b)),
+        cs: cs === null || cs === undefined ? 'UTF-8' : String(cs)
+      }), '');
+    },
+    // ---- 规则/内容上下文（上游 java.setContent + getElements 组合） ----
+    // 搬山人：`va.setContent(markup, pageUrl); java.getElements('@css:html')`
+    // —— 先把 HTML 灌进当前解析器，再按规则取元素。这里用全局覆盖变量实现，
+    // getElements 优先读它（见下）。
+    setContent: function (html, url) {
+      globalThis.__lgContent = html === null || html === undefined ? '' : String(html);
+      globalThis.__lgContentUrl = url === null || url === undefined ? '' : String(url);
+      return true;
+    },
+    getStringList: function (rule) {
+      var s = java.getString(rule);
+      return s === null || s === undefined || s === '' ? [] : String(s).split('\n');
+    },
+    // ---- 登录/浏览器交互类：无 UI 的平台上给稳定返回值，别让规则空掉 ----
+    getVerificationCode: function () { return ''; },
+    upLoginData: function () { return true; },
+    reUiView: function () { return true; },
+    refreshTocUrl: function () { return true; },
+    clearCookie: function (tag) { __lgcall('cookie.del', { tag: String(tag) }); return true; },
+    downloadFile: function () { return ''; },
+    readFile: function () { return ''; },
+    aesEncodeToBase64String: function (str, key, transformation, iv) {
+      return java.createSymmetricCrypto(transformation, key, iv).encryptBase64(String(str));
+    },
+    digestHex: function (v) {
+      var arr = __lgArr(v), out = '';
+      for (var i = 0; i < arr.length; i++) {
+        var x = arr[i] & 0xff;
+        out += (x < 16 ? '0' : '') + x.toString(16);
+      }
+      return out;
+    },
+    createAsymmetricCrypto: function () {
+      return {
+        encrypt: function () { return ''; },
+        encryptBase64: function () { return ''; },
+        encryptHex: function () { return ''; },
+        decrypt: function () { return ''; },
+        decryptStr: function () { return ''; }
+      };
+    },
+    toURL: function (u) {
+      var s = u === null || u === undefined ? '' : String(u);
+      return {
+        toString: function () { return s; },
+        toExternalForm: function () { return s; },
+        getPath: function () { return s.replace(/^[a-z]+:\/\/[^\/]+/i, '').split('?')[0]; },
+        openConnection: function () { return null; }
+      };
+    },
     put: function (key, value) { __lgcall('var.put', { k: String(key), v: value === null || value === undefined ? null : String(value) }); return value; },
     log: function (msg) { __lgcall('log', { msg: msg === null || msg === undefined ? '' : String(msg) }); },
     toast: function (msg) { __lgcall('toast', { msg: msg === null || msg === undefined ? '' : String(msg) }); },
     getWebViewUA: function () { return __lgv(__lgcall('ua', {})); },
     getCookie: function (tag, key) { return __lgv(__lgcall('cookie.get', { tag: String(tag), key: key === null || key === undefined ? null : String(key) })); },
+    setCookie: function (tag, v) { __lgcall('cookie.set', { tag: String(tag), v: v === null || v === undefined ? '' : String(v) }); return true; },
+    randomUUID: function () {
+      var b = __lgArr(__lgv(__lgcall('jcompat', { op: 'random', n: 16 }), ''));
+      if (!b || b.length < 16) b = __lgB64d(__lgv(__lgcall('jcompat', { op: 'random', n: 16 }), ''));
+      var h = '';
+      for (var i = 0; i < 16 && i < b.length; i++) {
+        var x = b[i] & 0xff;
+        h += (x < 16 ? '0' : '') + x.toString(16);
+      }
+      while (h.length < 32) h += '0';
+      return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) + '-' +
+        ((parseInt(h.charAt(16), 16) & 3) | 8).toString(16) + h.slice(17, 20) + '-' + h.slice(20, 32);
+    },
     queryTTF: function (data) { return __lgv(__lgcall('ttf', { s: String(data) }), null); },
     queryBase64TTF: function (data) { return __lgv(__lgcall('ttfb64', { s: String(data) }), null); },
     replaceFont: function (text, ttf) { return __lgv(__lgcall('font', { text: text === null || text === undefined ? '' : String(text), ttf: String(ttf) })); }

@@ -955,6 +955,20 @@ const String kJavaCompatShim = r'''
     }
   };
   function JsoupResponse(body) { this.__b = String(body === null || body === undefined ? '' : body); }
+  // java.getElements(rule) 的返回值：上游是 jsoup Elements（可迭代 + 集合方法）。
+  // 宿主只回一串 outerHtml，这里逐个包成节点（树导航仍按各自片段成立）。
+  globalThis.__lgElementsFromHtml = function (list) {
+    var out = [];
+    if (list && list.length !== undefined) {
+      for (var i = 0; i < list.length; i++) {
+        var html = String(list[i] === null || list[i] === undefined ? '' : list[i]);
+        if (!html) continue;
+        var n = bridge('selector', { html: html, css: 'html', mode: 'node' });
+        if (n) out.push(wrapNode(n, html));
+      }
+    }
+    return decorate(out);
+  };
   JsoupResponse.prototype = {
     body: function () { return this.__b; },
     text: function () { return this.__b; },
