@@ -163,6 +163,27 @@ void main() {
     expect(ev("Packages.org.jsoup.Jsoup.parse($h).title()"), '');
   });
 
+  test('jsoup：表格片段与字符串上的元素式调用', () {
+    // `<tr>` 片段直接解析会被 HTML5 解析器丢弃 → 必须撑 table 外壳（若雨中文）
+    const row = '<tr><td>0</td><td><a href="/Book/12/index.html">书名</a></td>'
+        '<td>2</td><td>4</td><td>5</td></tr>';
+    final r = jsonEncode(row);
+    expect(ev("Packages.org.jsoup.Jsoup.parse($r).select('td').size()"), '5');
+    expect(
+        ev("Packages.org.jsoup.Jsoup.parse($r).select('td').get(1)"
+            ".select('a').attr('href')"),
+        '/Book/12/index.html');
+    // `result` 是 outerHtml 字符串时，脚本仍可写 result.select(...)（legado 是 Element）
+    expect(
+        ev("(function(){var result=$r;"
+            "return result.select('td').get(0).text();})()"),
+        '0');
+    expect(
+        ev("(function(){var result=$r;"
+            "return result.select('td').get(1).select('a').text();})()"),
+        '书名');
+  });
+
   test('System / UUID / Integer / StringBuilder', () {
     expect(ev("Packages.java.lang.System.currentTimeMillis() > 1600000000000"), 'true');
     expect(

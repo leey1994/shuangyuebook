@@ -203,6 +203,23 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
         if (_ownText(e).toLowerCase().contains(needle)) e,
     ];
   }
+  // 位置伪类出现在组合选择器中间（`span:nth-child(2) a`）时 package:html 不支持
+  // （`:nth-child` 静默 0 命中、`:nth-of-type` 直接抛 UnimplementedError）。
+  // 按顶层空格切段逐段选择，段内的位置伪类退化成尾部过滤（新龙小说网等依赖此形态）。
+  if (_selectorNeedsStaging(s)) {
+    final parts = _splitTopLevelSpaces(s);
+    if (parts.length > 1) {
+      var cur = selectElements(context, parts.first);
+      for (var i = 1; i < parts.length && cur.isNotEmpty; i++) {
+        final next = <dom.Element>[];
+        for (final e in cur) {
+          next.addAll(selectElements(e, parts[i]));
+        }
+        cur = next;
+      }
+      return cur;
+    }
+  }
   try {
     if (context is dom.Document) {
       return context.querySelectorAll(s);
@@ -215,6 +232,62 @@ List<dom.Element> selectElements(dom.Node context, String selector) {
     // 选择器语法不支持：返回空结果（与“找不到元素”同语义）
     return const [];
   }
+}
+
+// ---------- 组合选择器里的位置伪类 ----------
+
+final RegExp _posPseudo = RegExp(
+    r':(nth-child|nth-last-child|nth-of-type|eq|lt|gt)\s*\('
+    r'|:(first-child|last-child|first-of-type|last-of-type)(?![-\w])');
+
+/// 选择器是否需要「切段选择」：含位置伪类、含顶层空格、且没有 `>`/`+`/`~`
+/// 这类兄弟/子代组合子（有的话语义交给 package:html，失败为原语义）。
+bool _selectorNeedsStaging(String s) {
+  if (!s.contains(' ')) return false;
+  if (s.contains('>') || s.contains('+') || s.contains('~')) return false;
+  return _posPseudo.hasMatch(s);
+}
+
+/// 按顶层空格切分（括号/中括号内与引号内的空格不切）。
+List<String> _splitTopLevelSpaces(String s) {
+  final out = <String>[];
+  final buf = StringBuffer();
+  var depth = 0;
+  String? quote;
+  for (var i = 0; i < s.length; i++) {
+    final ch = s[i];
+    if (quote != null) {
+      buf.write(ch);
+      if (ch == quote) quote = null;
+      continue;
+    }
+    if (ch == '"' || ch == "'") {
+      quote = ch;
+      buf.write(ch);
+      continue;
+    }
+    if (ch == '(' || ch == '[') {
+      depth++;
+      buf.write(ch);
+      continue;
+    }
+    if (ch == ')' || ch == ']') {
+      if (depth > 0) depth--;
+      buf.write(ch);
+      continue;
+    }
+    if (depth == 0 &&
+        (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')) {
+      final t = buf.toString().trim();
+      if (t.isNotEmpty) out.add(t);
+      buf.clear();
+      continue;
+    }
+    buf.write(ch);
+  }
+  final t = buf.toString().trim();
+  if (t.isNotEmpty) out.add(t);
+  return out;
 }
 
 // ---------- 尾部过滤伪类 ----------
@@ -234,14 +307,15 @@ String _ownText(dom.Element el) {
 }
 
 final RegExp _filterSuffix = RegExp(
-    r':(lt|gt|eq|nth-of-type|first-of-type|last-of-type)\s*(?:\(([^()]*)\))?\s*$');
+    r':(lt|gt|eq|nth-last-child|nth-child|nth-of-type|first-child|last-child|first-of-type|last-of-type)\s*(?:\(([^()]*)\))?\s*$');
 
 (String, (String, String?))? _splitTrailingFilter(String s) {
   final m = _filterSuffix.firstMatch(s);
   if (m == null) return null;
   final name = m.group(1)!;
   final arg = m.group(2)?.trim();
-  if (name == 'lt' || name == 'gt' || name == 'eq' || name == 'nth-of-type') {
+  if (name == 'lt' || name == 'gt' || name == 'eq' || name == 'nth-of-type' ||
+      name == 'nth-child' || name == 'nth-last-child') {
     if (arg == null || arg.isEmpty) return null;
   }
   final base = s.substring(0, m.start).trim();
@@ -270,6 +344,22 @@ List<dom.Element> _applyListFilter(List<dom.Element> list, (String, String?) f) 
       return (n >= 0 && n < list.length) ? [list[n]] : const [];
     case 'nth-of-type':
       return [for (final e in list) if (_matchNthOfType(e, f.$2!)) e];
+    case 'nth-child':
+      return [for (final e in list) if (_matchNth(_childPosition(e), f.$2!)) e];
+    case 'nth-last-child':
+      return [
+        for (final e in list)
+          if (_matchNth(
+              _childPosition(e, total: true) - _childPosition(e) + 1, f.$2!))
+            e,
+      ];
+    case 'first-child':
+      return [for (final e in list) if (_childPosition(e) == 1) e];
+    case 'last-child':
+      return [
+        for (final e in list)
+          if (_childPosition(e) == _childPosition(e, total: true)) e,
+      ];
     case 'first-of-type':
       return [for (final e in list) if (_typePosition(e) == 1) e];
     case 'last-of-type':
@@ -296,8 +386,23 @@ int _typePosition(dom.Element el, {bool total = false}) {
   return total ? pos : (pos == 0 ? 1 : pos);
 }
 
-bool _matchNthOfType(dom.Element el, String spec) {
-  final pos = _typePosition(el);
+/// 元素在**同父全部元素**中的位置（1 起，对应 CSS `:nth-child`）；
+/// [total] 为 true 时返回同父元素总数（供 `:nth-last-child` / `:last-child`）。
+int _childPosition(dom.Element el, {bool total = false}) {
+  final parent = el.parent;
+  if (parent == null) return 1;
+  var pos = 0;
+  for (final c in parent.children) {
+    pos++;
+    if (!total && identical(c, el)) return pos;
+  }
+  return total ? pos : (pos == 0 ? 1 : pos);
+}
+
+bool _matchNthOfType(dom.Element el, String spec) =>
+    _matchNth(_typePosition(el), spec);
+
+bool _matchNth(int pos, String spec) {
   final t = spec.trim().toLowerCase();
   if (t == 'odd') return pos % 2 == 1;
   if (t == 'even') return pos % 2 == 0;

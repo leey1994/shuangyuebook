@@ -256,7 +256,7 @@ class JavaCompat {
     final css = '${p['css'] ?? ''}';
     final limit = (p['limit'] as num?)?.toInt() ?? 200;
     final mode = '${p['mode'] ?? 'elements'}';
-    final doc = html_parser.parse(htmlText);
+    final doc = _parseFragment(htmlText);
     if (mode == 'text') {
       return _cleanText(doc.documentElement?.text ?? '');
     }
@@ -285,6 +285,22 @@ class JavaCompat {
       });
     }
     return out;
+  }
+
+  /// HTML5 片段解析：表格类标签（`<tr>`/`<td>`…）直接交给解析器会被丢弃
+  /// （"in body" 插入模式），`result.select('td')` 便 0 命中。撑一个 `<table>`
+  /// 外壳再解析，选到的元素 outerHtml 仍是原片段。
+  static dom.Document _parseFragment(String htmlText) {
+    final t = htmlText.trimLeft().toLowerCase();
+    const tableTags = <String>[
+      '<tr', '<td', '<th', '<tbody', '<thead', '<tfoot', '<caption', '<col',
+    ];
+    for (final tag in tableTags) {
+      if (t.startsWith(tag)) {
+        return html_parser.parse('<table>$htmlText</table>');
+      }
+    }
+    return html_parser.parse(htmlText);
   }
 
   /// 与 jsoup `Element.text()` 对齐：块级标签补空格、压缩空白。

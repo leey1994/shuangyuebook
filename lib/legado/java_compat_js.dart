@@ -803,6 +803,28 @@ const String kJavaCompatShim = r'''
     out.is = function () { return out.length > 0; };
     return out;
   }
+  // legado 里 `result` 是 jsoup 的 Element/Elements；爽阅把条目上下文交给脚本时
+  // 是「元素 outerHtml 字符串」。源脚本常直接写 `result.select('td').get(1)…`
+  // （若雨中文的 bookUrl），这里给 String 补上 jsoup 常用方法：既保住
+  // indexOf/substring/match 等原生用法，又让元素式调用成立。
+  (function () {
+    var SP = String.prototype;
+    if (SP.select) return;
+    SP.select = function (css) { return selectIn(String(this), String(css)); };
+    SP.selectFirst = function (css) {
+      var r = selectIn(String(this), String(css));
+      return r.length ? r[0] : null;
+    };
+    SP.getElementsByTag = function (t) { return selectIn(String(this), String(t)); };
+    SP.getElementsByClass = function (c) { return selectIn(String(this), '.' + String(c)); };
+    SP.getElementById = function (id) { return selectIn(String(this), '#' + String(id))[0] || null; };
+    SP.outerHtml = function () { return String(this); };
+    SP.html = function () { return String(this); };
+    SP.text = function () { return new JsoupDocument(String(this)).text(); };
+    SP.attr = function () { return ''; };
+    SP.hasAttr = function () { return false; };
+    SP.is = function () { return String(this).length > 0; };
+  })();
   function JsoupDocument(html) { this.__h = String(html === null || html === undefined ? '' : html); }
   JsoupDocument.prototype = {
     select: function (css) { return selectIn(this.__h, css); },
