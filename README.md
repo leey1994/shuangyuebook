@@ -4,7 +4,7 @@
 
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
-当前版本：**v1.0.3**（更新内容见 [docs/release-notes-v1.0.3.md](docs/release-notes-v1.0.3.md)）
+当前版本：**v1.0.4**（更新内容见 [docs/release-notes-v1.0.4.md](docs/release-notes-v1.0.4.md)）
 
 静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/)
 
@@ -98,9 +98,9 @@ Flutter 打造的双端（Android / Windows）小说阅读器——内置固化�
 
 | 平台 | 文件 | 体积 |
 | --- | --- | --- |
-| Android（64 位，推荐） | `ShuangYue-v1.0.3+9-arm64-v8a.apk` | 约 24 MB |
-| Android（32 位老机型） | `ShuangYue-v1.0.3+9-armeabi-v7a.apk` | 约 22 MB |
-| Windows | `ShuangYue-v1.0.3+9-windows-x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装 | 约 18 MB |
+| Android（64 位，推荐） | `ShuangYue-v1.0.4+12-arm64-v8a.apk` | 约 24 MB |
+| Android（32 位老机型） | `ShuangYue-v1.0.4+12-armeabi-v7a.apk` | 约 22 MB |
+| Windows | `ShuangYue-v1.0.4+12-windows-x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装 | 约 18 MB |
 
 > **为什么要按架构分开？** Flutter 每个 ABI 都要带一份自己的引擎（约 20 MB）。
 > 三合一「通用包」会把 arm64 / armeabi-v7a / x86_64 三份都塞进去，体积直接到 ~68 MB。
@@ -133,15 +133,15 @@ flutter test
 # APP_VERSION 取自 pubspec.yaml 的 version，必须显式传 ——
 # 「我的 → 关于」与自动更新都靠它判断有没有新版本。
 # 安卓：--split-per-abi 出三个按架构分包（各 ~20 MB），不要用默认的通用包（~68 MB）。
-flutter build apk --release --split-per-abi --dart-define=APP_VERSION=1.0.3
+flutter build apk --release --split-per-abi --dart-define=APP_VERSION=1.0.4
 # 只要其中一个架构：
-flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.3
-flutter build windows --release --dart-define=APP_VERSION=1.0.3
+flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.4
+flutter build windows --release --dart-define=APP_VERSION=1.0.4
 
 # Windows 更新器（独立后台进程，打 Windows 包前必须先产出并放进 Release 目录）：
 # 负责下载/解压/换装/重启，UI 进程只负责点火。
 dart compile exe tool/updater.dart -o build/windows/x64/runner/Release/updater.exe
-# 然后整目录打包成 ShuangYue-v1.0.3+9-windows-x64.zip（updater.exe 一并进包）。
+# 然后整目录打包成 ShuangYue-v1.0.4+12-windows-x64.zip（updater.exe 一并进包）。
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
@@ -155,6 +155,26 @@ powershell -ExecutionPolicy Bypass -File tool/shot.ps1 -Out build/shot.png -Wait
 ```powershell
 powershell -ExecutionPolicy Bypass -File assets/icon/generate_icon.ps1
 ```
+
+## 自动发版（GitHub Actions）
+
+正式包不用手打：`.github/workflows/release.yml` 在 **push 到 `main`** 时自动跑完整链路——
+升版本号 → 打 Android（arm64-v8a / armeabi-v7a 分包）+ Windows（含 `updater.exe`）→
+建 Release 与 tag → 上传三个安装包与 `SHA256SUMS.txt` → 把新版本号回写进
+`pubspec.yaml` / `README.md` / `docs/index.html` 并自动提交。也可以在 Actions 页手动
+`workflow_dispatch` 再发一版。
+
+版本控制写在 commit message 里（默认 patch 递增）：
+
+| 写法 | 效果 | 例子 |
+| --- | --- | --- |
+| 无 | patch +1 | `v1.0.4` → `v1.0.5` |
+| `#minor` | 次版本 +1，patch 归零 | `v1.0.4` → `v1.1.0` |
+| `#major` | 主版本 +1，其余归零 | `v1.0.4` → `v2.0.0` |
+| `#norelease` | 本次不发版 | 只推文档/配置时用 |
+
+细节（Flutter 版本固定、构建号规则、文件同步清单、失败重入语义）见
+[docs/release-process.md](docs/release-process.md)。
 
 ## 说明
 

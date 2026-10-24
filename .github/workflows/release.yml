@@ -1,0 +1,251 @@
+# 爽阅自动发版：push 到 main → 自动升版本号 → 打双端包 → 建 Release + tag → 回写版本号
+#
+# 触发方式（二选一）：
+#   1. push 到 main（.github/**、**/*.md、docs/** 的改动不触发——文档/公告更新不该发行）
+#   2. Actions 页手动 workflow_dispatch（立刻按当前最新 tag 再发一版）
+#
+# 版本号规则（写进 commit message 即可控制，默认 patch）：
+#   #major  1.0.4 → 2.0.0
+#   #minor  1.0.4 → 1.1.0
+#   （无）   1.0.4 → 1.0.5
+#   #norelease 跳过本次发版（只合文档/改配置又想推 main 时用）
+# 构建号 B 取仓库提交数（git rev-list --count HEAD，单调递增、每次发版唯一），
+# 版本写成 pubspec.yaml 的 `X.Y.Z+B`；App 内 compareVersion 只比 X.Y.Z。
+#
+# 为什么不用「tag 推送触发 build」的双工作流：GITHUB_TOKEN 产生的 tag 推送
+# 不会触发新的 workflow run，还得额外配 PAT。单工作流内一次跑完没有这个问题。
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ---------- 版本号决策 ----------
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.calc.outputs.publish }}
+      version: ${{ steps.calc.outputs.version }}
+      build: ${{ steps.calc.outputs.build }}
+      full: ${{ steps.calc.outputs.full }}
+      title: ${{ steps.calc.outputs.title }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 拿全部历史，版本号/发布说明都靠 git log 与 tag
+      - id: calc
+        run: |
+          set -euo pipefail
+          # 逃生门：commit message 写 #norelease 则本次不发版
+          if git log -1 --pretty=%B | grep -qi '#norelease'; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "commit message 含 #norelease，跳过发版"
+            exit 0
+          fi
+
+          # 上一版取最新 tag；一个 tag 都没有时退回读 pubspec.yaml
+          LAST_TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ]; then
+            BASE="${LAST_TAG#v}"
+          else
+            BASE=$(sed -n 's/^version: *//p' pubspec.yaml | cut -d'+' -f1)
+          fi
+          IFS=. read -r MAJ MIN PAT <<<"$BASE"
+
+          MSG=$(git log -1 --pretty=%s)
+          case "$MSG" in
+            *'#major'*) MAJ=$((MAJ + 1)); MIN=0; PAT=0 ;;
+            *'#minor'*) MIN=$((MIN + 1)); PAT=0 ;;
+            *)          PAT=$((PAT + 1)) ;;
+          esac
+
+          V="$MAJ.$MIN.$PAT"
+          B=$(git rev-list --count HEAD)
+          FULL="$V+$B"
+          # tag/Release 标题沿用旧惯例：`爽阅 vX.Y.Z：<commit 主题>`，剥掉控制标签
+          SUBJECT=$(printf '%s' "$MSG" | sed -E 's/#[A-Za-z]+//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')
+
+          {
+            echo "publish=true"
+            echo "version=$V"
+            echo "build=$B"
+            echo "full=$FULL"
+            echo "title=爽阅 v$V：$SUBJECT"
+          } >> "$GITHUB_OUTPUT"
+          echo "next release: $FULL（上一版 tag: ${LAST_TAG:-无}）"
+
+  # ---------- Android（按 ABI 拆包，只发 arm64-v8a 与 armeabi-v7a）----------
+  # release 签名走 build.gradle.kts 里既有的 debug  signingConfig，无需 secret。
+  build-apk:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1' # 与 .metadata / 本地开发版一致；升 Flutter 时改这里
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: 构建 APK
+        run: >
+          flutter build apk --release --split-per-abi
+          --dart-define=APP_VERSION=${{ needs.version.outputs.full }}
+      - name: 按发布命名规范改名
+        run: |
+          set -euo pipefail
+          V="${{ needs.version.outputs.full }}"
+          mkdir -p artifacts
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+             "artifacts/ShuangYue-v$V-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+             "artifacts/ShuangYue-v$V-armeabi-v7a.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: artifacts/
+
+  # ---------- Windows（含后台更新器 updater.exe，整目录打包）----------
+  build-windows:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: 构建 Windows
+        run: >
+          flutter build windows --release
+          --dart-define=APP_VERSION=${{ needs.version.outputs.full }}
+      - name: 编译更新器并放入 Release 目录
+        run: >
+          dart compile exe tool/updater.dart
+          -o build/windows/x64/runner/Release/updater.exe
+      - name: 整目录打包（exe 在压缩包根目录）
+        shell: pwsh
+        run: |
+          $V = "${{ needs.version.outputs.full }}"
+          if (-not (Test-Path build/windows/x64/runner/Release/novel_reader.exe)) {
+            throw "novel_reader.exe 不在 build/windows/x64/runner/Release/，打包前先确认构建成功"
+          }
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "ShuangYue-v$V-windows-x64.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: ShuangYue-v*-windows-x64.zip
+
+  # ---------- 建 Release + tag，回写版本号 ----------
+  release:
+    needs: [version, build-apk, build-windows]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 汇总产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: 生成发布说明与 SHA256SUMS
+        run: |
+          set -euo pipefail
+          V="${{ needs.version.outputs.version }}"
+          FULL="${{ needs.version.outputs.full }}"
+          TAG="v$V"
+          PREV=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
+          if [ -n "$PREV" ]; then RANGE="$PREV..$GITHUB_SHA"; else RANGE="$GITHUB_SHA"; fi
+
+          # Release body：自上一版以来的提交清单（用户向的详细说明仍以
+          # docs/release-notes-vX.Y.Z.md / announcement.json 为准）
+          {
+            echo "# 爽阅 v$V（$FULL）"
+            echo
+            echo "> 自动发版产物；以下为自 ${PREV:-初始版本} 以来的提交。"
+            echo
+            git log --no-merges --pretty='- %s (%h)' $RANGE
+          } > notes.md
+
+          # 写一份 docs/release-notes 文件（沿用仓库既有惯例）
+          {
+            echo "# 爽阅 v$V（$FULL）"
+            echo
+            echo "发布日期：$(date +%Y-%m-%d)"
+            echo "发布：https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+            echo
+            echo "## 本版提交"
+            echo
+            git log --no-merges --pretty='- %s (%h)' $RANGE
+            echo
+            echo "> 本文件由 GitHub Actions 自动生成；面向用户的详细更新说明请补充于此，"
+            echo "> 或发布到 docs/announcement.json（官网与 App 公告同源）。"
+          } > "docs/release-notes-v$V.md"
+
+          (cd dist && sha256sum apk/* windows/* > SHA256SUMS.txt)
+      - name: 打 tag
+        run: |
+          set -euo pipefail
+          TAG="v${{ needs.version.outputs.version }}"
+          TITLE="${{ needs.version.outputs.title }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG 已存在，复用"
+          else
+            git tag -a "$TAG" -m "$TITLE"
+          fi
+          git push origin "refs/tags/$TAG"
+      - name: 建 Release 并上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v${{ needs.version.outputs.version }}"
+          TITLE="${{ needs.version.outputs.title }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/apk/* dist/windows/* dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" dist/apk/* dist/windows/* dist/SHA256SUMS.txt \
+              --title "$TITLE" --notes-file notes.md
+          fi
+      - name: 回写版本号（pubspec / README / 官网）
+        run: |
+          set -euo pipefail
+          V="${{ needs.version.outputs.version }}"
+          FULL="${{ needs.version.outputs.full }}"
+          sed -i -E "s|^当前版本：.*|当前版本：**v$V**（更新内容见 [docs/release-notes-v$V.md](docs/release-notes-v$V.md)）|" README.md
+          sed -i -E "s/ShuangYue-v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?-/ShuangYue-v$FULL-/g" README.md
+          sed -i -E "s/APP_VERSION=[0-9]+\.[0-9]+\.[0-9]+/APP_VERSION=$V/g" README.md
+          sed -i -E "s|docs/release-notes-v[0-9]+\.[0-9]+\.[0-9]+\.md|docs/release-notes-v$V.md|g" docs/index.html
+          sed -i -E "s/var FALLBACK = 'v[0-9]+\.[0-9]+\.[0-9]+';/var FALLBACK = 'v$V';/" docs/index.html
+          sed -i -E "s|^version: .*|version: $FULL|" pubspec.yaml
+      - name: 提交版本号回写
+        run: |
+          set -euo pipefail
+          FULL="${{ needs.version.outputs.full }}"
+          git add -A
+          git diff --cached --quiet || git commit -m "chore(release): v$FULL [skip ci]"
+          # GITHUB_TOKEN 产生的推送不会再触发 workflow，不会自触发循环
+          git push origin HEAD:main
