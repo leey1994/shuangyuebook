@@ -230,10 +230,37 @@ class LegadoCookieJar {
     _loaded = true;
   }
 
+  /// 只读模式（体检分身用）：从同一份文件读出登录态，但不回写。
+  /// 两个 isolate 同时写 `cookies.json` 会互相盖掉，写盘归主线程一家。
+  bool readOnly = false;
+
+  /// 本实例接触过的 Cookie 键（新增 / 改值 / 删除）。分身任务用它把结果带回主线程。
+  final Set<String> _touched = {};
+
+  /// 分身回传用：本次任务里新增或变更的 Cookie（已删除的不在表里）。
+  List<Map<String, dynamic>> touchedSnapshot() => [
+        for (final k in _touched)
+          if (_cookies[k] != null) _cookies[k]!.toJson(),
+      ];
+
+  /// 主线程合并分身带回的 Cookie（写盘仍由主线程负责）。
+  void mergeFrom(List<dynamic> jsons) {
+    var changed = false;
+    for (final j in jsons) {
+      if (j is! Map) continue;
+      final c = LegadoCookie.fromJson(Map<String, dynamic>.from(j));
+      if (c == null || c.expired) continue;
+      _put(c);
+      changed = true;
+    }
+    if (changed) _saveSoon();
+  }
+
   /// 立即落盘（测试与退出前调用）。
-  Future<void> flush() => _save();
+  Future<void> flush() => readOnly ? Future.value() : _save();
 
   void _saveSoon() {
+    if (readOnly) return;
     if (_file == null && _dirsOverride == null) return; // 没初始化：只存内存
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 1200), () {
@@ -266,8 +293,10 @@ class LegadoCookieJar {
   void _put(LegadoCookie c) {
     if (c.value.isEmpty || c.expired) {
       _cookies.remove(c.key);
+      _touched.add(c.key);
       return;
     }
+    _touched.add(c.key);
     if (!_cookies.containsKey(c.key) && _cookies.length >= maxCookies) {
       // 先踢过期，再按插入序踢最老
       _cookies.removeWhere((_, v) => v.expired);

@@ -124,16 +124,21 @@ Future<void> _afterFirstFrame() async {
     await StatsStore.I.load(); // 阅读统计（时长 / 连续天数 / 最近 7 天）
   } catch (_) {}
   try {
-    // 书源健康档案：每天首次启动自动体检一次（只标记不删源）
-    await SourceHealthStore.I.load();
-    unawaited(SourceHealthStore.I
-        .autoRunIfNeeded(concurrency: AppStore.I.checkConcurrency)
-        .then((r) {
-      // 有失效书源就提醒一句，具体清单去「阅读记录」里看
-      if (r != null && r.hasFailure && r.failed.isNotEmpty) {
-        debugPrint('[书源体检] ${r.summary}');
-      }
-    }));
+    await SourceHealthStore.I.load(); // 健康档案先落座，30 秒后的体检才有的写
+    // 书源健康档案：每天首次启动自动体检一次（只标记不删源）。
+    // 隔几天没打开 ⇒ 打开那天必然触发整轮巡检，所以这里两个约束：
+    //  - 延后 30 秒：不与首页推荐 / 公告 / 更新检查抢同一段带宽和站点限流；
+    //  - 并发固定 2：后台巡检不该按手动体检的档位全速跑（用户设置只作用于
+    //    「书源管理」里手动体检）。网络与解析都在分身池里跑（见 parse_worker.dart），
+    //    主 isolate 只收结论 —— 这是「打开就卡」的根治处。
+    Future.delayed(const Duration(seconds: 30), () {
+      unawaited(SourceHealthStore.I.autoRunIfNeeded(concurrency: 2).then((r) {
+        // 有失效书源就提醒一句，具体清单去「阅读记录」里看
+        if (r != null && r.hasFailure && r.failed.isNotEmpty) {
+          debugPrint('[书源体检] ${r.summary}');
+        }
+      }));
+    });
   } catch (_) {}
   try {
     // 上次选过网络字体：后台把字体下好（只下一次），下完进阅读器即刻生效。

@@ -696,6 +696,18 @@ class OnlineBookService {
   static Map<String, String> itemVars(String sourceUrl, String bookUrl) =>
       _itemVars['$sourceUrl\u0000$bookUrl'] ?? const {};
 
+  /// 分身回传用：本源在搜索阶段写入的书级变量快照（bookUrl → 变量表）。
+  /// 搜索在后台 isolate 跑时，`@put:{...}` 写的是分身那一份；不带回来的话，
+  /// 主线程随后的详情 `@get:{...}`（17k 那类源）会拿到空值。
+  static Map<String, Map<String, String>> itemVarsSnapshotFor(String sourceUrl) {
+    final pre = '$sourceUrl\u0000';
+    final out = <String, Map<String, String>>{};
+    for (final e in _itemVars.entries) {
+      if (e.key.startsWith(pre)) out[e.key.substring(pre.length)] = e.value;
+    }
+    return out;
+  }
+
   Future<String> _getHtml(BookSource source, String url) async =>
       (await _fetch(source, url)).body;
 

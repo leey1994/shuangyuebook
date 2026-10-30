@@ -105,10 +105,14 @@ class SourceVars {
     _loaded = true;
   }
 
+  /// 只读模式（体检分身用）：读同一份文件，但不回写 —— 写盘归主线程。
+  bool readOnly = false;
+
   /// 立即落盘（测试与退出前调用）。
-  Future<void> flush() => _save();
+  Future<void> flush() => readOnly ? Future.value() : _save();
 
   void _saveSoon() {
+    if (readOnly) return;
     if (_file == null && _dirsOverride == null) return; // 没初始化过：只存内存
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 800), () {

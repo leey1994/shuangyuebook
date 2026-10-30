@@ -14,6 +14,8 @@ import 'package:flutter/foundation.dart';
 import '../platform/native_bridge.dart';
 import '../sources/legado_source.dart';
 import '../sources/registry.dart';
+import 'online_repo.dart';
+import 'parse_worker.dart';
 import 'source_store.dart';
 
 /// 探针关键词：专有名词比「天才」这类烂大街的词更容易命中真实结果，
@@ -192,8 +194,15 @@ class SourceHealthStore extends ChangeNotifier {
     }
   }
 
-  /// 探测单个源：跑一次真实搜索当探针。
-  Future<SourceHealth> probe(LegadoSource src) async {
+  /// 探测单个源（主线程路径）。
+  ///
+  /// 批量体检默认把整条链交给后台分身池（[ParseWorkerPool]），只有两类源
+  /// 留在这里：书源定义里带 `webView` 的（隐藏 WebView 只能开在主 isolate），
+  /// 以及分身起不来 / 判不了退回的少数源。
+  Future<SourceHealth> probe(LegadoSource src) => _probeMainThread(src);
+
+  /// 主线程探测（旧路径，结论最可靠但会占主线程，只给少数源用）。
+  Future<SourceHealth> _probeMainThread(LegadoSource src) async {
     final t0 = DateTime.now();
     try {
       final books = await src.search(kProbeKeyword).timeout(kProbeTimeout);
@@ -222,6 +231,10 @@ class SourceHealthStore extends ChangeNotifier {
 
   /// 批量检测导入书源。
   ///
+  /// 探针走 [ParseWorkerPool] 常驻分身：取页、搜索页解析、JS 脚本全在后台
+  /// isolate，主 isolate 只收结论 —— 体检期间不再掉帧。只有两类源留主线程：
+  /// 需要隐藏 WebView 的（[sourceNeedsMainParse]），和分身起不来 / 判不了的。
+  ///
   /// [removeFailed] 为 true 时把不通过的源从仓库删掉（导入流程用）。
   /// [onProgress] 每完成一个源回调一次，参数为「已完成数 / 本次总数」。
   ///
@@ -237,25 +250,83 @@ class SourceHealthStore extends ChangeNotifier {
       return SourceCheckReport(checked: 0, passed: 0, failed: [], removed: []);
     }
     final results = <SourceHealth>[];
-    var next = 0;
     var done = 0;
-    Future<void> worker() async {
-      while (true) {
-        final i = next++;
-        if (i >= sources.length) return;
-        final src = sources[i];
-        final h = await probe(src);
-        results.add(h);
-        _items[src.id] = h;
-        done++;
-        notifyListeners();
-        onProgress?.call(done, sources.length);
+    void record(SourceHealth h) {
+      results.add(h);
+      _items[h.url] = h;
+      done++;
+      notifyListeners();
+      onProgress?.call(done, sources.length);
+    }
+
+    // 分身判不了 / 起不来的源，收尾统一在主线程补探：结论可靠优先于流畅
+    final onMainThread = <LegadoSource>[];
+    Future<void> runOnMainThread() async {
+      final list = onMainThread;
+      var i = 0;
+      Future<void> worker() async {
+        while (true) {
+          final k = i++;
+          if (k >= list.length) return;
+          record(await _probeMainThread(list[k]));
+        }
+      }
+
+      await Future.wait([
+        for (var k = 0; k < concurrency && k < list.length; k++) worker(),
+      ]);
+    }
+
+    // 需要隐藏 WebView 的源（平台通道只在主 isolate 可用）不进分身。
+    final iso = <LegadoSource>[];
+    for (final s in sources) {
+      if (sourceNeedsMainParse(s.source)) {
+        onMainThread.add(s);
+      } else {
+        iso.add(s);
       }
     }
 
-    await Future.wait([
-      for (var i = 0; i < concurrency && i < sources.length; i++) worker(),
-    ]);
+    if (iso.isNotEmpty) {
+      // 一个仓库管一批：perSourceTimeout 就是分身里的单源预算
+      final repo = OnlineRepo(
+        store: SourceStore(initial: [for (final s in iso) s.source]),
+        perSourceTimeout: kProbeTimeout,
+      );
+      var next = 0;
+      Future<void> worker() async {
+        while (true) {
+          final i = next++;
+          if (i >= iso.length) return;
+          final src = iso[i];
+          final r = await repo.offthreadProbe(src.source, kProbeKeyword);
+          if (r == null) {
+            onMainThread.add(src);
+            continue;
+          }
+          final count = (r['count'] as num?)?.toInt() ?? 0;
+          final ok = count > 0 && r['status'] != 'err';
+          record(SourceHealth(
+            url: src.id,
+            name: src.name,
+            ok: ok,
+            books: count,
+            ms: (r['ms'] as num?)?.toInt() ?? 0,
+            error: ok
+                ? null
+                : (r['error'] as String? ?? '搜索无结果，站点可能已失效'),
+            checkedAt: DateTime.now(),
+          ));
+        }
+      }
+
+      await Future.wait([
+        for (var i = 0; i < concurrency && i < iso.length; i++) worker(),
+      ]);
+    }
+
+    // 少数留在主线程的源顺序探测（webView 源在实测语料里是 0 条，不是热路径）
+    if (onMainThread.isNotEmpty) await runOnMainThread();
 
     final failed = results.where((h) => !h.ok).toList();
     var removed = <String>[];

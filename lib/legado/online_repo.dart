@@ -17,6 +17,7 @@ import 'http_client.dart';
 import 'js_engine.dart';
 import 'models.dart';
 import 'online_book_service.dart';
+import 'parse_worker.dart';
 import 'source_store.dart';
 import 'source_vars.dart';
 import 'webview_engine.dart';
@@ -151,10 +152,20 @@ class OnlineRepo {
     this.concurrency = 8,
     this.requestTimeout = const Duration(seconds: 15),
     this.perSourceTimeout = const Duration(seconds: 60),
-  }) : _client = client ?? SourceHttpClient();
+    bool? offthreadParse,
+  })  : _client = client ?? SourceHttpClient(),
+        _injectedClient = client != null,
+        offthreadParse = offthreadParse ?? (client == null);
 
   final SourceStore store;
   final SourceHttpClient _client;
+
+  /// 外部注入的 mock / 定制客户端：不可能跨 isolate 传，这类仓库一律主线程解析。
+  final bool _injectedClient;
+
+  /// 是否把「取页 + 规则解析 + JS」丢给 [ParseWorkerPool] 分身。
+  /// 默认开；分身内部构造仓库时必须传 false（否则会递归起孙分身）。
+  final bool offthreadParse;
 
   /// 全局并发上限。
   final int concurrency;
@@ -170,6 +181,129 @@ class OnlineRepo {
 
   RateGate _gateFor(BookSource s) =>
       _gates.putIfAbsent(s.bookSourceUrl, () => RateGate(s.concurrentRate));
+
+  // ---------- 离线分身（后台 isolate）分流 ----------
+
+  /// 这次能不能丢给分身：注入了 mock 客户端（不可跨 isolate）、源需要
+  /// 隐藏 WebView、或分身已禁用 / 起不来的，一律留在主线程。
+  bool _useOffthread(BookSource s) =>
+      offthreadParse &&
+      !_injectedClient &&
+      !sourceNeedsMainParse(s) &&
+      !ParseWorkerPool.I.disabled;
+
+  /// 搜索丢分身。返回 null = 没走成分身，调用方落回主线程原路。
+  Future<SourceSearchResult?> offthreadSearch(
+    BookSource source,
+    String key, {
+    int page = 1,
+    bool brief = false,
+  }) async {
+    final r = await _submitSearch(source, key, page: page, brief: brief);
+    if (r == null) return null;
+    if (r['status'] == 'defer') {
+      // 真机诊断点：分身里 QuickJS 起不来而这源的搜索依赖 JS → 主线程复探
+      debugPrint('[书源分身]「${source.bookSourceName}」JS 仅主线程可用 → 主线程复探');
+      return null;
+    }
+    applyOffthreadSideEffects(r, source.bookSourceUrl);
+    return SourceSearchResult(
+      source: source,
+      books: [
+        for (final b in (r['books'] as List? ?? const []))
+          if (b is Map) SearchBook.fromJson(Map<String, dynamic>.from(b)),
+      ],
+      error: r['status'] == 'err' ? (r['error'] as String? ?? '搜索失败') : null,
+      elapsedMs: (r['ms'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 体检用：只要结论（活没活、为什么），不把书目搬回主 isolate。
+  /// 返回 null = 交回主线程探测（分身不可用，或这源的 JS 只有主线程起得来）。
+  Future<Map<String, dynamic>?> offthreadProbe(
+      BookSource source, String key) async {
+    final r = await _submitSearch(source, key, brief: true);
+    if (r == null) return null;
+    if (r['status'] == 'defer') {
+      debugPrint('[书源分身]「${source.bookSourceName}」JS 仅主线程可用 → 主线程复探');
+      return null;
+    }
+    applyOffthreadSideEffects(r, source.bookSourceUrl);
+    return r;
+  }
+
+  Future<Map<String, dynamic>?> _submitSearch(
+    BookSource source,
+    String key, {
+    int page = 1,
+    bool brief = false,
+  }) async {
+    final dirs = await workerAppDirs();
+    if (dirs == null) return null;
+    return ParseWorkerPool.I.submit({
+      'kind': 'search',
+      'source': source.toJson(),
+      'key': key,
+      'page': page,
+      'brief': brief,
+      'files': dirs.files,
+      'cache': dirs.cache,
+      'timeoutSecs': perSourceTimeout.inSeconds,
+    });
+  }
+
+  /// 发现页书单丢分身（排行页 / 首页推荐聚合的热路径）。
+  Future<SourceExploreResult?> offthreadExplore(
+    BookSource source,
+    ExploreCategory category, {
+    int page = 1,
+  }) async {
+    final dirs = await workerAppDirs();
+    if (dirs == null) return null;
+    final r = await ParseWorkerPool.I.submit({
+      'kind': 'explore',
+      'source': source.toJson(),
+      'catTitle': category.title,
+      'catUrl': category.url,
+      'page': page,
+      'files': dirs.files,
+      'cache': dirs.cache,
+      'timeoutSecs': perSourceTimeout.inSeconds,
+    });
+    if (r == null || r['status'] == 'defer') return null;
+    applyOffthreadSideEffects(r, source.bookSourceUrl);
+    return SourceExploreResult(
+      source: source,
+      books: [
+        for (final b in (r['books'] as List? ?? const []))
+          if (b is Map) SearchBook.fromJson(Map<String, dynamic>.from(b)),
+      ],
+      error: r['status'] == 'err' ? (r['error'] as String? ?? '发现页抓取失败') : null,
+      elapsedMs: (r['ms'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 发现页分类表（`exploreUrl` 是 JS 脚本的那种）丢分身：跑脚本 + 补网取页
+  /// 都是主线程上的同步砖头。返回 null = 交回主线程。
+  Future<List<ExploreCategory>?> offthreadCategories(BookSource source) async {
+    final dirs = await workerAppDirs();
+    if (dirs == null) return null;
+    final r = await ParseWorkerPool.I.submit({
+      'kind': 'categories',
+      'source': source.toJson(),
+      'files': dirs.files,
+      'cache': dirs.cache,
+      'timeoutSecs': 25,
+    });
+    if (r == null || r['status'] == 'defer') return null;
+    final cats = r['cats'];
+    if (cats is! List) return const [];
+    return [
+      for (final c in cats)
+        if (c is Map)
+          ExploreCategory(title: '${c['title']}', url: '${c['url']}'),
+    ];
+  }
 
   /// P0：书源 JS 环境（同一次搜索/发现操作共享 [session]）。
   static JsEnv jsEnvFor(BookSource source, JsSession session) => JsEnv(
@@ -282,11 +416,22 @@ class OnlineRepo {
   }
 
   /// 单源搜索（错误隔离在内部消化；P0：JS 挂起自动补网重跑）。
+  ///
+  /// 默认整条链在后台分身里跑（见 [ParseWorkerPool]）：几十个源同时回结果时，
+  /// 主 isolate 不再被一块块几十毫秒的 HTML→XML→规则→QuickJS 砖头拍住。
+  /// [brief] 只要「有没有结果」的计数（体检用），不往回搬书目数据。
   Future<SourceSearchResult> searchOne(
     BookSource source,
     String key, {
     int page = 1,
+    bool brief = false,
   }) async {
+    if (_useOffthread(source)) {
+      final r =
+          await offthreadSearch(source, key, page: page, brief: brief);
+      if (r != null) return r;
+      // 分身不可用 / 这源的脚本只有主线程起得来：继续走下面的原路
+    }
     final session = JsSession();
     final env = jsEnvFor(source, session);
     try {
@@ -630,6 +775,13 @@ class OnlineRepo {
     final raw = (source.exploreUrl ?? '').trim();
     final body = _exploreJsBody(raw);
     if (body == null) return sync;
+    if (_useOffthread(source)) {
+      final off = await offthreadCategories(source);
+      if (off != null) {
+        if (off.isNotEmpty) _rememberCategories(raw, off);
+        return off;
+      }
+    }
     final session = JsSession();
     final env = jsEnvFor(source, session);
     try {
@@ -1117,6 +1269,10 @@ class OnlineRepo {
     ExploreCategory category, {
     int page = 1,
   }) async {
+    if (_useOffthread(source)) {
+      final off = await offthreadExplore(source, category, page: page);
+      if (off != null) return off;
+    }
     final started = DateTime.now();
     try {
       final books = await exploreOne(source, category, page: page);

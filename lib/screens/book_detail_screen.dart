@@ -19,6 +19,10 @@ import '../ui/brand.dart';
 import '../widgets.dart';
 import 'reader_screen.dart';
 
+/// 来源计数的让路时长：目录 + 预取正文都发出去之后，再开始全源扇出搜索。
+/// 那些搜索的解析都在主 isolate（池并发 6），早一步起跑会把正文挤慢。
+const Duration kSourceCountDefer = Duration(seconds: 8);
+
 class BookDetailScreen extends StatefulWidget {
   const BookDetailScreen({super.key, required this.book});
 
@@ -57,7 +61,9 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     _book = widget.book;
     _src = sourceById(_book.sourceId) ?? allSources.first;
     _load();
-    unawaited(_countSources());
+    // 来源计数（全源扇出搜索）不再和目录 / 正文抢同一段时间：
+    // 它的解析都发生在主 isolate，池并发 6，一进来就跑就会把正文挤慢。
+    // 目录落地后再延后一轮（见 _load 成功分支）。
   }
 
   Future<void> _load() async {
@@ -70,6 +76,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
       final d = await _src.fetchDetail(_book);
       if (mounted) setState(() => _detail = d);
       AppStore.I.setChapterCount(_book.url, d.chapters.length);
+      _afterDetailLanded(); // 预取正文 + 让路后再统计来源
     } catch (e) {
       // 离线兜底：用本地缓存的目录
       final cached = await AppStore.I.cachedDetail(_book);
@@ -83,6 +90,35 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
         await _autoSwitch(e);
       }
     }
+  }
+
+  /// 目录落地上屏后，把用户要读的那一章正文在后台拉下来。
+  ///
+  /// 之前正文要等点开阅读器才发请求：网络 + 解析都叠在「点开之后」，
+  /// 用户看目录的这几秒全浪费了。这里趁目录刚出就预取；chapterText 的
+  /// 在途去重保证读者此刻点开 = 直接搭同一班车，点晚了 = 内存缓存命中。
+  void _warmContent() {
+    final d = _detail;
+    if (d == null || d.chapters.isEmpty) return;
+    unawaited(_warmOne(_startIndex()));
+  }
+
+  Future<void> _warmOne(int idx) async {
+    final d = _detail;
+    if (d == null || idx < 0 || idx >= d.chapters.length) return;
+    try {
+      await AppStore.I.chapterText(_src, d, d.chapters[idx], background: true);
+    } catch (_) {
+      // 预取失败不打扰：真正点开阅读器时会带正常的错误呈现
+    }
+  }
+
+  /// 目录落地上屏后的两件事：立刻预取正文，并把全源扇出的来源计数推后。
+  void _afterDetailLanded() {
+    _warmContent();
+    unawaited(Future.delayed(kSourceCountDefer, () async {
+      if (mounted) await _countSources();
+    }));
   }
 
   /// 当前来源打不开（404 / 解析失败）时，自动换到其它能打开的源。
@@ -140,6 +176,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           _autoMsg = null;
         });
         AppStore.I.setChapterCount(b.url, d.chapters.length);
+        _afterDetailLanded(); // 换源成功同样预取正文，来源计数让路后再跑
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('原来源打不开，已自动切换到「${s.name}」')));
         return;

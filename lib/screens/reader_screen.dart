@@ -33,6 +33,31 @@ import '../ui/reader/page_snap_physics.dart';
 import '../widgets.dart';
 import 'book_search_sheet.dart';
 
+/// 章末 / 章首越界拖动的累计量（纯函数，回归测试见
+/// test/reader_edge_flip_test.dart）。
+///
+/// 方向约定：`scrollDelta` 是本页位移动量，**朝「下一页」为正**
+/// （手指往左划）。PageSnapPhysics 不吃越界拖动，所以：
+/// - 章末继续往下一章方向拖：`pixels > maxExtent`、`scrollDelta > 0`；
+/// - 章首继续往上一章方向拖：`pixels < minExtent`、`scrollDelta < 0`；
+/// - 页内正常滑动 / 回弹：计数清零（不然往回划也会攒出翻章）。
+///
+/// 旧实现把两侧符号写反，计数永远攒不起来 —— 「章末手势翻章」
+/// 在滑动 / 覆盖模式下从来没生效过。
+@visibleForTesting
+double pagedEdgeAccum({
+  required double acc,
+  required double pixels,
+  required double minExtent,
+  required double maxExtent,
+  required double? scrollDelta,
+}) {
+  final d = scrollDelta ?? 0;
+  if (pixels > maxExtent + 0.5 && d > 0) return acc + d;
+  if (pixels < minExtent - 0.5 && d < 0) return acc - d;
+  return 0;
+}
+
 /// 阅读器：左右翻页 / 上下滚动双模式，
 /// 目录、进度条、字号行距、主题、书签、离线、换源。
 class ReaderScreen extends StatefulWidget {
@@ -81,6 +106,9 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// 章末/章首越界拖动的累计距离（像素）。
   double _edgeDrag = 0;
+
+  /// 一次越界手势只翻一章的闩（松手时复位）。
+  bool _edgeLock = false;
 
   /// 越界拖够这么多像素就换章。
   static const double _kEdgeDragToChapter = 120;
@@ -1183,32 +1211,45 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// [_kEdgeDragToChapter]（约 0.3 屏宽）就翻下一章；章首往前拖同理回上一章。
   ///
   /// 只在越界方向上计数 —— 页内正常滑动会把计数清零，所以不会误翻。
+  ///
+  /// 方向约定（ScrollUpdateNotification.scrollDelta = 本帧位移动量）：
+  /// PageSnapPhysics 不吃越界拖动，章末继续往后拖时 pixels 会**越过**
+  /// maxScrollExtent（scrollDelta 为正），章首同理为负 —— 旧代码把两侧
+  /// 符号写反了（`d < 0` / `d > 0`），导致越界计数永远立刻被清零，
+  /// 「章末手势翻章」在滑动 / 覆盖模式下从未生效过。
   bool _onPagedScroll(ScrollNotification n) {
+    // 一次越界只许翻一章：翻章会重建分页，指针若还拖在身上，越界量会
+    // 继续累计并再翻一章（表现为「一划跳过两章」）。松手前锁住。
+    if (_edgeLock) {
+      if (n is ScrollEndNotification) _edgeLock = false;
+      return false;
+    }
     if (n is ScrollUpdateNotification) {
       if (n.dragDetails == null) {
         _edgeDrag = 0;
       } else {
         final m = n.metrics;
-        final d = n.scrollDelta ?? 0;
-        if (m.pixels >= m.maxScrollExtent && d < 0) {
-          _edgeDrag += -d; // 章末继续往后拖
-        } else if (m.pixels <= m.minScrollExtent && d > 0) {
-          _edgeDrag += d; // 章首继续往前拖
-        } else {
-          _edgeDrag = 0;
-        }
+        _edgeDrag = pagedEdgeAccum(
+          acc: _edgeDrag,
+          pixels: m.pixels,
+          minExtent: m.minScrollExtent,
+          maxExtent: m.maxScrollExtent,
+          scrollDelta: n.scrollDelta,
+        );
       }
       if (_edgeDrag >= _kEdgeDragToChapter) {
         _edgeDrag = 0;
-        return _flipBeyondEdge();
+        if (_flipBeyondEdge()) _edgeLock = true;
+        return true;
       }
     } else if (n is ScrollEndNotification) {
       // 松手翻章：章末/章首拖出了越界但没到拖动阈值 —— 松手即翻
       // （阅读 3.0 同口径：章末轻划松手直接进下一章），否则回弹归位。
       final drag = _edgeDrag;
       _edgeDrag = 0;
-      if (drag >= _kEdgeDragToChapter ~/ 3) {
-        return _flipBeyondEdge();
+      if (drag >= _kEdgeDragToChapter ~/ 3 && _flipBeyondEdge()) {
+        _edgeLock = true;
+        return true;
       }
     }
     return false;
