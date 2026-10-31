@@ -6,13 +6,12 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_version.dart';
 import 'pet/pet_event.dart';
 import 'pet/pet_store.dart';
 import 'platform/native_bridge.dart';
 
-/// 应用版本：构建时由 --dart-define=APP_VERSION 注入（取自 pubspec.yaml 的 version）。
-const String kAppVersion =
-    String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
+// 版本号来源见 lib/app_version.dart：运行时读安装包，构建注入值只是回退。
 
 const String _repo = 'leey1994/shuangyuebook';
 
@@ -144,11 +143,11 @@ class UpdateChecker {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
       final tag = (j['tag_name'] as String? ?? '').trim();
-      if (tag.isEmpty || compareVersion(tag, kAppVersion) <= 0) {
+      if (tag.isEmpty || compareVersion(tag, AppVersion.name) <= 0) {
         if (manual && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('已是最新版本（当前 v$kAppVersion）'),
-            duration: Duration(seconds: 2),
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('已是最新版本（当前 v${AppVersion.display}）'),
+            duration: const Duration(seconds: 2),
           ));
         }
         return;

@@ -59,6 +59,9 @@ class LegadoSource extends NovelSource {
   String get id => source.bookSourceUrl;
 
   @override
+  bool get supportsTextReading => source.isTextSource;
+
+  @override
   String get name => source.bookSourceName.isEmpty
       ? source.bookSourceUrl
       : source.bookSourceName;

@@ -621,3 +621,36 @@ class BookSource {
     return out;
   }
 }
+
+/// `bookSourceType` 的阅读 3.0 语义：0 文本 / 1 音频 / 2 图片。
+///
+/// 爽阅 v1.1 只渲染文本源；音频 / 图片源**照常导入**（用户能看到、能停用、
+/// 能导出），只是在阅读器里给一句明确的话，而不是静默丢掉或显示空白页。
+extension BookSourceTypeLabel on BookSource {
+  bool get isTextSource => bookSourceType == 0;
+
+  /// 短标签，用于列表徽章。
+  String get typeLabel => switch (bookSourceType) {
+        0 => '文本',
+        1 => '音频',
+        2 => '图片',
+        _ => '类型$bookSourceType',
+      };
+}
+
+/// 打开非文本源的书时抛出：交给阅读器错误页展示，并允许一键换源。
+class UnsupportedSourceTypeException implements Exception {
+  const UnsupportedSourceTypeException(this.type);
+
+  final int type;
+
+  String get label => switch (type) {
+        1 => '音频',
+        2 => '图片',
+        _ => '类型 $type',
+      };
+
+  @override
+  String toString() =>
+      '该源是$label书源，v1.1 暂不支持阅读。\n可点「换源」找同名文本源。';
+}

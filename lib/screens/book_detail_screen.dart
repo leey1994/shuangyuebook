@@ -435,31 +435,58 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                 ),
                 Expanded(
                   child: Builder(builder: (c) {
-                    // EPUB 多级目录：卷行加粗，子级按层级缩进
+                    // EPUB 多级目录 / 在线源的卷标题行：卷行加粗且不可点，
+                    // 卷下章节整体缩进一级（在线源没有更深层级，只分两级）。
                     final depths =
                         d.chapters.map((e) => e.depth ?? 0).toList();
-                    final layered = depths.any((v) => v > 0);
+                    final hasVolume = d.chapters.any((e) => e.isVolume);
+                    final layered = hasVolume || depths.any((v) => v > 0);
+                    // 卷之后的行缩进一级；第一个卷之前的散章保持顶格。
+                    final indents = <int>[];
+                    var underVolume = 0;
+                    for (final e in d.chapters) {
+                      if (e.isVolume) {
+                        indents.add(0);
+                        underVolume = 1;
+                      } else {
+                        indents.add(underVolume);
+                      }
+                    }
                     return ListView.builder(
                     itemCount: n,
                     itemBuilder: (c, i) {
                       final idx = _tocAsc ? i : n - 1 - i;
-                      final depth = layered ? depths[idx] : 0;
+                      final ch = d.chapters[idx];
+                      final depth = layered ? depths[idx] + indents[idx] : 0;
+                      final locked = ch.isVip || ch.isPay;
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.only(
                             left: 20.0 + depth * 18.0, right: 20.0),
-                        title: Text(d.chapters[idx].title,
+                        title: Text(ch.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontWeight: depth == 0 && layered
+                              fontWeight: (ch.isVolume ||
+                                      (!hasVolume && depth == 0 && layered))
                                   ? FontWeight.w700
                                   : null,
                             )),
-                        onTap: () {
-                          Navigator.of(ctx).pop();
-                          _openReader(idx);
-                        },
+                        trailing: locked
+                            ? Text(
+                                ch.isPay ? '付费' : 'VIP',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: Brand.fg3(ctx),
+                                ),
+                              )
+                            : null,
+                        onTap: ch.isVolume
+                            ? null
+                            : () {
+                                Navigator.of(ctx).pop();
+                                _openReader(idx);
+                              },
                       );
                     },
                     );

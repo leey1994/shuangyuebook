@@ -55,14 +55,38 @@ class Chapter {
 
   /// EPUB 多级目录层级：null=平铺（在线源），0=卷，>0=章/小节。
   final int? depth;
-  const Chapter({required this.title, required this.url, this.depth});
 
-  Map<String, dynamic> toJson() =>
-      {'title': title, 'url': url, if (depth != null) 'depth': depth};
+  /// 在线源的卷标题行（`ruleToc.isVolume` 命中）：不可点、只做分组。
+  final bool isVolume;
+
+  /// `ruleToc.isVip` / `isPay`：付费 / VIP 章标记（只做提示，不绕过任何限制）。
+  final bool isVip;
+  final bool isPay;
+
+  const Chapter({
+    required this.title,
+    required this.url,
+    this.depth,
+    this.isVolume = false,
+    this.isVip = false,
+    this.isPay = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'url': url,
+        if (depth != null) 'depth': depth,
+        if (isVolume) 'isVolume': true,
+        if (isVip) 'isVip': true,
+        if (isPay) 'isPay': true,
+      };
   factory Chapter.fromJson(Map<String, dynamic> j) => Chapter(
         title: j['title'] as String,
         url: j['url'] as String,
         depth: j['depth'] as int?,
+        isVolume: j['isVolume'] == true,
+        isVip: j['isVip'] == true,
+        isPay: j['isPay'] == true,
       );
 }
 

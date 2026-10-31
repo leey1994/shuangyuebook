@@ -8,6 +8,10 @@ abstract class NovelSource {
   String get name;
   String get baseUrl;
 
+  /// 能否用阅读器打开（文本）。音频 / 图片书源为 false —— 上层据此给明确提示，
+  /// 而不是让用户对着一片空白翻页。
+  bool get supportsTextReading => true;
+
   /// 站点首页推荐（无推荐内容的站返回空列表）。
   Future<List<Book>> fetchHome();
 

@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shuangyue/data/format.dart';
+import 'package:shuangyue/legado/batch_tester.dart';
 import 'package:shuangyue/legado/http_client.dart';
 import 'package:shuangyue/legado/models.dart';
 import 'package:shuangyue/legado/source_health.dart';
@@ -454,6 +455,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           _hostOf(s.bookSourceUrl),
           if (s.bookSourceGroup != null && s.bookSourceGroup!.isNotEmpty)
             s.bookSourceGroup!,
+          if (!s.isTextSource) '${s.typeLabel}源',
           if (s.searchUrl == null) '未配置搜索',
         ].join(' · '),
         maxLines: 1,
@@ -679,6 +681,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               ),
               const SizedBox(height: 10),
               _kv(ctx, '地址', s.bookSourceUrl),
+              _kv(ctx, '类型', '${s.typeLabel}${s.isTextSource ? '' : '（v1.1 暂不支持阅读）'}'),
               if (s.bookSourceGroup != null && s.bookSourceGroup!.isNotEmpty)
                 _kv(ctx, '分组', s.bookSourceGroup!),
               _kv(ctx, '搜索', s.searchUrl ?? '（未配置）'),
@@ -693,7 +696,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  FilledButton.icon(
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      unawaited(_diagnose(s));
+                    },
+                    icon: const Icon(Icons.bug_report_outlined, size: 18),
+                    label: const Text('诊断'),
+                  ),
+                  OutlinedButton.icon(
                     onPressed: () => _openWeb(s.bookSourceUrl),
                     icon: const Icon(Icons.public, size: 18),
                     label: const Text('查看网站'),
@@ -725,6 +736,74 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 单源诊断：真实跑一遍搜索 → 目录 → 首章正文，把过程逐行摊开。
+  ///
+  /// 目的不是给个通过/不通过，而是让用户（或书源作者）看见**哪一步、为什么**
+  /// 断了 —— 规则引擎的失败默认都是静默的，这一层是唯一的解释入口。
+  Future<void> _diagnose(BookSource s) async {
+    final nav = Navigator.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('正在试跑'),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('搜索 → 目录 → 首章正文，最长 45 秒', style: Theme.of(ctx).textTheme.bodySmall)),
+          ],
+        ),
+      ),
+    );
+    BatchTestResult? r;
+    try {
+      r = await BatchTester().testOne(s);
+    } catch (e) {
+      r = BatchTestResult(source: s, error: '$e', log: ['未预期异常：$e']);
+    }
+    if (!mounted) return;
+    nav.pop();
+    final text = [
+      '书源：${s.bookSourceName}',
+      '地址：${s.bookSourceUrl}',
+      '结论：${r.verdict}${r.error == null ? '' : ' — ${r.error}'}',
+      '总耗时：${(r.ms / 1000).toStringAsFixed(1)}s',
+      '',
+      ...r.log,
+    ].join('\n');
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${s.bookSourceName} · ${r!.verdict}'),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: SelectableText(text,
+                style: const TextStyle(fontSize: 12.5, height: 1.6)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              _snack('诊断信息已复制');
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }

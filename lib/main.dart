@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'announcement.dart';
+import 'app_version.dart';
 import 'data/font_store.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
@@ -26,10 +27,12 @@ import 'sources/registry.dart';
 import 'store.dart';
 import 'theme.dart';
 import 'title_bar.dart';
+import 'tts/tts_controller.dart';
 import 'ui/brand.dart';
 import 'ui/pet_top_band.dart';
 import 'ui/storage_gate.dart';
 import 'ui/system_metrics.dart';
+import 'ui/tts_mini_bar.dart';
 import 'update_check.dart';
 
 /// 崩溃兜底：写入临时目录日志，避免未捕获异常直接杀进程。
@@ -48,6 +51,8 @@ Future<void> main(List<String> args) async {
         .writeAsStringSync('${DateTime.now().toIso8601String()} args=$args\n');
   } catch (_) {}
   WidgetsFlutterBinding.ensureInitialized();
+  // 先取安装包版本：关于页/更新检查都以它为准（避免与安装器显示的版本不一致）。
+  await AppVersion.load();
   FlutterError.onError =
       (d) => _logCrash(d.exception, d.stack ?? StackTrace.current);
   PlatformDispatcher.instance.onError = (e, s) {
@@ -157,17 +162,26 @@ class NovelApp extends StatefulWidget {
 
 class _NovelAppState extends State<NovelApp> {
   int _theme = AppStore.I.prefs.theme;
+  final _navKey = GlobalKey<NavigatorState>(); // 迷你条点开书籍用
 
   @override
   void initState() {
     super.initState();
     AppStore.I.addListener(_onStore);
+    // 迷你条挂在这里：MaterialApp.builder 里的 ListenableBuilder 在路由压栈后
+    // 收不到通知（实测），改成让 App 根部订阅，整棵树随会话状态刷新。
+    TtsController.I.addListener(_onTtsSession);
   }
 
   @override
   void dispose() {
+    TtsController.I.removeListener(_onTtsSession);
     AppStore.I.removeListener(_onStore);
     super.dispose();
+  }
+
+  void _onTtsSession() {
+    if (mounted) setState(() {});
   }
 
   void _onStore() {
@@ -197,6 +211,7 @@ class _NovelAppState extends State<NovelApp> {
     // 需求，根部关闭 semantics 让 bridge 不生成可 diff 的树，上游修复合入后可移除。
     Widget app = MaterialApp(
       title: '爽阅',
+      navigatorKey: _navKey,
       debugShowCheckedModeBanner: false,
       theme: AppThemes.material(AppThemes.white),
       darkTheme: AppThemes.material(AppThemes.black),
@@ -204,7 +219,12 @@ class _NovelAppState extends State<NovelApp> {
       // 存储权限门：Android 11+ 导入本地书需要「所有文件访问」。
       // 非 Android 直接透传，不做任何检查。
       home: const StorageGate(child: HomeShell()),
-      builder: (context, child) => _wrap(context, child),
+      builder: (context, child) => Stack(
+        children: [
+          _wrap(context, child),
+          Positioned.fill(child: TtsMiniBar(navigatorKey: _navKey)),
+        ],
+      ),
     );
     if (Platform.isWindows) app = ExcludeSemantics(child: app);
     return app;

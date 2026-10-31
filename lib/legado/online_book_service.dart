@@ -332,9 +332,24 @@ class OnlineBookService {
     final urlRule = (rule.chapterUrl?.trim().isNotEmpty ?? false)
         ? rule.chapterUrl!.trim()
         : 'tag.a@href';
+    final volumeRule = rule.isVolume?.trim() ?? '';
+    final vipRule = rule.isVip?.trim() ?? '';
+    final payRule = rule.isPay?.trim() ?? '';
+
+    // 规则求值 → 是否命中。空白 / `0` / `false` 都算否（legado 同口径）。
+    bool flag(String r, Object ctx) {
+      if (r.isEmpty) return false;
+      try {
+        final v = engine.getString(r, ctx: ctx)?.trim().toLowerCase() ?? '';
+        return v.isNotEmpty && v != '0' && v != 'false' && v != 'null';
+      } catch (_) {
+        return false;
+      }
+    }
 
     final out = <Chapter>[];
     final seen = <String>{};
+    final seenVolumes = <String>{};
     for (final item in engine.getRawList(listRule)) {
       final titles = nameRule.isEmpty
           ? const <String>[]
@@ -343,8 +358,18 @@ class OnlineBookService {
       engine.vars['chapter'] = <String, dynamic>{
         'title': titles.isEmpty ? '' : titles.first.trim(),
       };
+      // 卷标题行：没有章节链接，只做分组（<dl> 站点的 <dt>）
+      if (volumeRule.isNotEmpty && flag(volumeRule, item)) {
+        final t = titles.isEmpty ? '' : titles.first.trim();
+        if (t.isNotEmpty && seenVolumes.add(t)) {
+          out.add(Chapter(title: t, url: '', isVolume: true));
+        }
+        continue;
+      }
       final hrefs = engine.getStrings(urlRule, ctx: item);
       final n = titles.length < hrefs.length ? titles.length : hrefs.length;
+      final isVip = flag(vipRule, item);
+      final isPay = flag(payRule, item);
       for (var i = 0; i < n; i++) {
         final title = titles[i].trim();
         final rawHref = hrefs[i].trim();
@@ -360,7 +385,12 @@ class OnlineBookService {
         final href = resolveUrl(target, baseUrl) + suffix;
         if (href.isEmpty) continue;
         if (!seen.add(href)) continue;
-        out.add(Chapter(title: title, url: href));
+        out.add(Chapter(
+          title: title,
+          url: href,
+          isVip: isVip,
+          isPay: isPay,
+        ));
       }
     }
     return reverse ? out.reversed.toList() : out;

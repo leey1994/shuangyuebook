@@ -83,6 +83,7 @@ class MainActivity : FlutterActivity() {
                     )
                     "getBattery" -> result.success(batteryStatus())
                     "openUrl" -> result.success(openUrl(stringArg(call, "url")))
+                    "getAppVersion" -> result.success(appVersion())
                     "openTtsSettings" -> result.success(openTtsSettings())
                     "installApk" -> result.success(installApk(stringArg(call, "path")))
                     "canInstallApk" -> result.success(canInstallApk())
@@ -180,6 +181,27 @@ class MainActivity : FlutterActivity() {
     }
 
     // ==================== 基础能力 ====================
+
+    /** 安装包版本（安装器/系统设置里看到的就是它）。 */
+    private fun appVersion(): Map<String, Any> {
+        val pm = packageManager
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(packageName, 0)
+        }
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        return hashMapOf(
+            "name" to (info.versionName ?: ""),
+            "code" to code
+        )
+    }
 
     /**
      * 音量键翻页（阅读器门控期内拦截）：

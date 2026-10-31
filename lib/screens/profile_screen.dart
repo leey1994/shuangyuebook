@@ -11,6 +11,7 @@ import '../pet/pet_event.dart';
 import '../pet/pet_painter.dart';
 import '../pet/pet_store.dart';
 import '../sources/registry.dart';
+import '../app_version.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../tts_voices.dart';
@@ -937,7 +938,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     return _section('关于', [
       _row(
         icon: Icons.system_update_outlined,
-        label: '当前版本 v$kAppVersion',
+        label: '当前版本 v${AppVersion.display}',
         subtitle: _checking ? '正在检查更新…' : '发现新版本时启动会自动提示',
         trailing: FilledButton.tonal(
           onPressed: _checking ? null : _checkUpdate,

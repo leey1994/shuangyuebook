@@ -42,6 +42,11 @@ class ReaderPrefs {
   double ttsRate; // 听书语速
   double ttsPitch; // 听书音调（0.5~2.0）
   String ttsVoice; // 听书音色名（'' = 自动选中文）
+  String ttsBackend; // 朗读引擎：edge / http / system
+  String httpTtsUrl; // 自定义 HTTP TTS 端点（OpenAI 兼容）
+  String httpTtsKey; // Bearer key（空 = 不带）
+  String httpTtsVoice; // voice 参数
+  String httpTtsModel; // model 参数
   bool edgeNotice; // 在线朗读联网说明已读
 
   // ---- 排版（旧版融合）----
@@ -69,6 +74,11 @@ class ReaderPrefs {
     this.ttsRate = 0.5,
     this.ttsPitch = 1.0,
     this.ttsVoice = '',
+    this.ttsBackend = 'edge',
+    this.httpTtsUrl = '',
+    this.httpTtsKey = '',
+    this.httpTtsVoice = 'alloy',
+    this.httpTtsModel = 'tts-1',
     this.edgeNotice = false,
     this.marginH = 16,
     this.marginV = 12,
@@ -137,6 +147,11 @@ class AppStore extends ChangeNotifier {
       prefs.ttsRate = sp.getDouble('ttsRate') ?? prefs.ttsRate;
       prefs.ttsPitch = sp.getDouble('ttsPitch') ?? prefs.ttsPitch;
       prefs.ttsVoice = sp.getString('ttsVoice') ?? prefs.ttsVoice;
+      prefs.ttsBackend = sp.getString('ttsBackend') ?? prefs.ttsBackend;
+      prefs.httpTtsUrl = sp.getString('httpTtsUrl') ?? prefs.httpTtsUrl;
+      prefs.httpTtsKey = sp.getString('httpTtsKey') ?? prefs.httpTtsKey;
+      prefs.httpTtsVoice = sp.getString('httpTtsVoice') ?? prefs.httpTtsVoice;
+      prefs.httpTtsModel = sp.getString('httpTtsModel') ?? prefs.httpTtsModel;
       prefs.edgeNotice = sp.getBool('edgeNotice') ?? prefs.edgeNotice;
       prefs.marginH = sp.getDouble('marginH') ?? prefs.marginH;
       prefs.marginV = sp.getDouble('marginV') ?? prefs.marginV;
@@ -500,6 +515,42 @@ class AppStore extends ChangeNotifier {
     prefs.ttsVoice = v;
     _sp?.setString('ttsVoice', v);
     notifyListeners();
+  }
+
+  void setTtsBackend(String v) {
+    prefs.ttsBackend = switch (v) { 'http' || 'system' => v, _ => 'edge' };
+    _sp?.setString('ttsBackend', prefs.ttsBackend);
+    notifyListeners();
+  }
+
+  void setHttpTtsUrl(String v) {
+    prefs.httpTtsUrl = v.trim();
+    _sp?.setString('httpTtsUrl', prefs.httpTtsUrl);
+    notifyListeners();
+  }
+
+  void setHttpTtsKey(String v) {
+    prefs.httpTtsKey = v.trim();
+    _sp?.setString('httpTtsKey', prefs.httpTtsKey);
+  }
+
+  void setHttpTtsVoice(String v) {
+    prefs.httpTtsVoice = v.trim().isEmpty ? 'alloy' : v.trim();
+    _sp?.setString('httpTtsVoice', prefs.httpTtsVoice);
+    notifyListeners();
+  }
+
+  void setHttpTtsModel(String v) {
+    prefs.httpTtsModel = v.trim().isEmpty ? 'tts-1' : v.trim();
+    _sp?.setString('httpTtsModel', prefs.httpTtsModel);
+    notifyListeners();
+  }
+
+  /// 听书断点（`章|段|句`），按书存；没有则 null。
+  String? ttsPos(String bookUrl) => _sp?.getString('ttsPos:$bookUrl');
+
+  void setTtsPos(String bookUrl, int chapter, int para, int sentence) {
+    _sp?.setString('ttsPos:$bookUrl', '$chapter|$para|$sentence');
   }
 
   void setEdgeNotice(bool v) {

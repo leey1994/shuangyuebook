@@ -54,6 +54,15 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
       ..showSnackBar(SnackBar(content: Text(s)));
   }
 
+  /// 「文本 120 · 音频 3 · 图片 1」——只列非零项。
+  String _typeSummary() {
+    final counts = <String, int>{};
+    for (final s in _fetched) {
+      counts[s.typeLabel] = (counts[s.typeLabel] ?? 0) + 1;
+    }
+    return counts.entries.map((e) => '${e.key} ${e.value}').join(' · ');
+  }
+
   Future<void> _fetch() async {
     final url = _urlCtrl.text.trim();
     if (url.isEmpty) {
@@ -91,11 +100,11 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
   Future<void> _test() async {
     final testable = [
       for (final s in _fetched)
-        if (s.bookSourceType == 0 && (s.searchUrl?.trim().isNotEmpty ?? false))
-          s,
+        if (s.isTextSource && (s.searchUrl?.trim().isNotEmpty ?? false)) s,
     ];
+    final skipped = _fetched.length - testable.length;
     if (testable.isEmpty) {
-      _snack('没有可测试的文本小说源（缺搜索地址或非文本类型）');
+      _snack('没有可测试的文本源（缺搜索地址，或全是音频 / 图片源）');
       return;
     }
     final limit = int.tryParse(_limitCtrl.text.trim()) ?? 0;
@@ -126,6 +135,7 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
     setState(() => _testing = false);
     final ok = _results.where((r) => r.fullOk).length;
     _snack('测试结束：完全可用 $ok/${_results.length}'
+        '${skipped > 0 ? '（$skipped 条非文本或无搜索地址，未测试）' : ''}'
         '${_cancel ? '（已提前停止）' : ''}');
   }
 
@@ -133,17 +143,13 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
     final passed = {
       for (final r in _results.where((r) => r.fullOk)) r.source.bookSourceUrl,
     };
-    final tested = {for (final r in _results) r.source.bookSourceUrl};
     final list = <BookSource>[
       for (final s in _fetched)
-        if (s.bookSourceType == 0)
-          if (!onlyPassed || passed.contains(s.bookSourceUrl))
-            passed.contains(s.bookSourceUrl) || !tested.contains(s.bookSourceUrl)
-                ? s
-                : s.copyWith(enabled: false),
+        if (!onlyPassed || passed.contains(s.bookSourceUrl))
+          s,
     ];
     if (list.isEmpty) {
-      _snack(onlyPassed ? '没有通过全链路测试的书源' : '没有可导入的文本源');
+      _snack(onlyPassed ? '没有通过全链路测试的书源' : '没有可导入的书源');
       return;
     }
     // 这里已经是 BookSource 对象，直接批量入库：
@@ -239,6 +245,16 @@ class _SourceFetchPageState extends State<SourceFetchPage> {
                     '已获取 ${_fetched.length} 条（$_alreadyInStore 条已在库中）',
                     style: theme.textTheme.bodySmall,
                   ),
+                  if (_fetched.any((s) => !s.isTextSource)) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '其中 ${_typeSummary()}；非文本源可导入、可管理，'
+                      'v1.1 暂不支持播放 / 阅读（不参与全链路测试）',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.hintColor,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,

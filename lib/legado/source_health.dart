@@ -194,6 +194,20 @@ class SourceHealthStore extends ChangeNotifier {
     }
   }
 
+  /// 某源最近一次检测结果（没有则 null）。
+  SourceHealth? forUrl(String url) => _items[url];
+
+  /// 换源候选排序：可用 → 未检测 → 失败；同档按耗时升序。
+  /// 未检测不惩罚（新导入的源不该排到已知可用源后面还是前面？这里放中间）。
+  static int compareForSwitch(SourceHealth? a, SourceHealth? b) {
+    int rank(SourceHealth? h) => h == null ? 1 : (h.ok ? 0 : 2);
+    final r = rank(a).compareTo(rank(b));
+    if (r != 0) return r;
+    final am = a?.ms ?? 1 << 30;
+    final bm = b?.ms ?? 1 << 30;
+    return am.compareTo(bm);
+  }
+
   /// 探测单个源（主线程路径）。
   ///
   /// 批量体检默认把整条链交给后台分身池（[ParseWorkerPool]），只有两类源

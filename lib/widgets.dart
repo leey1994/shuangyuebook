@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'legado/source_health.dart';
 import 'models.dart';
 import 'net.dart';
 import 'sources/registry.dart';
@@ -336,6 +337,14 @@ class BookTile extends StatelessWidget {
 
 /// 换源对话框：在其它书源搜索同名书，选择后回调。
 /// 返回选中的 (source, book)；取消返回 null。
+/// 换源列表里的健康标签：` · 320ms` / ` · 近期失败`，无记录则空串。
+String _healthTag(String sourceId) {
+  final h = SourceHealthStore.I.forUrl(sourceId);
+  if (h == null) return '';
+  if (!h.ok) return ' · 近期失败';
+  return h.ms > 0 ? ' · ${h.ms}ms' : '';
+}
+
 void showSourceSwitch(
   BuildContext context,
   Book current, {
@@ -373,6 +382,10 @@ void showSourceSwitch(
               );
             }
             final items = snap.data ?? [];
+            // 健康档案排序：可用 → 未检测 → 失败；同档按历史耗时。
+            items.sort((x, y) => SourceHealthStore.compareForSwitch(
+                SourceHealthStore.I.forUrl(x.$1.id),
+                SourceHealthStore.I.forUrl(y.$1.id)));
             if (items.isEmpty) {
               return const Text('其它书源均未找到该书');
             }
@@ -385,7 +398,7 @@ void showSourceSwitch(
                     title: Text(b.title,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
-                      '${s.name} · ${b.author ?? ""}',
+                      '${s.name} · ${b.author ?? ""}${_healthTag(s.id)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

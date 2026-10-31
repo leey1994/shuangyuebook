@@ -22,6 +22,7 @@ class BatchTestResult {
     this.content = 'skip',
     this.chars = 0,
     this.ms = 0,
+    this.log = const [],
   });
 
   final BookSource source;
@@ -44,13 +45,20 @@ class BatchTestResult {
   /// 首个失败原因（可直接展示）。
   final String? error;
 
+  /// 逐阶段过程记录（诊断面板用）：搜索词、命中数、目录章数、正文字数、耗时。
+  final List<String> log;
+
   final int ms;
 
   bool get fullOk => search == 'ok' && detail == 'ok' && content == 'ok';
 
   bool get searchOk => search == 'ok';
 
+  /// 非文本源（音频 / 图片）：不参与全链路判定，也不算失败。
+  bool get isNonText => source.bookSourceType != 0;
+
   String get verdict {
+    if (isNonText) return '非文本源';
     if (fullOk) return '完全可用';
     if (searchOk) return '仅搜索可用';
     return '不可用';
@@ -122,13 +130,17 @@ class BatchTester {
   }
 
   /// 单源全链路：搜索（双关键词兜底）→ 详情/目录 → 首章正文。
+  ///
+  /// [log] 逐阶段记录过程，供「书源诊断」面板展示（不影响判定口径）。
   Future<BatchTestResult> testOne(BookSource source) async {
     final sw = Stopwatch()..start();
-    if (source.bookSourceType != 0) {
+    final log = <String>[];
+    if (!source.isTextSource) {
       return BatchTestResult(
         source: source,
-        error: '非文本小说源（类型 ${source.bookSourceType}）',
+        error: '${source.typeLabel}书源，v1.1 暂不支持播放 / 阅读',
         ms: sw.elapsedMilliseconds,
+        log: ['类型：${source.typeLabel}（bookSourceType=${source.bookSourceType}）'],
       );
     }
     if (source.searchUrl?.trim().isEmpty ?? true) {
@@ -136,6 +148,7 @@ class BatchTester {
         source: source,
         error: '未配置搜索地址（searchUrl）',
         ms: sw.elapsedMilliseconds,
+        log: ['类型：文本', 'searchUrl：空（探索页 / 按钮型源没有搜索入口）'],
       );
     }
 
@@ -144,23 +157,36 @@ class BatchTester {
 
     var books = <Book>[];
     String? sErr;
-    try {
-      for (final k in keywords) {
+    String? hitKey;
+    for (final k in keywords) {
+      final t0 = sw.elapsedMilliseconds;
+      try {
         books = await ls.search(k).timeout(timeout);
-        if (books.isNotEmpty) break;
+      } catch (e) {
+        sErr = _brief(e);
+        log.add('搜索「$k」：失败 — $sErr（${sw.elapsedMilliseconds - t0}ms）');
+        continue;
       }
-    } catch (e) {
-      sErr = _brief(e);
+      log.add('搜索「$k」：${books.length} 条（${sw.elapsedMilliseconds - t0}ms）');
+      if (books.isNotEmpty) {
+        hitKey = k;
+        break;
+      }
+      if (sErr == null) log.add('搜索「$k」：0 条，换关键词重试');
     }
-    final search = sErr != null ? 'err' : (books.isNotEmpty ? 'ok' : 'empty');
+    final search = sErr != null && books.isEmpty
+        ? 'err'
+        : (books.isNotEmpty ? 'ok' : 'empty');
     if (search != 'ok') {
       return BatchTestResult(
         source: source,
         search: search,
         error: sErr ?? '搜索无结果',
         ms: sw.elapsedMilliseconds,
+        log: log,
       );
     }
+    log.add('命中关键词「$hitKey」，取第一本做后续测试');
 
     final book = books.firstWhere(
       (b) => b.url.startsWith('http'),
@@ -171,6 +197,7 @@ class BatchTester {
     var chapterUrl = '';
     var chapterTitle = '';
     String? dErr;
+    final td = sw.elapsedMilliseconds;
     try {
       final info = await svc.fetchInfo(source, book.url).timeout(timeout);
       chapters = info.chapters.length;
@@ -178,8 +205,11 @@ class BatchTester {
         chapterUrl = info.chapters.first.url;
         chapterTitle = info.chapters.first.title;
       }
+      log.add('详情/目录：$chapters 章（${sw.elapsedMilliseconds - td}ms）'
+          '${chapters > 0 ? '' : ' — 目录为空，检查 ruleToc.chapterList'}');
     } catch (e) {
       dErr = _brief(e);
+      log.add('详情/目录：失败 — $dErr（${sw.elapsedMilliseconds - td}ms）');
     }
     final detail = dErr != null ? 'err' : (chapters > 0 ? 'ok' : 'empty');
     if (detail != 'ok') {
@@ -192,12 +222,15 @@ class BatchTester {
         chapters: chapters,
         error: dErr ?? '目录为空',
         ms: sw.elapsedMilliseconds,
+        log: log,
       );
     }
+    log.add('首章：「$chapterTitle」→ $chapterUrl');
 
     String? cErr;
     var chars = 0;
     var gib = 0;
+    final tc = sw.elapsedMilliseconds;
     try {
       final text = await svc
           .fetchChapterText(
@@ -215,12 +248,16 @@ class BatchTester {
       final flat = text.replaceAll(RegExp(r'\s+'), '');
       chars = flat.length;
       gib = RegExp(r'[銆绗鈥锛鐨鏄鐞鎾]').allMatches(flat).length;
+      log.add('正文：$chars 字（${sw.elapsedMilliseconds - tc}ms）');
     } catch (e) {
       cErr = _brief(e);
+      log.add('正文：失败 — $cErr（${sw.elapsedMilliseconds - tc}ms）');
     }
     final content = cErr != null
         ? 'err'
         : (chars < 80 ? 'short' : (gib >= 3 ? 'gibberish' : 'ok'));
+    if (content == 'short') log.add('正文过短：多半是规则选错容器或站点返回验证页');
+    if (content == 'gibberish') log.add('正文疑似乱码：多为编码未按 charset 解码');
     return BatchTestResult(
       source: source,
       search: search,
@@ -232,6 +269,7 @@ class BatchTester {
       chars: chars,
       error: cErr,
       ms: sw.elapsedMilliseconds,
+      log: log,
     );
   }
 }
