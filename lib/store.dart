@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data/replace_rules.dart';
 import 'data/shelf_sort.dart';
 import 'legado/models.dart';
 import 'legado/source_store.dart';
@@ -159,6 +160,12 @@ class AppStore extends ChangeNotifier {
         } catch (_) {}
       }
       searchHistory = sp.getStringList('searchHistory') ?? [];
+      final groups = sp.getString('shelfGroups');
+      if (groups != null) {
+        try {
+          _shelfGroups = (jsonDecode(groups) as List).map((e) => '$e').toList();
+        } catch (_) {}
+      }
       final su = sp.getString('shelfUpdates');
       if (su != null) {
         try {
@@ -193,6 +200,15 @@ class AppStore extends ChangeNotifier {
       }
     }
     inited = true;
+  }
+
+  /// 备份恢复后重新装载：书架 / 进度 / 书签 / 偏好全部按磁盘现状刷新。
+  Future<void> reloadFromPrefs() async {
+    inited = false;
+    _metaFut.clear();
+    _metaSig.clear();
+    await init();
+    notifyListeners();
   }
 
   /// 仅测试用：跳过 path_provider，把离线缓存指到临时目录。
@@ -355,6 +371,69 @@ class AppStore extends ChangeNotifier {
   void applyShelfSort() {
     sortShelf(shelf, _shelfSort, ascending: _shelfAscending);
     sortShelf(history, _shelfSort, ascending: _shelfAscending);
+  }
+
+  // ---------- 书架分组 ----------
+
+  /// 用户建过的分组名（允许暂时是空组）。
+  List<String> _shelfGroups = [];
+
+  /// 全部分组：用户建的 + 书里实际用到的（导入旧数据时后者可能只在书里）。
+  List<String> get shelfGroups {
+    final names = <String>{..._shelfGroups};
+    for (final e in shelf) {
+      if (e.group.isNotEmpty) names.add(e.group);
+    }
+    return names.toList()..sort();
+  }
+
+  void addShelfGroup(String name) {
+    final n = name.trim();
+    if (n.isEmpty || _shelfGroups.contains(n)) return;
+    _shelfGroups.add(n);
+    _saveShelfGroups();
+    notifyListeners();
+  }
+
+  /// 删除分组：组里的书回到「未分组」，不会跟着被删。
+  void removeShelfGroup(String name) {
+    final had = _shelfGroups.remove(name);
+    var changed = false;
+    for (final e in shelf) {
+      if (e.group == name) {
+        e.group = '';
+        changed = true;
+      }
+    }
+    if (had) _saveShelfGroups();
+    if (changed) _save(shelf: true, history: false, bookmarks: false);
+    notifyListeners();
+  }
+
+  /// 把若干本书移到某个分组（[group] 为空 = 移出分组）。
+  void setShelfGroup(Iterable<String> bookUrls, String group) {
+    final urls = bookUrls.toSet();
+    final g = group.trim();
+    var changed = false;
+    for (final e in shelf) {
+      if (urls.contains(e.book.url) && e.group != g) {
+        e.group = g;
+        changed = true;
+      }
+    }
+    if (g.isNotEmpty && !_shelfGroups.contains(g)) {
+      _shelfGroups.add(g);
+      _saveShelfGroups();
+    }
+    if (!changed) {
+      notifyListeners();
+      return;
+    }
+    _save(shelf: true, history: false, bookmarks: false);
+  }
+
+  void _saveShelfGroups() {
+    _sp?.setString('shelfGroups', jsonEncode(_shelfGroups));
   }
 
   // ---------- 本地书 ----------
@@ -753,6 +832,10 @@ class AppStore extends ChangeNotifier {
   final Map<String, Future<Map<String, dynamic>>> _metaFut = {};
   final Map<String, String> _metaSig = {};
 
+  /// 已落盘的 [BookDetail] 对象集合（身份短路用）。
+  /// 用 Expando 而不是 Map：不持有目录列表，详情页关掉就能被 GC。
+  final Expando<bool> _remembered = Expando<bool>('remembered');
+
   /// 目录元数据（含旧布局迁移；每本书每进程只解析一次）。
   Future<Map<String, dynamic>> _meta(String bookUrl) =>
       _metaFut.putIfAbsent(bookUrl, () => _readMeta(bookUrl));
@@ -820,16 +903,25 @@ class AppStore extends ChangeNotifier {
   }
 
   /// 记住目录 / 书名；内容没变就不写盘（千章目录 ≈150 KB，不能每章重写）。
+  ///
+  /// 每开一章都会走到这里（正文拉取后）。同一份 [BookDetail] 只可能落一次盘：
+  /// 目录刷新/翻页会换新对象，所以按对象身份短路就够了 —— 旧实现每次都把
+  /// 上千章重新 `toJson` 一遍，纯浪费。
   Future<void> _rememberDetail(BookDetail detail) async {
     final url = detail.book.url;
+    if (_remembered[detail] == true) return;
     final m = await _meta(url);
     final chs = detail.chapters.map((c) => c.toJson()).toList();
     final sig = _sigOfParts(detail.book.title, chs);
-    if (_metaSig[url] == sig) return;
+    if (_metaSig[url] == sig) {
+      _remembered[detail] = true;
+      return;
+    }
     m['title'] = detail.book.title;
     m['chapters'] = chs;
     await _writeMeta(url, m);
     _metaSig[url] = sig;
+    _remembered[detail] = true;
   }
 
   Future<List<String>?> _readChapter(String bookUrl, String chUrl) async {
@@ -917,13 +1009,15 @@ class AppStore extends ChangeNotifier {
   }) async {
     final key = _chKey(detail.book.url, ch.url);
     final mem = _memGet(key);
-    if (mem != null) return mem;
+    if (mem != null) return ReplaceRules.I.apply(mem);
     final pend = _inflightChapter[key];
-    if (pend != null) return pend; // 预取已经在抓这一章：搭车，别再发一遍
+    // 预取已经在抓这一章：搭车，别再发一遍
+    if (pend != null) return ReplaceRules.I.apply(await pend);
     final fut = _chapterTextInner(src, detail, ch, key, background);
     _inflightChapter[key] = fut;
     try {
-      return await fut;
+      // 净化放在最外层：缓存里始终是原文，改规则立即生效
+      return ReplaceRules.I.apply(await fut);
     } finally {
       if (identical(_inflightChapter[key], fut)) _inflightChapter.remove(key);
     }
@@ -1247,6 +1341,7 @@ class AppStore extends ChangeNotifier {
     } catch (_) {}
     _metaFut.clear(); // 目录与章节都已删掉，别拿旧缓存糊回去
     _metaSig.clear();
+    // 章节缓存已删；Expando 随对象回收，不需要手动清
     notifyListeners();
   }
 }

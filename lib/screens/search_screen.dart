@@ -28,7 +28,19 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  List<(NovelSource, Book)> _all = [];
+
+  /// 增量合并结果：新源返回时只并入新条目，不在 build 里重算整表。
+  ///
+  /// 旧实现每次 build 都 `mergeBooks(_all)`（去空白 + 大正则归一化 × 全部行），
+  /// 源一多就是几百上千次正则 —— 而且每来一个源都要再跑一遍。现在合并只在
+  /// 「数据变化」时做一次，build 只读缓存。
+  final Map<String, MergedBook> _merged = {};
+  final List<MergedBook> _order = [];
+  List<MergedBook>? _view; // 当前筛选下的视图缓存
+  String? _viewFilter;
+  int _stamp = 0; // 数据版本（合并 / 清空时自增）
+  int _viewStamp = -1;
+
   final Set<String> _returned = {};
   String? _filter; // 来源筛选（null = 全部来源）
   String _query = '';
@@ -59,11 +71,15 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   /// 热词 = 已缓存的首页推荐书名（没有缓存就整块不显示，不空等网络）。
-  void _loadHotWords() {
+  Future<void> _loadHotWords() async {
+    final sources = collectSources();
+    final homes = await Future.wait([
+      for (final s in sources)
+        FeedCache.getAsync<List<Book>>(FeedCache.key(['home', s.id])),
+    ]);
     final titles = <String>[];
     outer:
-    for (final s in collectSources()) {
-      final home = FeedCache.get<List<Book>>(FeedCache.key(['home', s.id]));
+    for (final home in homes) {
       if (home == null) continue;
       for (final b in home.take(4)) {
         final t = b.title;
@@ -92,7 +108,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _query = q;
       _searching = true;
-      _all = [];
+      _resetMerged();
       _returned.clear();
       _filter = null;
       _done = 0;
@@ -117,14 +133,66 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _done++;
           _returned.add(s.id);
-          if (r.isNotEmpty) _all.addAll([for (final b in r) (s, b)]);
+          if (r.isNotEmpty) _mergeIn(s, r);
         });
       });
     }
     await runPooled(jobs);
     if (!mounted || gen != _gen) return;
     setState(() => _searching = false);
-    if (_all.isNotEmpty) PetStore.I.emit(PetAction.searchOpen);
+    if (_merged.isNotEmpty) PetStore.I.emit(PetAction.searchOpen);
+  }
+
+  void _resetMerged() {
+    _merged.clear();
+    _order.clear();
+    _view = null;
+    _viewStamp = -1;
+    _stamp++;
+  }
+
+  /// 把一个源的结果并入合并表（O(新增条目)）。
+  void _mergeIn(NovelSource s, List<Book> books) {
+    for (final b in books) {
+      final k = bookKeyOf(b);
+      final m = _merged[k];
+      if (m == null) {
+        final e = MergedBook(b)..entries.add((s, b));
+        _merged[k] = e;
+        _order.add(e);
+      } else {
+        m.entries.add((s, b));
+      }
+    }
+    _stamp++;
+  }
+
+  /// 当前筛选下的行（数据或筛选变了才重算）。
+  List<MergedBook> get _visible {
+    final cached = _view;
+    if (cached != null && _viewFilter == _filter && _viewStamp == _stamp) {
+      return cached;
+    }
+    final f = _filter;
+    List<MergedBook> v;
+    if (f == null) {
+      v = _order;
+    } else {
+      v = [];
+      for (final m in _order) {
+        final es = [
+          for (final e in m.entries)
+            if (e.$1.id == f) e,
+        ];
+        if (es.isEmpty) continue;
+        // 筛选视图只看该源这一条，来源药丸才对得上
+        v.add(MergedBook(es.first.$2)..entries.addAll(es));
+      }
+    }
+    _view = v;
+    _viewFilter = f;
+    _viewStamp = _stamp;
+    return v;
   }
 
   void _clearInput() {
@@ -133,7 +201,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _query = '';
       _searching = false;
-      _all = [];
+      _resetMerged();
       _returned.clear();
       _filter = null;
     });
@@ -375,10 +443,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _results(ThemeData theme) {
-    final entries = _filter == null
-        ? _all
-        : [for (final e in _all) if (e.$1.id == _filter) e];
-    final merged = mergeBooks(entries);
+    final merged = _visible;
     if (merged.isEmpty) {
       if (_searching) {
         return const Padding(
@@ -398,16 +463,20 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
       );
     }
-    return ListView(
+    // 懒构建：源一多时结果可能上千行，一次性建出来会卡住首帧。
+    return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: [
-        for (final m in merged) _resultRow(m, theme),
-        const SizedBox(height: 14),
-        Text('同名书自动合并 · 共 ${merged.length} 本 · 没搜到？试试导入更多书源',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.labelSmall
-                ?.copyWith(fontSize: 11, color: Brand.fg3(context))),
-      ],
+      itemCount: merged.length + 1,
+      itemBuilder: (context, i) {
+        if (i < merged.length) return _resultRow(merged[i], theme);
+        return Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: Text('同名书自动合并 · 共 ${merged.length} 本 · 没搜到？试试导入更多书源',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(fontSize: 11, color: Brand.fg3(context))),
+        );
+      },
     );
   }
 

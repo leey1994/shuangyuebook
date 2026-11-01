@@ -72,6 +72,19 @@ class SourceVars {
     _saveSoon();
   }
 
+  /// 全部书源变量的快照（备份用）。
+  Map<String, Map<String, String>> snapshot() => {
+        for (final e in _bySource.entries) e.key: Map<String, String>.of(e.value),
+      };
+
+  /// 整表替换（备份恢复用）。
+  void restoreAll(Map<String, Map<String, String>> data) {
+    _bySource
+      ..clear()
+      ..addAll(data);
+    _saveSoon();
+  }
+
   /// 整源变量的快照（诊断 / 导出用）。
   Map<String, String> of(String sourceUrl) =>
       Map<String, String>.unmodifiable(_bySource[sourceUrl] ?? const {});

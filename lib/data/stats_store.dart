@@ -230,6 +230,40 @@ class StatsStore extends ChangeNotifier {
     });
   }
 
+  /// 备份导出（结构与落盘文件一致）。
+  Map<String, dynamic> toJsonMap() => {
+        'version': 1,
+        'totalSeconds': _totalSeconds,
+        'finishedBooks': _finishedBooks,
+        'nightSeconds': _nightSeconds,
+        'ttsSeconds': _ttsSeconds,
+        'switchCount': _switchCount,
+        'days': _days,
+        'badges': _badges.toList(),
+      };
+
+  /// 备份恢复：整表替换后落盘。
+  Future<void> restoreFrom(Map<String, dynamic> data) async {
+    _totalSeconds = (data['totalSeconds'] as num?)?.toInt() ?? 0;
+    _finishedBooks = (data['finishedBooks'] as num?)?.toInt() ?? 0;
+    _nightSeconds = (data['nightSeconds'] as num?)?.toInt() ?? 0;
+    _ttsSeconds = (data['ttsSeconds'] as num?)?.toInt() ?? 0;
+    _switchCount = (data['switchCount'] as num?)?.toInt() ?? 0;
+    _days.clear();
+    _badges.clear();
+    final days = data['days'];
+    if (days is Map) {
+      days.forEach((k, v) {
+        if (v is num) _days['$k'] = v.toInt();
+      });
+    }
+    final badges = data['badges'];
+    if (badges is List) _badges.addAll(badges.map((e) => '$e'));
+    _checkBadges(celebrate: false);
+    notifyListeners();
+    await _save();
+  }
+
   /// 仅供测试：立即落盘（跳过防抖，消除时序脆弱）。
   @visibleForTesting
   Future<void> debugFlush() => _save();

@@ -139,7 +139,7 @@ class TtsService : Service() {
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(
-                action(ACTION_PREV, android.R.drawable.ic_media_previous, "上一段", 1)
+                action(ACTION_PREV, android.R.drawable.ic_media_previous, "上一章", 1)
             )
             .addAction(
                 action(
@@ -151,7 +151,7 @@ class TtsService : Service() {
                 )
             )
             .addAction(
-                action(ACTION_NEXT, android.R.drawable.ic_media_next, "下一段", 3)
+                action(ACTION_NEXT, android.R.drawable.ic_media_next, "下一章", 3)
             )
             .addAction(
                 action(ACTION_STOP, android.R.drawable.ic_menu_close_clear_cancel, "停止", 4)

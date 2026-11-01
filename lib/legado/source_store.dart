@@ -31,12 +31,16 @@ class SourceImportReport {
     this.added = 0,
     this.updated = 0,
     this.invalid = 0,
+    this.legado2 = 0,
     this.error,
   });
 
   final int added;
   final int updated;
   final int invalid;
+
+  /// 被明确拒收的「阅读 2.0」书源条数（字段结构不同，硬导进来也跑不起来）。
+  final int legado2;
   final String? error;
 
   bool get hasAny => added + updated > 0;
@@ -47,6 +51,7 @@ class SourceImportReport {
       if (added > 0) '新增 $added 个',
       if (updated > 0) '更新 $updated 个',
       if (invalid > 0) '跳过 $invalid 个无效条目',
+      if (legado2 > 0) '拒收 $legado2 个「阅读 2.0」书源（请用 3.0 格式重新导出）',
     ];
     return parts.isEmpty ? '没有可导入的书源' : parts.join('，');
   }
@@ -79,17 +84,61 @@ Map<String, dynamic> decodeSourcePayload(String text) {
   }
   final raw = decoded is List ? decoded : <dynamic>[decoded];
   final items = <Map<String, dynamic>>[];
+  var v2 = 0;
   for (final item in raw) {
     if (item is! Map) continue;
     try {
       final url = (item['bookSourceUrl'] ?? '').toString().trim();
       if (url.isEmpty) continue;
+      if (looksLikeLegado2(item)) {
+        v2++;
+        continue;
+      }
       items.add(Map<String, dynamic>.from(item));
     } catch (_) {
       // 单条坏数据不影响整体导入
     }
   }
-  return <String, dynamic>{'total': raw.length, 'items': items};
+  return <String, dynamic>{'total': raw.length, 'items': items, 'v2': v2};
+}
+
+/// 「阅读 2.0」书源的扁平规则字段。
+///
+/// 3.0 把规则收进了 `ruleSearch` / `ruleBookInfo` / `ruleToc` / `ruleContent`
+/// 四个对象；2.0 是一整排 `ruleSearchList` / `ruleBookContent` 这样的顶层键。
+/// 两种结构没有兼容层，直接导进来只会得到「搜不到书」的坏源，所以明确拒收。
+const Set<String> _legado2RuleKeys = {
+  'ruleSearchList',
+  'ruleSearchName',
+  'ruleSearchAuthor',
+  'ruleSearchKind',
+  'ruleSearchLastChapter',
+  'ruleSearchIntroduce',
+  'ruleSearchCoverUrl',
+  'ruleSearchNoteUrl',
+  'ruleBookName',
+  'ruleBookAuthor',
+  'ruleBookKind',
+  'ruleBookLastChapter',
+  'ruleBookIntroduce',
+  'ruleBookCoverUrl',
+  'ruleChapterList',
+  'ruleChapterName',
+  'ruleContentUrl',
+  'ruleBookContent',
+  'ruleBookUrlPattern',
+};
+
+/// 是否是「阅读 2.0」书源（见 [_legado2RuleKeys]）。
+bool looksLikeLegado2(Map item) {
+  // 只要带了任一 3.0 嵌套规则对象，就按 3.0 处理（有些源会混着写兼容字段）
+  for (final k in const ['ruleSearch', 'ruleBookInfo', 'ruleToc', 'ruleContent']) {
+    if (item[k] is Map) return false;
+  }
+  for (final k in _legado2RuleKeys) {
+    if (item.containsKey(k)) return true;
+  }
+  return false;
 }
 
 /// 落盘快照的解码（后台 isolate 入口）。
@@ -454,6 +503,7 @@ class SourceStore extends ChangeNotifier {
     final err = parsed['error'];
     if (err is String) return SourceImportReport(error: err);
     final total = (parsed['total'] as num?)?.toInt() ?? 0;
+    final v2 = (parsed['v2'] as num?)?.toInt() ?? 0;
     final rawItems = parsed['items'] as List? ?? const [];
     final items = <BookSource>[];
     for (final raw in rawItems) {
@@ -472,7 +522,8 @@ class SourceStore extends ChangeNotifier {
     return SourceImportReport(
       added: r.added,
       updated: r.updated,
-      invalid: total - items.length,
+      invalid: total - items.length - v2,
+      legado2: v2,
     );
   }
 

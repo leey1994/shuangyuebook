@@ -1,25 +1,21 @@
+
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:audioplayers/audioplayers.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 
-import '../edge_tts.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
 import '../pet/pet_view.dart';
 import '../data/font_store.dart';
+import '../data/tts_session.dart';
 import '../data/stats_store.dart';
 import '../models.dart';
 import '../paginate.dart';
 import '../platform/native_bridge.dart';
-import '../platform/tts_notify.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
@@ -159,28 +155,33 @@ class _ReaderScreenState extends State<ReaderScreen>
   // 偏好快照：排版签名（字号/行距/字距/缩进/字体/边距/翻页方式/背景）变化才重建
   late String _pLayout;
 
-  // 听书（TTS）
-  final FlutterTts _tts = FlutterTts();
-  List<Map<String, String>> _voiceList = []; // 系统音色（name/locale，仅作在线失败时的垫音回退）
+  // 听书（TTS）：引擎、进度、跨章推进全部在全局会话里（后台播放），
+  // 阅读器只是它的一个视图 —— 退出阅读器朗读继续，回来再接上。
   /// 在线音色表（Edge TTS）：prefs 值 → (显示名, 合成音色 id)。音色面板只列这些。
   static const _edgeVoices = kEdgeVoices;
   static const _kVoiceDefault = kVoiceDefaultKey; // 默认在线音色
-  final AudioPlayer _edgePlayer = AudioPlayer(); // 在线音色播放器
-  bool _edgeBroken = false; // 会话内合成失败过 → 本场回退系统 TTS
-  Completer<void>? _utter; // 当前朗读完成信号（完成/取消/出错都会触发）
-  bool _speaking = false;
+  TtsSession get _ttsSession => TtsSession.I;
+
+  /// 本书正在朗读（会话还在读这本书；退出阅读器也不会中断）。
+  bool get _speaking => _ttsSession.isReading(_book);
+  bool get _ttsPaused => _ttsSession.paused;
+  DateTime? get _ttsSince => _ttsSession.since;
+  int get _sleepMin => _ttsSession.sleepMinutes;
+  String get _sleepLeft => _ttsSession.sleepLeft;
+
+  /// 正在朗读的段落（高亮/跟随）：只在「同一本书、同一章」时对得上号。
+  int get _ttsCur => (_ttsSession.isReading(_book) &&
+          _ttsSession.chapterIndex == _chIdx)
+      ? _ttsSession.paraIndex
+      : -1;
+
   bool _ttsAutostartDone = false; // 听书直达只自动开播一次
   bool _ttsPage = false; // 全屏听书页（效果图 08）
-  DateTime? _ttsSince; // 本场播放起点（听书页显示已播时长）
-  int _sleepMin = 0; // 定时停止：0 = 关闭
-  DateTime? _sleepAt;
-  String _sleepLeft = '';
-  Timer? _sleepTimer;
-  bool _ttsPaused = false;
-  int _ttsIdx = 0; // 待读段落下标
-  int _ttsCur = -1; // 正在朗读的段落（高亮/跟随）
-  bool _ttsLoopOn = false;
+  int _followedPara = -1; // 上次跟随滚动的段落（会话每秒刷新，避免反复动画）
   final Map<int, GlobalKey> _paraKeys = {};
+
+  /// 分页总页数变化信号（分批补排时只刷新页脚，不重建整页）。
+  final ValueNotifier<int> _pageCountTick = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -222,14 +223,9 @@ class _ReaderScreenState extends State<ReaderScreen>
         _saveProgress(silent: true);
       });
     });
-    _tts.setCompletionHandler(_finishUtter);
-    _tts.setCancelHandler(_finishUtter);
-    _tts.setErrorHandler((_) => _finishUtter());
-    // 在线音色播放完成 → 同一完成信号（_utter）
-    _edgePlayer.onPlayerComplete.listen((_) => _finishUtter());
     WidgetsBinding.instance.addObserver(this);
+    TtsSession.I.addListener(_onTtsSession); // 朗读进度 → 高亮/跟随/面板
     _loadDetail();
-    _loadVoices(); // 预载系统音色清单（在线失败时的垫音回退用）
     // 音色迁移：旧的系统/预设音色值 → 默认在线音色（面板只保留在线音色）
     Future.microtask(() {
       if (!_edgeVoices.containsKey(_prefs.ttsVoice)) {
@@ -278,21 +274,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   static String _fmtClock(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
-  Future<void> _loadVoices() async {
-    try {
-      final v = await _tts.getVoices;
-      final list = <Map<String, String>>[];
-      if (v is List) {
-        for (final x in v) {
-          if (x is! Map) continue;
-          list.add(Map<String, String>.from(
-              x.map((k, val) => MapEntry(k.toString(), val.toString()))));
-        }
-      }
-      if (mounted) setState(() => _voiceList = list);
-    } catch (_) {}
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -336,13 +317,23 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     // 关窗退出时引擎可能不走 widget dispose，这里兜底停掉听书
     if (state == AppLifecycleState.detached && _speaking) {
-      _speaking = false;
-      try {
-        unawaited(_tts.stop());
-      } catch (_) {}
-      try {
-        unawaited(_edgePlayer.stop());
-      } catch (_) {}
+      unawaited(_ttsSession.stop());
+    }
+  }
+
+  /// 全局会话变化 → 刷新高亮/面板；朗读推进时跟随滚动（仅同章）。
+  void _onTtsSession() {
+    if (!mounted) return;
+    setState(() {});
+    final s = _ttsSession;
+    if (!s.isReading(_book) || s.chapterIndex != _chIdx || s.paused) {
+      _followedPara = -1;
+      return;
+    }
+    final i = s.paraIndex;
+    if (i >= 0 && i != _followedPara) {
+      _followedPara = i;
+      _followPara(i);
     }
   }
 
@@ -375,7 +366,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     FontStore.I.removeListener(_onFonts);
     _clock?.cancel();
     _clockText.dispose();
-    _sleepTimer?.cancel();
     _settleReading(); // 离场前把这一段时长落盘
     // 离开阅读器：整表补写一次（章内翻页期间只写了轻量进度记录）
     if (_detail != null) _store.flushProgress();
@@ -395,23 +385,16 @@ class _ReaderScreenState extends State<ReaderScreen>
     petPinned.value = false;
     // 恢复状态栏，并把配色还给全局主题
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
-    if (_speaking) {
-      _speaking = false;
-      try {
-        unawaited(_tts.stop());
-      } catch (_) {}
-      unawaited(TtsNotify.hide());
-    }
-    try {
-      unawaited(_edgePlayer.stop());
-    } catch (_) {}
-    unawaited(_edgePlayer.dispose());
+    // 后台播放：离开阅读器**不**停朗读 —— 会话还在全局跑，悬浮条可控制；
+    // 只解除本页对会话的监听（回来再 attach）。
+    TtsSession.I.removeListener(_onTtsSession);
     AppStore.I.removeListener(_onPrefs);
     AppStore.I.cancelPrefetch();
     _scrollSave?.cancel();
     _repagTimer?.cancel();
     _scrollCtrl.dispose();
     _pageCtrl.dispose();
+    _pageCountTick.dispose();
     super.dispose();
   }
 
@@ -523,12 +506,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       _pages = null;
       _pagesKey = null;
       _pager = null;
+      // 段落下标是「按章」的：不清掉就会越攒越多，且旧 key 永远挂不上新段
+      _paraKeys.clear();
       _pagerGen++; // 作废进行中的分批分页
       _startPage = toEnd ? 1 << 30 : startPage;
       _startOffset = startOffset;
       _page = 0;
-      _ttsIdx = 0; // 听书：切章后从新章开头读
-      _ttsCur = -1;
+      _followedPara = -1; // 切章后高亮/跟随重新对齐
     });
     try {
       final paras =
@@ -925,6 +909,10 @@ class _ReaderScreenState extends State<ReaderScreen>
                         paraSpacing: _prefs.fontSize * 0.6,
                         textScaler: ts,
                         indent: _prefs.indentFirstLine ? '　　' : '',
+                        // 插图段落按固定块高测量，否则图片会被当成一行字
+                        heightOf: (p) => imagePathOf(p) == null
+                            ? null
+                            : imageBlockHeight(h),
                       );
                       _pagerGen++;
                       final gen = _pagerGen;
@@ -1028,6 +1016,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       paraSpacing: _prefs.fontSize * 0.6,
       textScaler: _lastScaler,
       indent: _prefs.indentFirstLine ? '　　' : '',
+      heightOf: (p) => imagePathOf(p) == null
+          ? null
+          : imageBlockHeight(_lastH),
     );
     _pagerGen++;
     final gen = _pagerGen;
@@ -1040,6 +1031,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           _layoutSig, _lastScaler.toString());
       _page = _page.clamp(0, pager.pages.length - 1).toInt();
     });
+    _pageCountTick.value++;
     if (!pager.done) unawaited(_pumpRest(gen, pager));
   }
 
@@ -1050,9 +1042,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     while (mounted && gen == _pagerGen && identical(_pager, pager) && !pager.done) {
       pager.pump(const Duration(milliseconds: 6));
       if (!mounted || gen != _pagerGen || !identical(_pager, pager)) return;
-      setState(() {
-        _page = _page.clamp(0, pager.pages.length - 1).toInt();
-      });
+      _pageCountTick.value++; // 页脚「第 x/y 页」跟着涨
+      final np = _page.clamp(0, pager.pages.length - 1).toInt();
+      // 页码没变就不 setState：否则整个章节页在补排期间被反复重建。
+      if (np != _page) setState(() => _page = np);
       await Future<void>.delayed(Duration.zero);
     }
   }
@@ -1127,20 +1120,77 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 一起缩进，在分页测量里会与 cutToFit 的二分边界打架。
   String _indent(String s) => _prefs.indentFirstLine ? '　　$s' : s;
 
-  /// 一页正文的排版（所有分页模式共用，保证测量与渲染一致）。
-  Widget _pageBody(List<String> page) => Padding(
-        padding: EdgeInsets.symmetric(
-            horizontal: _prefs.marginH, vertical: _prefs.marginV),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < page.length; i++) ...[
-              Text(_indent(page[i]), style: _bodyStyle),
-              if (i < page.length - 1) SizedBox(height: _prefs.fontSize * 0.6),
-            ],
-          ],
-        ),
+  // ---- EPUB 插图 ----
+  //
+  // 解析 EPUB 时 `local_source` 把插图落盘，并把正文里的占位标记改写成
+  // `\u0001IMG:<本地路径>\u0001`（见 EpubParser.imageMarkerPrefix）。
+  // 这里把它渲染成图片块：高度固定为页高的一半左右，分页测量用同一个值，
+  // 网页图片原尺寸未知也不会让版面溢出。
+  static const String _imgPrefix = '\u0001IMG:';
+  static const String _imgEnd = '\u0001';
+
+  /// 插图段落 → 本地文件路径；普通正文段落返回 null。
+  static String? imagePathOf(String para) {
+    if (!para.startsWith(_imgPrefix)) return null;
+    final end = para.indexOf(_imgEnd, _imgPrefix.length);
+    if (end < 0) return null;
+    final path = para.substring(_imgPrefix.length, end);
+    return path.isEmpty ? null : path;
+  }
+
+  /// 插图块高度（分页测量与渲染必须一致）。
+  static double imageBlockHeight(double pageHeight) =>
+      pageHeight > 0 ? pageHeight * 0.55 : 200;
+
+  /// 一段正文的渲染：插图渲染成图片块，其余按正文排版。
+  Widget _paraText(String para, double blockH, {bool highlight = false}) {
+    final img = imagePathOf(para);
+    if (img != null) {
+      final f = File(img);
+      return SizedBox(
+        height: blockH,
+        width: double.infinity,
+        child: f.existsSync()
+            ? Image.file(
+                f,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+                gaplessPlayback: true,
+              )
+            : Center(
+                child: Text('［插图］',
+                    style: TextStyle(color: _colors().dim, fontSize: 13)),
+              ),
       );
+    }
+    final t = _indent(para);
+    return highlight
+        ? ColoredBox(
+            color: _isNightBg
+                ? const Color(0x333DDC97)
+                : const Color(0x222F6B3C),
+            child: Text(t, style: _bodyStyle),
+          )
+        : Text(t, style: _bodyStyle);
+  }
+
+  /// 一页正文的排版（所有分页模式共用，保证测量与渲染一致）。
+  Widget _pageBody(List<String> page) {
+    final blockH = imageBlockHeight(_lastH);
+    return Padding(
+      padding: EdgeInsets.symmetric(
+          horizontal: _prefs.marginH, vertical: _prefs.marginV),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < page.length; i++) ...[
+            _paraText(page[i], blockH),
+            if (i < page.length - 1) SizedBox(height: _prefs.fontSize * 0.6),
+          ],
+        ],
+      ),
+    );
+  }
 
   /// 滑动 / 覆盖翻页：PageView + 爽阅的页对齐物理。
   ///
@@ -1330,14 +1380,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         return Padding(
           key: _paraKeys.putIfAbsent(i, () => GlobalKey()),
           padding: EdgeInsets.only(bottom: _prefs.fontSize * 0.6),
-          child: highlight
-              ? ColoredBox(
-                  color: _isNightBg
-                      ? const Color(0x333DDC97)
-                      : const Color(0x222F6B3C),
-                  child: Text(_indent(_paras[i]), style: _bodyStyle),
-                )
-              : Text(_indent(_paras[i]), style: _bodyStyle),
+          child: _paraText(_paras[i], imageBlockHeight(_lastH),
+              highlight: highlight),
         );
       },
     );
@@ -1374,11 +1418,14 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
               const Spacer(),
               if (_detail != null)
-                Text(
-                  _paged && _currentPages.isNotEmpty
-                      ? '第 ${_page + 1}/${_currentPages.length} 页'
-                      : '第 ${_chIdx + 1}/${_detail!.chapters.length} 章',
-                  style: TextStyle(color: c.dim, fontSize: 11.5),
+                ValueListenableBuilder<int>(
+                  valueListenable: _pageCountTick,
+                  builder: (_, __, ___) => Text(
+                    _paged && _currentPages.isNotEmpty
+                        ? '第 ${_page + 1}/${_currentPages.length} 页'
+                        : '第 ${_chIdx + 1}/${_detail!.chapters.length} 章',
+                    style: TextStyle(color: c.dim, fontSize: 11.5),
+                  ),
                 ),
               const SizedBox(width: 10),
               if (_battery != null) ...[
@@ -2185,143 +2232,32 @@ class _ReaderScreenState extends State<ReaderScreen>
       );
 
   // ---------- 听书（TTS） ----------
+  void _togglePause() => _ttsSession.togglePause();
+  Future<void> _stopTts() => _ttsSession.stop();
 
-  void _finishUtter() {
-    final c = _utter;
-    if (c != null && !c.isCompleted) c.complete();
-  }
-
-  Future<void> _initTts() async {
-    try {
-      await _tts.setSpeechRate(_prefs.ttsRate);
-      await _tts.setVolume(1.0);
-      await _tts.setPitch(_prefs.ttsPitch);
-    } catch (_) {}
-    try {
-      await _tts.setLanguage('zh-CN'); // 先语言后音色，音色覆盖语言选择
-    } catch (_) {}
-    try {
-      if (_voiceList.isEmpty) await _loadVoices();
-      final saved = _prefs.ttsVoice;
-      // 在线音色：系统 TTS 先垫好回退音色（zh-TW 优先），
-      // 合成失败时本会话直接用系统语音续读
-      if (_edgeVoices.containsKey(saved)) {
-        final tw = _pickZhTwVoice();
-        if (tw != null) await _tts.setVoice(tw);
-        return;
-      }
-      // 回退：自动选中中文语音
-      for (final v in _voiceList) {
-        final s = v.values.join(' ').toLowerCase();
-        if (s.contains('zh') || s.contains('chinese')) {
-          await _tts.setVoice(v);
-          break;
-        }
-      }
-    } catch (_) {}
-  }
+  /// 音色/语速/音调变了 → 会话重新应用（系统 TTS 参数）。
+  Future<void> _initTts() => _ttsSession.applyVoice();
 
   /// 小智（温柔）：优先 Yaoyao（女）> Huihui（女）> 任意中文音色
-  Map<String, String>? _pickGentleVoice() {
-    Map<String, String>? soft, zhAny;
-    for (final v in _voiceList) {
-      final n = (v['name'] ?? '').toLowerCase();
-      final s = v.values.join(' ').toLowerCase();
-      final isZh = s.contains('zh') || s.contains('chinese');
-      if (n.contains('yaoyao')) return v; // 柔和女声首选
-      if (n.contains('huihui')) soft ??= v;
-      if (isZh) zhAny ??= v;
-    }
-    return soft ?? zhAny;
-  }
 
   /// 系统里找台湾腔音色（zh-TW/繁体：Hanhan/Taiwan/Hant），女声优先；没有返回 null。
-  Map<String, String>? _findTwVoice() {
-    Map<String, String>? tw;
-    for (final v in _voiceList) {
-      final n = (v['name'] ?? '').toLowerCase();
-      final locale = (v['locale'] ?? '').toLowerCase();
-      final s = v.values.join(' ').toLowerCase();
-      final isTw = locale.startsWith('zh-tw') ||
-          s.contains('cmn-hant') ||
-          s.contains('zh-tw') ||
-          n.contains('taiwan') ||
-          n.contains('hanhan');
-      if (!isTw) continue;
-      final male = n.contains('male') && !n.contains('female');
-      final cur = (tw?['name'] ?? '').toLowerCase();
-      final curMale = cur.contains('male') && !cur.contains('female');
-      if (tw == null || (curMale && !male)) tw = v; // 女声优先
-    }
-    return tw;
-  }
 
   /// 台湾腔：有系统台语音色则用，没装则回退 _pickGentleVoice（柔和女声）。
-  Map<String, String>? _pickZhTwVoice() => _findTwVoice() ?? _pickGentleVoice();
 
   // ---- 在线音色（Edge TTS）----
 
   /// 当前是否选中在线音色。
-  bool get _edgeVoiceOn => _edgeVoices.containsKey(_prefs.ttsVoice);
 
-  String _edgeVoiceId() =>
-      _edgeVoices[_prefs.ttsVoice]?.$2 ?? _edgeVoices[_kVoiceDefault]!.$2;
 
   /// 段落 → 本地缓存 mp3 路径（<缓存>/tts/<sha1(voice|text)>.mp3，命中直接复用）。
-  Future<String> _edgeSynthFile(String text) async {
-    final dir = await _store.ttsAudioDir();
-    if (dir == null) throw const EdgeTtsException('缓存目录不可用');
-    final key = sha1
-        .convert(utf8.encode('${_edgeVoiceId()}|$text'))
-        .toString()
-        .substring(0, 24);
-    final f = File('${dir.path}/$key.mp3');
-    if (await f.exists() && await f.length() > 500) return f.path;
-    final bytes = await EdgeTts.synth(text, voice: _edgeVoiceId());
-    await f.writeAsBytes(bytes, flush: true);
-    return f.path;
-  }
 
   /// 在线合成一段并开播；完成信号复用 _utter（onPlayerComplete → _finishUtter）。
   /// 合成失败抛出，由 [_speakSeg] 回退系统 TTS。
-  Future<void> _edgePlay(String text) async {
-    final path = await _edgeSynthFile(text);
-    if (!mounted || !_speaking) return; // 等待合成期间已停止 → 不播
-    // prosody 固定 +0%，语速在播放层生效（ttsRate 0.5 → 1.0 倍速）
-    await _edgePlayer.setPlaybackRate((_prefs.ttsRate * 2).clamp(0.5, 2.0));
-    await _edgePlayer.play(DeviceFileSource(path));
-  }
 
   /// 预热下一段在线合成（播放第 i 段时调用；静默失败）。
-  Future<void> _edgePreheat(int i) async {
-    if (_edgeBroken || !_speaking || !_edgeVoiceOn || i >= _paras.length) {
-      return;
-    }
-    final text = _paras[i].trim();
-    if (text.isEmpty) return;
-    try {
-      await _edgeSynthFile(text);
-    } catch (_) {}
-  }
 
   /// 朗读一段：在线音色走 Edge 合成+播放；失败（一场一次提示）回退系统 TTS。
   /// 完成信号统一走 _utter/_finishUtter。
-  Future<void> _speakSeg(String text) async {
-    if (_edgeVoiceOn && !_edgeBroken) {
-      try {
-        await _edgePlay(text);
-        return;
-      } catch (_) {
-        _edgeBroken = true;
-        if (mounted) _snack('在线朗读合成失败，本场已回退系统语音');
-        // 系统回退音色已在 _initTts 垫好，直接续读
-      }
-    }
-    // Android 引擎挂死时 speak future 可能永不返回 → 限时防循环卡死
-    await _tts
-        .speak(text)
-        .timeout(Duration(seconds: (text.length * 0.4 + 20).toInt()));
-  }
 
   /// 在线音色首次选择：一次性联网说明（存 prefs.edgeNotice）。
   Future<void> _maybeEdgeNotice() async {
@@ -2345,151 +2281,24 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   Future<void> _toggleTts() async {
     if (_speaking) {
-      await _stopTts();
+      await _ttsSession.stop();
       return;
     }
     if (_detail == null || _paras.isEmpty || _loading) return;
-    _edgeBroken = false; // 新一场播放：给在线合成重试机会（每场最多一次回退提示）
-    await _initTts();
-    if (!mounted) return;
-    _speaking = true;
-    _ttsPaused = false;
-    _ttsIdx = _ttsStartIndex();
-    _ttsCur = -1;
-    _ttsSince = DateTime.now();
-    setState(() {});
-    // 锁屏听书（Android）：通知栏显示「正在朗读」并接上动作按钮
-    TtsNotify.onAction = _onTtsNotifyAction;
-    unawaited(TtsNotify.requestPermission());
-    _syncTtsNotification();
-    PetStore.I.emit(PetAction.ttsPlay);
-    unawaited(_ttsLoop());
-  }
-
-  Future<void> _stopTts() async {
-    _speaking = false;
-    _ttsPaused = false;
-    _ttsSince = null;
-    _finishUtter(); // 解除循环阻塞
-    try {
-      await _tts.stop();
-    } catch (_) {}
-    try {
-      await _edgePlayer.stop();
-    } catch (_) {}
-    unawaited(TtsNotify.hide()); // 锁屏/通知栏同一时间撤下
-    if (mounted) setState(() => _ttsCur = -1);
-    PetStore.I.emit(PetAction.ttsStop);
-  }
-
-  void _togglePause() {
-    if (!_speaking) return;
-    setState(() => _ttsPaused = !_ttsPaused);
-    _syncTtsNotification();
+    await _ttsSession.start(
+      book: _book,
+      detail: _detail!,
+      source: _src,
+      paras: _paras,
+      chapterIndex: _chIdx,
+      startPara: _ttsStartIndex(),
+    );
+    if (mounted) setState(() {});
   }
 
   /// 通知栏动作（Android 锁屏控制）→ 阅读器听书状态机。
-  void _onTtsNotifyAction(String action) {
-    switch (action) {
-      case 'prev':
-        _ttsPrevPara();
-      case 'next':
-        _ttsNextPara();
-      case 'toggle':
-        _togglePause();
-      case 'stop':
-        unawaited(_stopTts());
-    }
-  }
 
   /// 同步「正在朗读」通知（书名 · 章节 + 当前段落摘要）。非 Android 平台直接返回。
-  void _syncTtsNotification() {
-    if (!TtsNotify.supported || !_speaking) return;
-    final text = (_ttsCur >= 0 && _ttsCur < _paras.length)
-        ? _paras[_ttsCur].trim()
-        : '准备中…';
-    unawaited(TtsNotify.show(
-      title: '${_book.title} · 第 ${_chIdx + 1} 章',
-      text: text.length > 42 ? '${text.substring(0, 42)}…' : text,
-      playing: !_ttsPaused,
-    ));
-  }
-
-  Future<void> _ttsLoop() async {
-    if (_ttsLoopOn) return;
-    _ttsLoopOn = true;
-    try {
-      while (_speaking && mounted) {
-        if (_ttsPaused) {
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-          continue;
-        }
-        if (_ttsIdx >= _paras.length) {
-          if (!await _ttsLoadNext()) break;
-          continue;
-        }
-        final i = _ttsIdx;
-        final text = _paras[i].trim();
-        if (text.isEmpty) {
-          _ttsIdx = i + 1;
-          continue;
-        }
-        _ttsCur = i;
-        if (mounted) setState(() {});
-        _followPara(i);
-        _syncTtsNotification();
-        final c = Completer<void>();
-        _utter = c;
-        try {
-          await _speakSeg(text);
-        } catch (_) {
-          _finishUtter();
-          _speaking = false;
-          if (mounted) {
-            setState(() => _ttsCur = -1);
-            _snack('听书启动失败，请检查系统语音引擎');
-          }
-          break;
-        }
-        // 段落已开播：并行预热下一段在线合成（静默失败）
-        unawaited(_edgePreheat(i + 1));
-        // 完成/取消/出错都会 complete；超时兜底防引擎挂死
-        final sec = (text.length * 0.4 + 20).toInt();
-        await c.future.timeout(Duration(seconds: sec), onTimeout: () {});
-        if (!_speaking || !mounted) break;
-        if (_ttsPaused) continue; // 暂停期间读完：不推进，恢复时重读本段
-        if (_ttsIdx == i) _ttsIdx = i + 1;
-      }
-    } finally {
-      _ttsLoopOn = false;
-    }
-  }
-
-  Future<bool> _ttsLoadNext() async {
-    final d = _detail;
-    if (d == null) return false;
-    if (_prefs.paginate) {
-      if (_chIdx >= d.chapters.length - 1) return false;
-      await _loadChapter(_chIdx + 1);
-      _ttsIdx = 0;
-      if (_paras.isNotEmpty) return true;
-      if (_error != null) _snack('章节加载失败，听书已停止');
-      return false;
-    }
-    // 滚动模式：已到最后连载章即止
-    if (_chStarts.isEmpty || _chStarts.last.$1 >= d.chapters.length - 1) {
-      return false;
-    }
-    final before = _paras.length;
-    await _loadMore();
-    if (_paras.length > before) return true;
-    // 网络/冷却失败：稍候重试一次
-    await Future<void>.delayed(const Duration(seconds: 6));
-    if (!mounted || !_speaking) return false;
-    final b2 = _paras.length;
-    await _loadMore();
-    return _paras.length > b2;
-  }
 
   int _ttsStartIndex() {
     try {
@@ -2555,42 +2364,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   // ---------- 听书页（效果图 08） ----------
 
   /// 定时停止（0 = 关闭）。到点自动停播；听书页与设置面板共用。
-  void _setSleepTimer(int minutes) {
-    _sleepTimer?.cancel();
-    _sleepTimer = null;
-    if (minutes <= 0) {
-      setState(() {
-        _sleepMin = 0;
-        _sleepAt = null;
-        _sleepLeft = '';
-      });
-      return;
-    }
-    _sleepMin = minutes;
-    _sleepAt = DateTime.now().add(Duration(minutes: minutes));
-    _sleepLeft = '$minutes:00';
-    setState(() {});
-    _sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted || _sleepAt == null) {
-        t.cancel();
-        return;
-      }
-      final left = _sleepAt!.difference(DateTime.now());
-      if (left <= Duration.zero) {
-        t.cancel();
-        _sleepTimer = null;
-        setState(() {
-          _sleepMin = 0;
-          _sleepAt = null;
-          _sleepLeft = '';
-        });
-        unawaited(_stopTts());
-        return;
-      }
-      setState(() =>
-          _sleepLeft = '${left.inMinutes}:${(left.inSeconds % 60).toString().padLeft(2, '0')}');
-    });
-  }
+  /// 定时停止：状态在会话里，倒计时随会话通知刷新本页。
+  void _setSleepTimer(int minutes) => _ttsSession.setSleepTimer(minutes);
 
   /// 波形高度百分比（效果图 08 的静态形态，按播放进度染色）。
   static const List<int> _waveHeights = [
@@ -2955,24 +2730,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   /// 上一段：把播放游标退一格后解除当前阻塞，循环继续时读新段。
-  void _ttsPrevPara() {
-    if (!_speaking) return;
-    setState(() {
-      _ttsIdx = _ttsCur <= 0 ? 0 : _ttsCur - 1;
-      _ttsCur = -1;
-    });
-    _finishUtter();
-  }
+  void _ttsPrevPara() => _ttsSession.prevPara();
 
   /// 下一段：游标加一（越过段尾时循环会自动进入下一章）。
-  void _ttsNextPara() {
-    if (!_speaking) return;
-    setState(() {
-      _ttsIdx = _ttsCur + 1;
-      _ttsCur = -1;
-    });
-    _finishUtter();
-  }
+  void _ttsNextPara() => _ttsSession.nextPara();
 
   Future<void> _openSleepSheet() async {
     final picked = await showModalBottomSheet<int>(

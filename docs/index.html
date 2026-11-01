@@ -144,7 +144,15 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
       </div>
       <div class="card">
         <h3>听书</h3>
-        <p class="muted">12 款在线音色，段落高亮跟随、自动跨章、定时停止；安卓支持锁屏与通知栏控制，切回阅读随时继续。</p>
+        <p class="muted">12 款在线音色，逐句朗读、段落高亮跟随、自动跨章、定时停止；退出应用继续播（后台播放），通知栏与主界面悬浮条都能切章暂停。</p>
+      </div>
+      <div class="card">
+        <h3>数据备份</h3>
+        <p class="muted">书架、进度、书签、偏好、书源、统计一键导出成单个 JSON，放在文档目录，卸载重装也能一键恢复。</p>
+      </div>
+      <div class="card">
+        <h3>AI 生成书源</h3>
+        <p class="muted">接入你自己的大模型（OpenAI 兼容接口），分步引导浏览站点，逐步生成并实测书源规则，通过才入库。</p>
       </div>
       <div class="card">
         <h3>桌宠养成</h3>
@@ -198,31 +206,43 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 
 <section>
   <div class="wrap">
-    <h2>本版更新（V1.0.4）</h2>
-    <p class="muted">切章不再干等、能换字体了，导入上千条书源也不卡。覆盖安装即可升级，书架、书源、进度、缓存、听书音频全部保留。</p>
+    <h2>本版更新（V1.1.0）</h2>
+    <p class="muted">备份恢复、替换净化、书架分组、书源登录与调试、AI 生成书源、听书后台播放。覆盖安装即可升级，书架、书源、进度、缓存、听书音频全部保留。</p>
     <div class="grid">
       <div class="card">
-        <h3>字体 · 不用再忍受系统默认</h3>
-        <p class="muted">应用不再内置字体文件（装包体积一点没涨）。新增思源宋体 / 思源黑体 / 霞鹜文楷三款，<b>点了才下载</b>（约 8~13 MB，面板里显示进度），下完自动生效；字体存在本机，清理阅读缓存不会删，断网也能用。入口在阅读器「排版」页与「我的 → 阅读 → 阅读字体」。</p>
+        <h3>数据备份 / 恢复</h3>
+        <p class="muted">「我的 → 数据备份」：书架、阅读进度、书签、偏好、书源、书源变量、阅读统计打包成一个 JSON，放在 Documents/爽阅备份 —— 卸载重装后文件还在，一键恢复；书源按地址合并，不会重复。</p>
       </div>
       <div class="card">
-        <h3>切章 · 不再干等</h3>
-        <p class="muted">同一章只抓一次（预取与正文共用同一请求）；最近 8 章留在内存，来回翻是瞬开；预取给前台让路，不再抢同一个站点的限速；滚动模式离章末一屏半就提前备粮。</p>
+        <h3>替换净化</h3>
+        <p class="muted">「我的 → 阅读 → 替换净化」：自定义跨书源生效的正文替换规则，去广告行、去乱码一次配好全部书源；支持正则 / 纯文本、逐条开关、示例预览。规则不写进章节缓存，改完回阅读器立刻生效。</p>
       </div>
       <div class="card">
-        <h3>书源 · 1000 条也不卡</h3>
-        <p class="muted">书源管理页只画看得见的那几行；新增搜索（名称 / 地址 / 分组 + 仅看已启用）；改一条书源不再全表重算；批量启用删除只通知一次；导入导出与开机读 1000 条的 JSON 处理挪到后台线程。</p>
+        <h3>书架分组</h3>
+        <p class="muted">书架新增「分组」筛选：新建分组、按组查看，批量管理里可把选中的书一次性移入分组；删分组只把书退回「未分组」，不会删书。</p>
       </div>
       <div class="card">
-        <h3>流畅度 · 低端机也跟得上</h3>
-        <p class="muted">桌宠待机不再每帧重画整屏（切后台 / 省电动画 / 关掉桌宠时直接停表）；阅读页脚时间不再拖着整页重建；封面加隔离层；开机时磁盘缓存与统计挪到界面出来之后再做。</p>
+        <h3>书源登录 / Cookie</h3>
+        <p class="muted">书源详情页新增「登录 / Cookie」：安卓直接开网页登录、一键收下登录态；Windows 等没有网页内核的平台可手动粘贴 Cookie，清除登录态也在同一处。</p>
       </div>
       <div class="card">
-        <h3>书源脚本 · 更像原版</h3>
-        <p class="muted">发现页 JS 形态 exploreUrl（含 infoMap 分栏选择器、分类异步补全）；jsoup 节点树导航；java.* 接口补齐；Packages.java 加密链路修复；WebView 真实渲染；:contains() / :containsOwn()；CSS 兄弟组合子 ~ / +；目录顺序前缀 - / +。</p>
+        <h3>书源调试器</h3>
+        <p class="muted">书源详情页新增「调试」：输入关键词或书页地址，分别跑搜索 / 详情目录 / 正文，直接看到解析结果与耗时，写规则不用再黑盒猜。</p>
+      </div>
+      <div class="card">
+        <h3>用 AI 生成书源</h3>
+        <p class="muted">书源管理 →「+」→「用 AI 生成书源」：填站点地址和自己的模型接口（OpenAI 兼容，型号自动获取、拉不到可手填）。分步向导引导你浏览站点 —— 搜索、详情、目录、正文每一步的页面结构直接喂给模型，逐步生成、逐步实测，四步全过才入库。</p>
+      </div>
+      <div class="card">
+        <h3>听书 · 后台播放</h3>
+        <p class="muted">退出阅读器朗读不再中断，主界面底部悬浮播放条就地控制；通知栏按钮升级为上一章 / 下一章 / 暂停；朗读改为逐句断句，暂停后从本句续读。</p>
+      </div>
+      <div class="card">
+        <h3>更流畅 / 更聪明</h3>
+        <p class="muted">搜索、排行结果先到先上屏且不再整表重算；本地 TXT / EPUB 解析搬到后台，导入大文件不卡首帧；EPUB 插图真正显示；「阅读 2.0」旧格式书源导入时明确拒收并提示。</p>
       </div>
     </div>
-    <p class="muted" style="margin-top:14px">完整清单见 <a href="https://github.com/leey1994/shuangyuebook/blob/main/docs/release-notes-v1.0.5.md">docs/release-notes-v1.0.5.md</a>。</p>
+    <p class="muted" style="margin-top:14px">完整清单见 <a href="https://github.com/leey1994/shuangyuebook/blob/main/docs/release-notes-v1.1.0.md">docs/release-notes-v1.1.0.md</a>。</p>
   </div>
 </section>
 
@@ -246,7 +266,7 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 // version，取其中更高的一个，都读不到才用页面里写死的默认值。
 // 这样发一次版，网页自己就跟上，不用再改一次 HTML。
 (function () {
-  var FALLBACK = 'v1.0.5';
+  var FALLBACK = 'v1.1.0';
   var REPO = 'leey1994/shuangyuebook';
 
   function clean(tag) {

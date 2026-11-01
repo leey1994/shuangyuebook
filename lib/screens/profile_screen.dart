@@ -1,8 +1,11 @@
 // 我的：小墨陪伴面板 + 阅读统计（7 日柱状图）+ 成就徽章 + 全部设置。
 // 原「设置」独立页已整体并入本页，行卡片与面页其余部分保持同一风格。
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/backup.dart';
 import '../data/format.dart';
 import '../data/shelf_sort.dart';
 import '../data/stats_store.dart';
@@ -16,6 +19,7 @@ import '../theme.dart';
 import '../tts_voices.dart';
 import '../ui/brand.dart';
 import '../ui/font_picker.dart';
+import '../ui/replace_rules_page.dart';
 import '../ui/source/source_manager_page.dart';
 import '../update_check.dart';
 import 'bookmarks_page.dart';
@@ -88,6 +92,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _shelfSection(theme),
             _petSection(theme),
             _cacheSection(theme),
+            _backupSection(theme),
             _aboutSection(theme),
           ],
         );
@@ -681,6 +686,13 @@ class _ProfileScreenState extends State<ProfileScreen>
         onChanged: store.setShowFooter,
       ),
       _divider(),
+      _row(
+        icon: Icons.auto_fix_high_outlined,
+        label: '替换净化',
+        subtitle: '自定义跨书源生效的正文替换规则（去广告行 / 乱码）',
+        onTap: () => showReplaceRules(context),
+      ),
+      _divider(),
       _sliderRow(
         icon: Icons.format_size,
         label: '字号',
@@ -930,6 +942,109 @@ class _ProfileScreenState extends State<ProfileScreen>
     setState(() => _cacheBytes = 0);
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('缓存已清除')));
+  }
+
+  // ---- 数据备份
+  Widget _backupSection(ThemeData theme) {
+    return _section('数据备份', [
+      _row(
+        icon: Icons.save_alt_outlined,
+        label: '导出备份',
+        subtitle: '书架 / 进度 / 书签 / 偏好 / 书源 / 统计 → 一个 JSON 文件',
+        onTap: _exportBackup,
+      ),
+      _divider(),
+      _row(
+        icon: Icons.settings_backup_restore_outlined,
+        label: '恢复备份',
+        subtitle: '从备份目录里选一个文件覆盖当前数据',
+        onTap: _restoreBackup,
+      ),
+    ]);
+  }
+
+  Future<void> _exportBackup() async {
+    try {
+      final f = await BackupService.export();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已备份到 ${f.path}'), duration: const Duration(seconds: 4)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('备份失败：$e')));
+    }
+  }
+
+  Future<void> _restoreBackup() async {
+    final dir = await BackupService.dir();
+    final files = await BackupService.list();
+    if (!mounted) return;
+    if (files.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('备份目录里还没有备份：${dir.path}'),
+          duration: const Duration(seconds: 5)));
+      return;
+    }
+    final picked = await showModalBottomSheet<File>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text('选择要恢复的备份'),
+            ),
+            for (final f in files)
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(f.uri.pathSegments.last),
+                subtitle: Text(_fileSize(f)),
+                onTap: () => Navigator.of(ctx).pop(f),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('恢复备份'),
+        content: const Text('当前书架、进度、偏好与书源会被备份里的内容覆盖，确定继续？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('恢复')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await BackupService.restore(picked);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(r.error ??
+              '已恢复：${r.prefs} 项偏好 · ${r.sources} 个书源')));
+      _loadCacheSize();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('恢复失败：$e')));
+    }
+  }
+
+  String _fileSize(File f) {
+    try {
+      final n = f.lengthSync();
+      return formatBytes(n);
+    } catch (_) {
+      return '';
+    }
   }
 
   // ---- 关于

@@ -8,6 +8,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'announcement.dart';
 import 'data/font_store.dart';
+import 'data/llm_settings.dart';
+import 'data/replace_rules.dart';
 import 'data/stats_store.dart';
 import 'feed_cache.dart';
 import 'legado/cookie_jar.dart';
@@ -30,6 +32,7 @@ import 'ui/brand.dart';
 import 'ui/pet_top_band.dart';
 import 'ui/storage_gate.dart';
 import 'ui/system_metrics.dart';
+import 'ui/tts_bar.dart';
 import 'update_check.dart';
 
 /// 崩溃兜底：写入临时目录日志，避免未捕获异常直接杀进程。
@@ -77,6 +80,8 @@ Future<void> main(List<String> args) async {
   }
   try {
     await AppStore.I.init();
+    ReplaceRules.I.init(AppStore.I.sp); // 正文净化规则（用户自定义，跨书源生效）
+    LlmSettings.I.init(AppStore.I.sp); // 书源 AI 生成的模型配置
   } catch (_) {
     // 个别环境（权限/杀软拦截）下偏好初始化失败时不阻塞启动，降级为无持久化运行
   }
@@ -341,7 +346,12 @@ class _HomeShellState extends State<HomeShell> {
     // 窄屏（安卓尺寸）：底部菜单；宽屏：左侧可收缩菜单
     if (MediaQuery.sizeOf(context).width < kNarrowBreakpoint) {
       return Scaffold(
-        body: _pages(),
+        body: Column(
+          children: [
+            Expanded(child: _pages()),
+            const TtsBar(), // 听书悬浮条：后台朗读时的常驻控制位
+          ],
+        ),
         bottomNavigationBar: _BottomTabBar(
           index: _index,
           labels: _labels,
@@ -351,18 +361,25 @@ class _HomeShellState extends State<HomeShell> {
       );
     }
     return Scaffold(
-      body: Row(
+      body: Column(
         children: [
-          _SideRail(
-            index: _index,
-            open: _railOpen,
-            labels: _labels,
-            icons: _icons,
-            onSelect: _select,
-            onToggle: () => setState(() => _railOpen = !_railOpen),
+          Expanded(
+            child: Row(
+              children: [
+                _SideRail(
+                  index: _index,
+                  open: _railOpen,
+                  labels: _labels,
+                  icons: _icons,
+                  onSelect: _select,
+                  onToggle: () => setState(() => _railOpen = !_railOpen),
+                ),
+                const VerticalDivider(width: 1, thickness: 1),
+                Expanded(child: _pages()),
+              ],
+            ),
           ),
-          const VerticalDivider(width: 1, thickness: 1),
-          Expanded(child: _pages()),
+          const TtsBar(),
         ],
       ),
     );

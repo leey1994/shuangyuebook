@@ -66,6 +66,23 @@ class Chapter {
       );
 }
 
+// ---- EPUB 插图占位 ----
+//
+// 解析 EPUB 时 `local_source` 把插图落盘，并把正文里的占位标记改写成
+// `IMG:<本地路径>`（见 EpubParser.imageMarkerPrefix）。
+// 阅读器渲染、分页测量与听书（跳过插图段）都要认它，放公共模型层。
+const String kImageMarkerPrefix = '\u0001IMG:';
+const String kImageMarkerSuffix = '\u0001';
+
+/// 插图段落 → 本地文件路径；普通正文段落返回 null。
+String? epubImagePathOf(String para) {
+  if (!para.startsWith(kImageMarkerPrefix)) return null;
+  final end = para.indexOf(kImageMarkerSuffix, kImageMarkerPrefix.length);
+  if (end < 0) return null;
+  final path = para.substring(kImageMarkerPrefix.length, end);
+  return path.isEmpty ? null : path;
+}
+
 class BookDetail {
   final Book book;
   final List<Chapter> chapters;
@@ -145,6 +162,12 @@ class ShelfEntry {
 
   bool finished;
 
+  /// 书架分组名（'' = 未分组）。
+  ///
+  /// 只存名字不存 id：分组本身是用户的纯文字标签，改个名就是同一个分组，
+  /// 不需要额外的分组表跟着迁移。
+  String group;
+
   ShelfEntry({
     required this.book,
     this.chapterIndex = 0,
@@ -156,6 +179,7 @@ class ShelfEntry {
     DateTime? addedAt,
     this.charCount = 0,
     this.finished = false,
+    this.group = '',
   })  : updatedAt = updatedAt ?? DateTime.now(),
         addedAt = addedAt ?? DateTime.now();
 
@@ -170,6 +194,7 @@ class ShelfEntry {
         'addedAt': addedAt.toIso8601String(),
         'charCount': charCount,
         'finished': finished,
+        'group': group,
       };
 
   factory ShelfEntry.fromJson(Map<String, dynamic> j) => ShelfEntry(
@@ -186,6 +211,7 @@ class ShelfEntry {
             DateTime.now(),
         charCount: j['charCount'] as int? ?? 0,
         finished: j['finished'] as bool? ?? false,
+        group: j['group'] as String? ?? '',
       );
 }
 

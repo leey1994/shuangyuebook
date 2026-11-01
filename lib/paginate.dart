@@ -19,6 +19,7 @@ List<List<String>> paginateParas({
   required double paraSpacing,
   TextScaler textScaler = TextScaler.noScaling,
   String indent = '',
+  double? Function(String para)? heightOf,
 }) {
   final pager = ParaPaginator(
     paras: paras,
@@ -28,6 +29,7 @@ List<List<String>> paginateParas({
     paraSpacing: paraSpacing,
     textScaler: textScaler,
     indent: indent,
+    heightOf: heightOf,
   );
   pager.runAll();
   return pager.pages;
@@ -44,6 +46,7 @@ class ParaPaginator {
     required this.paraSpacing,
     this.textScaler = TextScaler.noScaling,
     this.indent = '',
+    this.heightOf,
   }) {
     if (width <= 0 || height <= 0) {
       // 尺寸未知：退化成「全部塞一页」，与原实现一致
@@ -60,6 +63,9 @@ class ParaPaginator {
   final TextScaler textScaler;
   final String indent;
 
+  /// 段落高度覆盖：非 null 时直接用（如插图段落是固定块高，不是文字行高）。
+  final double? Function(String para)? heightOf;
+
   /// 已排好的页（原地增长；排完后长度即总页数）。
   final List<List<String>> pages = [];
 
@@ -75,6 +81,8 @@ class ParaPaginator {
 
   /// 测量缓存：同一字符串（含二分查找的重复前缀）只布局一次。
   double _measure(String t) {
+    final fixed = heightOf?.call(t);
+    if (fixed != null) return fixed;
     final full = indent + t;
     if (full.isEmpty) return 0;
     final hit = _mcache[full];

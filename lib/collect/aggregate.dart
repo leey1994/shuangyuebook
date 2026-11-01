@@ -151,6 +151,7 @@ Future<List<AggRankEntry>> aggregateRank(
   var done = 0;
   final map = <String, AggRankEntry>{};
   final order = <String>[];
+  var lastEmit = 0;
 
   void mergeAll(List<(NovelSource, int, Book)> list) {
     for (final (s, i, b) in list) {
@@ -200,7 +201,16 @@ Future<List<AggRankEntry>> aggregateRank(
         done++;
         mergeAll(out);
         onProgress?.call(done, total);
-        onPartial?.call(snapshot());
+        // 部分榜单节流：每个源都全量排序 + 重建整页是 O(源数 × 行数)，
+        // 100 个源时纯浪费。150ms 一次足够「先到先上屏」的手感，
+        // 最后一个源必定出全量。
+        if (onPartial != null) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (done == total || now - lastEmit >= 150) {
+            lastEmit = now;
+            onPartial(snapshot());
+          }
+        }
       },
   ], maxParallel: maxParallel);
 

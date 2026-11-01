@@ -1,0 +1,40 @@
+{
+  "bookSourceName": "SF轻小说（桌面）",
+  "bookSourceUrl": "https://book.sfacg.com",
+  "bookSourceGroup": "AI生成",
+  "bookSourceType": 0,
+  "enabled": true,
+  "enabledExplore": false,
+  "enabledCookieJar": true,
+  "searchUrl": "http://s.sfacg.com/?Key={{key}}&S=1&SS=0",
+  "ruleSearch": {
+    "bookList": "ul:has(strong a)",
+    "name": "strong a@text",
+    "author": "li:eq(1)@text##综合评价：\\s*##/\\d{4}/.*$",
+    "bookUrl": "strong a@href",
+    "coverUrl": "img@src",
+    "intro": "li:eq(1)@text",
+    "kind": "",
+    "lastChapter": "",
+    "wordCount": ""
+  },
+  "ruleBookInfo": {
+    "init": "",
+    "name": ".d-summary h1 .text@text",
+    "author": ".author-name span@text",
+    "coverUrl": ".summary-pic img@src",
+    "intro": "p.introduce@text",
+    "kind": ".text-row .text:eq(0)@text",
+    "lastChapter": "",
+    "tocUrl": ".btn-row a.btn.yellow@href",
+    "wordCount": ""
+  },
+  "ruleToc": {
+    "chapterList": "div.catalog-list li",
+    "chapterName": "a@text",
+    "chapterUrl": "a@href"
+  },
+  "ruleContent": {
+    "content": "#ChapterBody@html"
+  }
+}

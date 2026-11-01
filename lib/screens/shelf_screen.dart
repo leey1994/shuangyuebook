@@ -17,6 +17,12 @@ import '../ui/brand.dart';
 import 'local_import_page.dart';
 import 'reader_screen.dart';
 
+/// 分组选择结果（null = 全部，'' = 未分组）。
+class _GroupPick {
+  const _GroupPick(this.name);
+  final String? name;
+}
+
 class ShelfScreen extends StatefulWidget {
   const ShelfScreen({super.key});
 
@@ -29,6 +35,9 @@ class _ShelfScreenState extends State<ShelfScreen> {
   static bool _sessionChecked = false;
 
   int _seg = 0; // 0 = 在线书架，1 = 本地书
+
+  /// 分组筛选：null = 全部，'' = 未分组，其余 = 分组名。
+  String? _group;
   bool _selecting = false;
   final Set<String> _selected = {};
 
@@ -56,7 +65,12 @@ class _ShelfScreenState extends State<ShelfScreen> {
           if (e.book.sourceId == LocalSource.sourceId) e
       ];
 
-  List<ShelfEntry> get _current => _seg == 0 ? _online : _local;
+  List<ShelfEntry> get _current {
+    final base = _seg == 0 ? _online : _local;
+    final g = _group;
+    if (g == null) return base;
+    return [for (final e in base) if (e.group == g) e];
+  }
 
   Future<void> _manualCheck() async {
     final (updated, newCh, failed) = await AppStore.I.checkShelfUpdates();
@@ -219,7 +233,7 @@ class _ShelfScreenState extends State<ShelfScreen> {
               _selectHeader(theme, list),
             Expanded(
               child: list.isEmpty
-                  ? _emptyState(theme)
+                  ? _emptyState(theme, filtered: _group != null)
                   : _grid(theme, list, narrow: narrow),
             ),
             if (_selecting) _selectBar(theme),
@@ -359,9 +373,144 @@ class _ShelfScreenState extends State<ShelfScreen> {
                     PetStore.I.emit(PetAction.shelfSort);
                   }),
             ),
+          // 分组筛选：始终在末尾，选中后 chip 变成组名
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: PillChip(
+                _group == null
+                    ? '分组'
+                    : (_group!.isEmpty ? '未分组' : _group!),
+                selected: _group != null,
+                onTap: _pickGroup),
+          ),
         ],
       ),
     );
+  }
+
+  /// 分组选择 / 新建 / 删除（书架筛选与批量分配共用同一张表）。
+  Future<String?> _pickGroupSheet({
+    required String title,
+    String? current,
+    bool allowAll = false,
+  }) async {
+    final store = AppStore.I;
+    final groups = store.shelfGroups;
+    final action = await showModalBottomSheet<Object>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Text(title,
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+            if (allowAll)
+              ListTile(
+                leading: const Icon(Icons.all_inbox_outlined),
+                title: const Text('全部'),
+                trailing: current == null
+                    ? const Icon(Icons.check, color: Brand.green)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(const _GroupPick(null)),
+              ),
+            ListTile(
+              leading: const Icon(Icons.label_off_outlined),
+              title: const Text('未分组'),
+              trailing: current == ''
+                  ? const Icon(Icons.check, color: Brand.green)
+                  : null,
+              onTap: () => Navigator.of(ctx).pop(const _GroupPick('')),
+            ),
+            for (final g in groups)
+              ListTile(
+                leading: const Icon(Icons.label_outline),
+                title: Text(g),
+                subtitle: Text(
+                    '${store.shelf.where((e) => e.group == g).length} 本'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (current == g)
+                      const Icon(Icons.check, color: Brand.green),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: '删除分组',
+                      onPressed: () {
+                        store.removeShelfGroup(g);
+                        Navigator.of(ctx).pop(const _GroupPick(null));
+                      },
+                    ),
+                  ],
+                ),
+                onTap: () => Navigator.of(ctx).pop(_GroupPick(g)),
+              ),
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: const Text('新建分组'),
+              onTap: () async {
+                final name = await _askGroupName(ctx);
+                if (name == null) return;
+                store.addShelfGroup(name);
+                if (ctx.mounted) Navigator.of(ctx).pop(_GroupPick(name));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action is _GroupPick) return action.name;
+    return null;
+  }
+
+  Future<void> _pickGroup() async {
+    final picked = await _pickGroupSheet(
+        title: '按分组筛选', current: _group, allowAll: true);
+    if (!mounted) return;
+    setState(() => _group = picked);
+  }
+
+  Future<String?> _askGroupName(BuildContext context) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('新建分组'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '分组名，如 玄幻 / 待读'),
+          onSubmitted: (_) => Navigator.of(ctx).pop(true),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('创建')),
+        ],
+      ),
+    );
+    final name = ctrl.text.trim();
+    if (ok != true || name.isEmpty) return null;
+    return name;
+  }
+
+  /// 批量把选中的书移到某个分组。
+  Future<void> _assignSelectedGroup(String? target) async {
+    if (_selected.isEmpty) return;
+    final picked = await _pickGroupSheet(
+        title: '移入分组（${_selected.length} 本）', current: target);
+    if (picked == null) return;
+    AppStore.I.setShelfGroup(_selected, picked);
+    if (mounted) _exitSelect();
   }
 
   Widget _selectHeader(ThemeData theme, List<ShelfEntry> list) {
@@ -413,6 +562,10 @@ class _ShelfScreenState extends State<ShelfScreen> {
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: Brand.fg3(context))),
           const Spacer(),
+          BrandBtn('分组',
+              style: BrandBtnStyle.hairline,
+              onTap: _selected.isEmpty ? null : () => _assignSelectedGroup(null)),
+          const SizedBox(width: 8),
           BrandBtn('移出书架',
               style: BrandBtnStyle.outline,
               onTap: _selected.isEmpty ? null : _removeSelected),
@@ -421,7 +574,23 @@ class _ShelfScreenState extends State<ShelfScreen> {
     );
   }
 
-  Widget _emptyState(ThemeData theme) {
+  Widget _emptyState(ThemeData theme, {bool filtered = false}) {
+    if (filtered) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Mascot(size: 60),
+            const SizedBox(height: 14),
+            Text('这个分组还没有书', style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 12),
+            BrandBtn('看全部',
+                style: BrandBtnStyle.outline,
+                onTap: () => setState(() => _group = null)),
+          ],
+        ),
+      );
+    }
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

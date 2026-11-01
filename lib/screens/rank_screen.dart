@@ -132,54 +132,64 @@ class _RankScreenState extends State<RankScreen>
     final theme = Theme.of(context);
     final items = _items;
     final narrow = MediaQuery.sizeOf(context).width < kNarrowBreakpoint;
-    final body = ListView(
+    // 头部 / 尾部固定几块，榜单行用 builder 懒构建（排行动辄几百上千行，
+    // 旧实现每次 setState 都把全部行重建一遍）。
+    final head = <Widget>[
+      _caption(theme),
+      if (_loading)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              const SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 10),
+              Text('正在聚合 $_done/$_total 个书源…',
+                  style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+      const SizedBox(height: 12),
+      if (items != null && items.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 60),
+          child: Column(
+            children: [
+              const Mascot(size: 56),
+              const SizedBox(height: 14),
+              Text('这个分类暂时没拿到榜单数据\n换个分类，或到书源管理里体检一下书源',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 12),
+              BrandBtn('重新聚合',
+                  style: BrandBtnStyle.outline, onTap: () => _load()),
+            ],
+          ),
+        ),
+      if (items != null && items.isNotEmpty) ...[
+        _top3(items.take(3).toList(), theme),
+        const SizedBox(height: 6),
+      ],
+    ];
+    final rows = (items != null && items.isNotEmpty)
+        ? (items.length > 3 ? items.length - 3 : 0)
+        : 0;
+    final body = ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(narrow ? 16 : 22, 4, narrow ? 16 : 22, 28),
-      children: [
-        _caption(theme),
-        if (_loading)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                const SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                const SizedBox(width: 10),
-                Text('正在聚合 $_done/$_total 个书源…',
-                    style: theme.textTheme.bodySmall),
-              ],
-            ),
-          ),
-        const SizedBox(height: 12),
-        if (items != null && items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 60),
-            child: Column(
-              children: [
-                const Mascot(size: 56),
-                const SizedBox(height: 14),
-                Text('这个分类暂时没拿到榜单数据\n换个分类，或到书源管理里体检一下书源',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 12),
-                BrandBtn('重新聚合',
-                    style: BrandBtnStyle.outline, onTap: () => _load()),
-              ],
-            ),
-          ),
-        if (items != null && items.isNotEmpty) ...[
-          _top3(items.take(3).toList(), theme),
-          const SizedBox(height: 6),
-          for (var i = 3; i < items.length; i++) _listRow(items[i], i + 1, theme),
-          const SizedBox(height: 18),
-          Text('数据来自各书源站内榜单实时抓取 · 下拉刷新',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(fontSize: 11, color: Brand.fg3(context))),
-        ],
-      ],
+      itemCount: head.length + rows + (rows > 0 ? 2 : 0),
+      itemBuilder: (context, i) {
+        if (i < head.length) return head[i];
+        final r = i - head.length;
+        if (r < rows) return _listRow(items![r + 3], r + 4, theme);
+        if (r == rows) return const SizedBox(height: 18);
+        return Text('数据来自各书源站内榜单实时抓取 · 下拉刷新',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall
+                ?.copyWith(fontSize: 11, color: Brand.fg3(context)));
+      },
     );
     return Column(
       children: [

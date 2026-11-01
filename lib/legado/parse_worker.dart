@@ -42,8 +42,13 @@ import 'source_vars.dart';
 /// 判据取「书源定义里出现过 `webView` 字样」这一宽口径：`extra.webView` 标记、
 /// 章地址 `,{"webView":true}` 尾缀、脚本里的 `java.webView(...)` 都会命中。
 /// 宁可多留几个在主线程，也不在分身里误杀好源。
+///
+/// 结果按书源对象缓存：`toJson().toString()` 要把整份规则序列化一遍，
+/// 而这条判断在每次扇出（搜索 / 首页 / 排行 / 体检）对每个源都会问一次。
+/// 书源对象不可变（改源会换新实例），所以缓存不会过期。
+final Expando<bool> _needsMain = Expando<bool>('needsMainParse');
 bool sourceNeedsMainParse(BookSource s) =>
-    s.toJson().toString().contains('webView');
+    _needsMain[s] ??= s.toJson().toString().contains('webView');
 
 /// 测试用：跳过原生桥直接指定分身要读的目录（真机上由主 isolate 经桥取）。
 /// 传 null 恢复「取不到目录就一律留主线程」的默认行为。

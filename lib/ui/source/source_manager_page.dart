@@ -17,6 +17,9 @@ import 'package:shuangyue/sources/legado_source.dart';
 import 'package:shuangyue/sources/registry.dart';
 import 'package:shuangyue/sources/source.dart';
 import 'package:shuangyue/store.dart';
+import 'ai_source_page.dart';
+import 'source_debugger_page.dart';
+import 'source_login_page.dart';
 import 'package:shuangyue/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -720,6 +723,23 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                     icon: const Icon(Icons.delete_outline, size: 18),
                     label: const Text('删除'),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      showSourceLogin(context, s);
+                    },
+                    icon: const Icon(Icons.vpn_key_outlined, size: 18),
+                    label: const Text('登录 / Cookie'),
+                  ),
+                  if (s.searchUrl != null)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        showSourceDebugger(context, s);
+                      },
+                      icon: const Icon(Icons.bug_report_outlined, size: 18),
+                      label: const Text('调试'),
+                    ),
                 ],
               ),
             ],
@@ -863,6 +883,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _importBuiltin();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('用 AI 生成书源'),
+              subtitle: const Text('填站点地址与模型接口，自动生成并实测通过后入库'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                showAiSource(context, _store);
               },
             ),
             ListTile(

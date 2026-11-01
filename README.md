@@ -4,7 +4,7 @@
 
 Flutter 打造的双端（Android / Windows）小说阅读器——内置固化书源、可导入书源引擎、本地书与在线书共用同一套阅读体验，离线能读，还能听。顶部住着一只会陪你长大的小兽。
 
-当前版本：**v1.0.5**（更新内容见 [docs/release-notes-v1.0.5.md](docs/release-notes-v1.0.5.md)）
+当前版本：**v1.1.0**（更新内容见 [docs/release-notes-v1.1.0.md](docs/release-notes-v1.1.0.md)）
 
 静态主页：[https://leey1994.github.io/shuangyuebook/](https://leey1994.github.io/shuangyuebook/)
 
@@ -99,9 +99,9 @@ Flutter 打造的双端（Android / Windows）小说阅读器——内置固化�
 
 | 平台 | 文件 | 体积 |
 | --- | --- | --- |
-| Android（64 位，推荐） | `ShuangYue-v1.0.5+35-arm64-v8a.apk` | 约 24 MB |
-| Android（32 位老机型） | `ShuangYue-v1.0.5+35-armeabi-v7a.apk` | 约 22 MB |
-| Windows | `ShuangYue-v1.0.5+35-windows-x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装 | 约 18 MB |
+| Android（64 位，推荐） | `ShuangYue-v1.1.0+36-arm64-v8a.apk` | 约 24 MB |
+| Android（32 位老机型） | `ShuangYue-v1.1.0+36-armeabi-v7a.apk` | 约 22 MB |
+| Windows | `ShuangYue-v1.1.0+36-windows-x64.zip`（内含 `novel_reader.exe` + 后台更新器 `updater.exe`）—— 解压即用，无需安装 | 约 18 MB |
 
 > **为什么要按架构分开？** Flutter 每个 ABI 都要带一份自己的引擎（约 20 MB）。
 > 三合一「通用包」会把 arm64 / armeabi-v7a / x86_64 三份都塞进去，体积直接到 ~68 MB。
@@ -134,15 +134,15 @@ flutter test
 # APP_VERSION 取自 pubspec.yaml 的 version，必须显式传 ——
 # 「我的 → 关于」与自动更新都靠它判断有没有新版本。
 # 安卓：--split-per-abi 出三个按架构分包（各 ~20 MB），不要用默认的通用包（~68 MB）。
-flutter build apk --release --split-per-abi --dart-define=APP_VERSION=1.0.5
+flutter build apk --release --split-per-abi --dart-define=APP_VERSION=1.1.0
 # 只要其中一个架构：
-flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.0.5
-flutter build windows --release --dart-define=APP_VERSION=1.0.5
+flutter build apk --release --target-platform android-arm64 --dart-define=APP_VERSION=1.1.0
+flutter build windows --release --dart-define=APP_VERSION=1.1.0
 
 # Windows 更新器（独立后台进程，打 Windows 包前必须先产出并放进 Release 目录）：
 # 负责下载/解压/换装/重启，UI 进程只负责点火。
 dart compile exe tool/updater.dart -o build/windows/x64/runner/Release/updater.exe
-# 然后整目录打包成 ShuangYue-v1.0.5+35-windows-x64.zip（updater.exe 一并进包）。
+# 然后整目录打包成 ShuangYue-v1.1.0+36-windows-x64.zip（updater.exe 一并进包）。
 ```
 
 桌面端的标题栏与桌宠活动区、顶部窄带这类只能肉眼确认的改动，可以用 `tool/shot.ps1` 启动桌面端并截图：
