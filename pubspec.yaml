@@ -1,5 +1,5 @@
 name: shuangyue
-description: 爽阅·在线聚合阅读器（Android + Windows，35 内置书源实时聚合 + 阅读 3.0 书源引擎 + 桌宠小墨）
+description: 爽阅·在线聚合阅读器（Android + Windows，多源实时聚合 + 阅读 3.0 书源引擎 + 桌宠小墨）
 publish_to: none
 version: 1.1.0+36
 
@@ -40,7 +40,7 @@ flutter:
 
   assets:
     - assets/images/ # 无封面时按书名稳定分配的占位插画
-    - assets/sources/ # 内置书源资产（26 个「阅读 3.0」源，首启导入）
+    - assets/sources/ # 内置书源资产（「阅读 3.0」源，首启导入）
     - assets/icon/sizes/icon-1024.png # 小墨徽标（品牌 logo / 水印）
 
 
