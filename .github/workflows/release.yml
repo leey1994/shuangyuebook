@@ -131,7 +131,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - name: 对齐 pubspec 版本（构建前写入，AndroidManifest 的 versionName/versionCode 靠它）
-        run: sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml
+        run: 'sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml'
       - name: 构建 APK
         run: >
           flutter build apk --release --split-per-abi
@@ -165,7 +165,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - name: 对齐 pubspec 版本（构建前写入，AndroidManifest 的 versionName/versionCode 靠它）
-        run: sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml
+        run: 'sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml'
       - name: 构建 Windows
         run: >
           flutter build windows --release
