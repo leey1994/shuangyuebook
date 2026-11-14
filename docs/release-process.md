@@ -25,9 +25,15 @@
   | `#major` | `v1.0.4` → `v2.0.0` |
   | `#norelease` | 跳过本次发版 |
 
-* 构建号 `B = git rev-list --count HEAD`（仓库提交总数，单调递增），
-  最终写入 `pubspec.yaml` 的 `version: X.Y.Z+B`。
-  App 内 `compareVersion` 只比 `X.Y.Z`，`+B` 仅供「我的 → 关于」展示。
+* 构建号 `B = max(git rev-list --count HEAD, pubspec 的 +B 加一)`。
+  提交数通常够用，但本地测试包可能用过更大的号（如 `+2047`）；安卓按
+  `versionCode` 判重，号一旦回退就会拒绝覆盖安装，所以这里只增不减。
+  最终写入 `pubspec.yaml` 的 `version: X.Y.Z+B`。App 内 `compareVersion`
+  只比 `X.Y.Z`，`+B` 仅供「我的 → 关于」展示。
+* **构建前**两个 build job 都会先 `sed` 把 `pubspec.yaml` 改成 `X.Y.Z+B` 再
+  `flutter build`：AndroidManifest 的 `versionName` / `versionCode` 取自
+  pubspec，放在发版回写里改就晚了一版（安装器会显示上一版版本号）。
+  下载包的资产名则一直用 `needs.version.outputs.full`，不受影响。
 * 注意：`workflow_dispatch` 重跑时版本按**当前最新 tag**重算，不是读 `pubspec.yaml`。
   如果上一次发版在建好 tag 之后、回写提交之前失败，重跑会跳一个版本号
   （tag 已推进而 pubspec 没跟上）——此时手动改 `pubspec.yaml` 对齐或删掉多余 tag 再重跑。

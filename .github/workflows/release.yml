@@ -74,6 +74,11 @@ jobs:
 
           V="$MAJ.$MIN.$PAT"
           B=$(git rev-list --count HEAD)
+          # versionCode 地板：本地 / 历史安装包可能用过更大的 +B（如 +2047）。
+          # 构建号一旦回退，安卓会以「版本降级」拒绝覆盖安装。这里取
+          # max(提交数, pubspec 构建号 + 1)，发版回写 pubspec 后自然单调递增。
+          PUB_B=$(sed -n 's/^version: *//p' pubspec.yaml | cut -d'+' -f2)
+          if [ -n "$PUB_B" ] && [ "$PUB_B" -ge "$B" ]; then B=$((PUB_B + 1)); fi
           FULL="$V+$B"
           # tag/Release 标题沿用旧惯例：`爽阅 vX.Y.Z：<commit 主题>`，剥掉控制标签
           SUBJECT=$(printf '%s' "$MSG" | sed -E 's/#[A-Za-z]+//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')
@@ -125,6 +130,8 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: 对齐 pubspec 版本（构建前写入，AndroidManifest 的 versionName/versionCode 靠它）
+        run: sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml
       - name: 构建 APK
         run: >
           flutter build apk --release --split-per-abi
@@ -157,6 +164,8 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: 对齐 pubspec 版本（构建前写入，AndroidManifest 的 versionName/versionCode 靠它）
+        run: sed -i -E "s/^version: .*/version: ${{ needs.version.outputs.full }}/" pubspec.yaml
       - name: 构建 Windows
         run: >
           flutter build windows --release
