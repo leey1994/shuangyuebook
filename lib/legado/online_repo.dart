@@ -206,6 +206,15 @@ class OnlineRepo {
       debugPrint('[书源分身]「${source.bookSourceName}」JS 仅主线程可用 → 主线程复探');
       return null;
     }
+    if (r['status'] == 'lost') {
+      // 分身崩/超时：本轮跳过该源，不回主线程重跑（双倍等待 + 卡 UI 线程）。
+      return SourceSearchResult(
+        source: source,
+        books: const [],
+        error: '分身解析超时，本轮已跳过',
+        elapsedMs: (r['ms'] as num?)?.toInt() ?? 0,
+      );
+    }
     applyOffthreadSideEffects(r, source.bookSourceUrl);
     return SourceSearchResult(
       source: source,
@@ -228,6 +237,9 @@ class OnlineRepo {
       debugPrint('[书源分身]「${source.bookSourceName}」JS 仅主线程可用 → 主线程复探');
       return null;
     }
+    // lost = 分身超时：体检结论按「可疑」处理（count=0、非 err），不判坏源；
+    // 没有副作用要回灌，直接把回执交给体检层。
+    if (r['status'] == 'lost') return r;
     applyOffthreadSideEffects(r, source.bookSourceUrl);
     return r;
   }
@@ -271,6 +283,14 @@ class OnlineRepo {
       'timeoutSecs': perSourceTimeout.inSeconds,
     });
     if (r == null || r['status'] == 'defer') return null;
+    if (r['status'] == 'lost') {
+      // 分身超时：本轮该源不出书单，不回主线程重跑（排行榜聚合的热路径）
+      return SourceExploreResult(
+        source: source,
+        books: const [],
+        error: '分身解析超时，本轮已跳过',
+      );
+    }
     applyOffthreadSideEffects(r, source.bookSourceUrl);
     return SourceExploreResult(
       source: source,

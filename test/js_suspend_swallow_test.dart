@@ -2,6 +2,8 @@
 //  1) JS 列表规则返回的字符串条目（`<a ...>` 片段）上，字段规则只在片段里取；
 //  2) 脚本 `try { java.ajax() } catch (e) {}` 吞掉补网错误时仍要重跑补网
 //     （legado 的 ajax 是同步的，脚本不会走到 catch —— 神文小说目录依赖这点）。
+@Tags(['native'])
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/analyze_rule.dart';
 import 'package:shuangyue/legado/js_engine.dart';

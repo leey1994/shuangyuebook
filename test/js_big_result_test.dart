@@ -4,6 +4,8 @@
 // 带回 Dart，超过即整体返回 null 且不带错误。书源里 `JSON.stringify(整页 JSON)`
 // 这类规则（魔丸小说 bookList = `<js>…JSON.stringify(result)</js>\n$.data.items`）
 // 因此静默变空。修复：脚本末尾把超长值挂到 `__lgBIG`，Dart 侧按 4000 分片取回。
+@Tags(['native'])
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';

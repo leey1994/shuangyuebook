@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -78,6 +79,11 @@ class FeedCache {
     return null;
   }
 
+  static void clearForTest() {
+    _m.clear();
+    _stopJsonWorker();
+  }
+
   static void set(String k, Object v) {
     _m[k] = (v, DateTime.now());
     unawaited(_writeDisk(k, v));
@@ -91,21 +97,34 @@ class FeedCache {
   }
 
   /// 按键前缀批量作废（排行刷新：「rank」一次清掉 rankTabs 与全部 rank 页）。
+  ///
+  /// 只作废内存、磁盘交给 [invalidatePrefixAsync] 后台删 —— 调用方若紧接着
+  /// 重新取数，[reach] 会在删除完成前从磁盘把旧值读回来（下拉刷新「刷了等于
+  /// 没刷」就是这么来的）。要保证刷新生效，请 await 异步版。
+  @Deprecated('刷新后紧接着取数会读到磁盘旧值，改用 invalidatePrefixAsync')
   static void invalidatePrefix(String prefix) {
+    unawaited(invalidatePrefixAsync(prefix));
+  }
+
+  /// 按键前缀批量作废（内存 + 磁盘），完成后再返回。
+  ///
+  /// 排行下拉刷新必须 await 它：内存删掉之后 [getAsync] 会去磁盘兜底，
+  /// 磁盘删除是异步的，旧实现留了一个「刚删完又读回旧值」的窗口。
+  static Future<void> invalidatePrefixAsync(String prefix) async {
     _m.removeWhere((k, _) => _safeName(k).startsWith(prefix));
     final d = _dir;
     if (d == null) return;
-    unawaited(() async {
-      try {
-        await for (final f in d.list()) {
-          if (f is File && f.uri.pathSegments.last.startsWith(prefix)) {
-            try {
-              await f.delete();
-            } catch (_) {}
-          }
+    try {
+      await for (final f in d.list()) {
+        if (f is File && f.uri.pathSegments.last.startsWith(prefix)) {
+          try {
+            await f.delete();
+          } catch (_) {}
         }
-      } catch (_) {}
-    }());
+      }
+    } catch (_) {
+      // 磁盘清理失败不影响内存语义（下次写入会覆盖）
+    }
   }
 
   static String _safeName(String k) {
@@ -133,12 +152,94 @@ class FeedCache {
   /// 串行写队列：同一 key 的并发写不会互相覆盖，且一次只跑一个文件 I/O。
   static Future<void> _writeChain = Future.value();
 
+  // ---------------- 后台 JSON 编解码（单常驻 isolate） ----------------
+  //
+  // 首页一次扇出几十个源，每条响应几十 KB；jsonEncode/jsonDecode 都在主
+  // isolate 上排队，大响应时会直接丢帧。这里用**一个**常驻 isolate 串行
+  // 处理编解码 —— 不用 compute()：每次 spawn 1~3ms，30 条响应就是一串
+  // spawn，比编码本身还贵。
+  static Isolate? _jsonIso;
+  static SendPort? _jsonTo;
+  static ReceivePort? _jsonRx;
+  static Future<SendPort?>? _jsonStart;
+  static final Map<int, Completer<Object?>> _jsonPending = {};
+  static int _jsonSeq = 0;
+  static bool _jsonDead = false;
+
+  static Future<SendPort?> _jsonPort() {
+    final p = _jsonTo;
+    if (p != null) return Future.value(p);
+    return _jsonStart ??= _startJsonWorker();
+  }
+
+  static Future<SendPort?> _startJsonWorker() async {
+    final rx = ReceivePort();
+    final ready = Completer<SendPort>();
+    rx.listen((m) {
+      if (m is SendPort) {
+        if (!ready.isCompleted) ready.complete(m);
+        return;
+      }
+      if (m is List && m.length == 3) {
+        final c = _jsonPending.remove(m[0]);
+        if (c != null && !c.isCompleted) {
+          c.complete(m[1] == true ? m[2] : null);
+        }
+      }
+    });
+    try {
+      _jsonIso =
+          await Isolate.spawn(_jsonWorker, rx.sendPort, debugName: 'feed-json');
+      final to = await ready.future.timeout(const Duration(seconds: 3));
+      _jsonRx = rx;
+      return _jsonTo = to;
+    } catch (_) {
+      rx.close();
+      _jsonIso?.kill(priority: Isolate.immediate);
+      _jsonIso = null;
+      _jsonDead = true; // 平台不支持 / 起不来：之后一律回主线程
+      _jsonStart = null;
+      return null;
+    }
+  }
+
+  static Future<Object?> _json(String op, Object data) async {
+    if (_jsonDead) return null;
+    final to = await _jsonPort();
+    if (to == null) return null;
+    final id = ++_jsonSeq;
+    final c = Completer<Object?>();
+    _jsonPending[id] = c;
+    try {
+      to.send([id, op, data, _jsonRx!.sendPort]);
+      return await c.future.timeout(const Duration(seconds: 15));
+    } catch (_) {
+      _jsonPending.remove(id);
+      return null;
+    }
+  }
+
+  static void _stopJsonWorker() {
+    _jsonIso?.kill(priority: Isolate.immediate);
+    _jsonIso = null;
+    _jsonTo = null;
+    _jsonRx?.close();
+    _jsonRx = null;
+    _jsonStart = null;
+    _jsonPending.clear();
+    _jsonDead = false;
+  }
+
   static Future<(Object?, DateTime)> _readDisk(String k) async {
     final now = DateTime.now();
     try {
       final f = _file(k);
       if (f == null || !await f.exists()) return (null, now);
-      final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      final text = await f.readAsString();
+      final dec = await _json('dec', text) ?? jsonDecode(text);
+      final j = dec is Map<String, dynamic>
+          ? dec
+          : Map<String, dynamic>.from(dec as Map);
       final ts = j['ts'] as int? ?? 0;
       final dt = DateTime.fromMillisecondsSinceEpoch(ts);
       if (now.difference(dt) > diskTtl) {
@@ -156,9 +257,14 @@ class FeedCache {
   static Future<void> _writeDisk(String k, Object v) async {
     final f = _file(k);
     if (f == null) return;
-    // 编码在内存里做（几 KB，毫秒级）；落盘排队，不占渲染线程。
-    final body = jsonEncode(
-        {'ts': DateTime.now().millisecondsSinceEpoch, 'v': _encode(k, v)});
+    // 模型 → 纯 JSON 结构必须在主 isolate 做（对象不能跨 isolate 传）；
+    // 真正耗时的 jsonEncode 丢给后台，主线程只等结果。
+    final plain = {
+      'ts': DateTime.now().millisecondsSinceEpoch,
+      'v': _encode(k, v),
+    };
+    final enc = await _json('enc', plain);
+    final body = enc is String ? enc : jsonEncode(plain);
     _writeChain = _writeChain.then((_) async {
       try {
         await f.writeAsString(body);
@@ -223,18 +329,39 @@ class FeedCache {
 
   static Object? _decode(String k, dynamic v) {
     final t = k.split('|').first;
+    final rawItems = (v is Map ? v['items'] : v) as List;
+    final items = [
+      for (final e in rawItems)
+        e is Map<String, dynamic> ? e : Map<String, dynamic>.from(e as Map),
+    ];
     if (t == 'rank' || t == 'booklists') {
-      final m = v as Map<String, dynamic>;
-      final items = (m['items'] as List).cast<Map<String, dynamic>>();
-      final next = m['nextUrl'] as String?;
+      final next = v is Map ? v['nextUrl'] as String? : null;
       return t == 'rank'
           ? Paged<Book>(items: items.map(Book.fromJson).toList(), nextUrl: next)
           : Paged<BooklistEntry>(
               items: items.map(BooklistEntry.fromJson).toList(), nextUrl: next);
     }
-    final items = (v as List).cast<Map<String, dynamic>>();
     return t == 'rankTabs'
         ? items.map(RankTab.fromJson).toList()
         : items.map(Book.fromJson).toList();
   }
+}
+
+/// 常驻 JSON 编解码 isolate 的入口（顶层函数，`Isolate.spawn` 只接受静态入口）。
+///
+/// 消息格式：`[id, 'enc'|'dec', 数据, 回执 SendPort]`；
+/// 回执：`[id, 成功?, 结果]`（失败时调用方回主线程原路重试）。
+void _jsonWorker(SendPort hub) {
+  final rx = ReceivePort();
+  hub.send(rx.sendPort);
+  rx.listen((m) {
+    if (m is! List || m.length != 4) return;
+    final reply = m[3] as SendPort;
+    try {
+      final out = m[1] == 'enc' ? jsonEncode(m[2]) : jsonDecode(m[2] as String);
+      reply.send([m[0], true, out]);
+    } catch (e) {
+      reply.send([m[0], false, '$e']);
+    }
+  });
 }

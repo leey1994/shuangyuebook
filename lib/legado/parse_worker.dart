@@ -206,16 +206,20 @@ class ParseWorkerPool {
       return null;
     }
     // 看门狗：分身崩了/消息丢了不能把上层 Future 挂成永久等待。
+    // 返回 status='lost' 让调用方**跳过本源本轮**，不要回主线程重跑：
+    // 真机上分身超时后再落回主线程会双倍等待、且把解析砖头拍回 UI 线程。
     final budgetS = (job['timeoutSecs'] as num?)?.toInt() ?? 60;
     _watchdog[id] = Timer(Duration(seconds: budgetS + 15), () {
       _watchdog.remove(id);
       final p = _pending.remove(id);
-      if (p != null && !p.isCompleted) p.complete({'id': id, 'status': 'lost'});
+      if (p != null && !p.isCompleted) {
+        p.complete({'id': id, 'status': 'lost'});
+      }
     });
     final r = await c.future;
     if (r['status'] == 'lost') {
-      debugPrint('[书源分身] 任务 ${job['kind']} 超时未回，本条回主线程');
-      return null;
+      debugPrint('[书源分身] 任务 ${job['kind']} 超时未回，本轮跳过该源');
+      return r; // 交给上层产出明确的「跳过」结论
     }
     return r;
   }

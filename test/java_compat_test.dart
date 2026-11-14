@@ -4,6 +4,8 @@
 //   $env:PATH = "C:\Users\leey1\Desktop\A\A1\shuangyue\build\windows\x64\quickjs_engine_native\Release;" +
 //               "C:\Users\leey1\Desktop\A\A1\shuangyue\build\windows\x64\plugins\quickjs_engine\Release;" + $env:PATH
 //   flutter test test/java_compat_test.dart -r expanded
+@Tags(['native'])
+
 import 'dart:convert';
 import 'dart:io' show ZLibEncoder, gzip, Directory;
 

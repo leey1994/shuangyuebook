@@ -181,10 +181,11 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
 <section>
   <div class="wrap">
     <h2>内置书源</h2>
-    <p class="muted">内置 13 个书源，全部随包内置、开箱即用：搜索 / 详情 / 目录 / 正文全链路直连站点，解析在本地完成，不依赖任何外部脚本。第三方站点经常改版或关闭，失效的源会在「书源管理」里被体检标出；也可以导入自己的书源来接替。</p>
+    <p class="muted">内置 14 个书源，全部随包内置、开箱即用：搜索 / 详情 / 目录 / 正文全链路直连站点，解析在本地完成，不依赖任何外部脚本。第三方站点经常改版或关闭，失效的源会在「书源管理」里被体检标出；也可以导入自己的书源来接替。</p>
     <table>
       <thead><tr><th>书源</th><th>搜索</th><th>发现 / 排行</th></tr></thead>
       <tbody>
+      <tr><td>owllook</td><td>✔</td><td>✔（权威榜）</td></tr>
       <tr><td>顶点小说</td><td>✔</td><td>✔</td></tr>
       <tr><td>速读谷</td><td>✔</td><td>✔</td></tr>
       <tr><td>黄金屋</td><td>✔</td><td>✔</td></tr>
@@ -200,49 +201,49 @@ footer{padding:56px 0 72px; color:var(--dim); font-size:14px}
       <tr><td>若雨中文</td><td>✔</td><td>首页推荐</td></tr>
     </tbody>
     </table>
-    <p class="muted" style="margin-top:12px">※ 后 4 个源提供搜索与首页推荐（站点本身没有榜单页），其余 9 个源同时参与排行聚合。</p>
+    <p class="muted" style="margin-top:12px">※ 后 4 个源提供搜索与首页推荐（站点本身没有榜单页），其余 10 个源参与排行聚合；owllook 另提供起点 / 纵横 / Owllook 权威榜与聚合搜索。</p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <h2>本版更新（V1.1.0）</h2>
-    <p class="muted">备份恢复、替换净化、书架分组、书源登录与调试、AI 生成书源、听书后台播放。覆盖安装即可升级，书架、书源、进度、缓存、听书音频全部保留。</p>
+    <h2>本版更新（V1.2.0）</h2>
+    <p class="muted">权威热榜、漫画阅读、WiFi 传书、WebDAV 云备份、自动翻页。覆盖安装即可升级，书架、书源、进度、缓存、听书音频全部保留。</p>
     <div class="grid">
       <div class="card">
-        <h3>数据备份 / 恢复</h3>
-        <p class="muted">「我的 → 数据备份」：书架、阅读进度、书签、偏好、书源、书源变量、阅读统计打包成一个 JSON，放在 Documents/爽阅备份 —— 卸载重装后文件还在，一键恢复；书源按地址合并，不会重复。</p>
+        <h3>权威热榜 · 榜单落地</h3>
+        <p class="muted">排行页新增起点榜 / 纵横榜 / Owllook 榜（纯 HTTP 直连服务端渲染的榜单页）。榜单书名会回你启用的书源里自动匹配：命中就标「xx源可读」，点开直接读；没命中给「去书源里搜」入口，不跳站、不留死链。</p>
       </div>
       <div class="card">
-        <h3>替换净化</h3>
-        <p class="muted">「我的 → 阅读 → 替换净化」：自定义跨书源生效的正文替换规则，去广告行、去乱码一次配好全部书源；支持正则 / 纯文本、逐条开关、示例预览。规则不写进章节缓存，改完回阅读器立刻生效。</p>
+        <h3>漫画阅读</h3>
+        <p class="muted">支持「阅读 3.0」图片书源（bookSourceType=2）：独立漫画阅读器，左右翻页 / 上下滚动、双指缩放、章节切换、进度记忆。取图带书源 UA / Cookie / Referer，磁盘缓存过的章节断网也能看；首页漫画推荐条 + 独立漫画榜。</p>
       </div>
       <div class="card">
-        <h3>书架分组</h3>
-        <p class="muted">书架新增「分组」筛选：新建分组、按组查看，批量管理里可把选中的书一次性移入分组；删分组只把书退回「未分组」，不会删书。</p>
+        <h3>WiFi 传书 / 局域网书架</h3>
+        <p class="muted">「我的 → 局域网服务」开启后，同一 WiFi 下浏览器打开 http://手机IP:6274，即可看书架、传 TXT / EPUB 进手机、粘贴导入书源、下载或恢复备份。只对局域网私有地址开放，随时可关。</p>
       </div>
       <div class="card">
-        <h3>书源登录 / Cookie</h3>
-        <p class="muted">书源详情页新增「登录 / Cookie」：安卓直接开网页登录、一键收下登录态；Windows 等没有网页内核的平台可手动粘贴 Cookie，清除登录态也在同一处。</p>
+        <h3>WebDAV 云备份</h3>
+        <p class="muted">「我的 → 数据备份」新增 WebDAV 配置：一键覆盖式上传 shuangyue_backup.json，换机或重装后从云端恢复；与本地导出同一份数据口径。</p>
       </div>
       <div class="card">
-        <h3>书源调试器</h3>
-        <p class="muted">书源详情页新增「调试」：输入关键词或书页地址，分别跑搜索 / 详情目录 / 正文，直接看到解析结果与耗时，写规则不用再黑盒猜。</p>
+        <h3>Owllook 内置源</h3>
+        <p class="muted">聚合搜索 + 目录 + 在线正文，纯 HTTP 即可跑；不导入任何书源也能搜、能看、能上榜。</p>
       </div>
       <div class="card">
-        <h3>用 AI 生成书源</h3>
-        <p class="muted">书源管理 →「+」→「用 AI 生成书源」：填站点地址和自己的模型接口（OpenAI 兼容，型号自动获取、拉不到可手填）。分步向导引导你浏览站点 —— 搜索、详情、目录、正文每一步的页面结构直接喂给模型，逐步生成、逐步实测，四步全过才入库。</p>
+        <h3>自动翻页</h3>
+        <p class="muted">阅读器新增自动翻页：3 / 5 / 8 / 12 / 20 / 30 秒可选；滚动模式触底自动续下一章，再点一下停止。</p>
       </div>
       <div class="card">
-        <h3>听书 · 后台播放</h3>
-        <p class="muted">退出阅读器朗读不再中断，主界面底部悬浮播放条就地控制；通知栏按钮升级为上一章 / 下一章 / 暂停；朗读改为逐句断句，暂停后从本句续读。</p>
+        <h3>更新包完整性校验</h3>
+        <p class="muted">检查更新时拉取 SHA256SUMS，下载完 APK / Windows 包先校验 SHA-256 再安装；下载被截断或被代理篡改会直接拦下。</p>
       </div>
       <div class="card">
-        <h3>更流畅 / 更聪明</h3>
-        <p class="muted">搜索、排行结果先到先上屏且不再整表重算；本地 TXT / EPUB 解析搬到后台，导入大文件不卡首帧；EPUB 插图真正显示；「阅读 2.0」旧格式书源导入时明确拒收并提示。</p>
+        <h3>更稳 · 更省盘</h3>
+        <p class="muted">封面缓存 64MB 上限 + 最后使用时间 LRU 淘汰，设置页统计与「清除缓存」覆盖封面目录；缓存编解码移到常驻后台 isolate，首页推荐网格懒构建。</p>
       </div>
     </div>
-    <p class="muted" style="margin-top:14px">完整清单见 <a href="https://github.com/leey1994/shuangyuebook/blob/main/docs/release-notes-v1.1.0.md">docs/release-notes-v1.1.0.md</a>。</p>
+    <p class="muted" style="margin-top:14px">完整清单见 <a href="https://github.com/leey1994/shuangyuebook/blob/main/docs/release-notes-v1.2.0.md">docs/release-notes-v1.2.0.md</a>。</p>
   </div>
 </section>
 

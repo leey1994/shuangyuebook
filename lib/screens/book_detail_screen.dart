@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../collect/aggregate.dart';
+import '../collect/usable_sources.dart';
 import '../data/stats_store.dart';
 import '../feed_cache.dart';
 import '../models.dart';
@@ -17,6 +18,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../ui/brand.dart';
 import '../widgets.dart';
+import 'image_reader_screen.dart';
 import 'reader_screen.dart';
 
 /// 来源计数的让路时长：目录 + 预取正文都发出去之后，再开始全源扇出搜索。
@@ -135,7 +137,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     final found = <(NovelSource, Book)>[];
     // 分池并发（上限 6）：全源一次扇出会在结果集中到达时卡住主 isolate
     final jobs = <Future<void> Function()>[];
-    for (final s in collectSources()) {
+    final pool = usableSources();
+    for (final s in pool) {
       if (s.id == current) continue;
       jobs.add(() async {
         try {
@@ -157,9 +160,9 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     }
     await runPooled(jobs);
     if (!mounted) return;
-    // 并发返回顺序不定：按 collectSources 的登记顺序重排后再试
+    // 并发返回顺序不定：按可用源池的登记顺序重排后再试
     final order = <String, int>{};
-    final all = collectSources();
+    final all = usableSources();
     for (var i = 0; i < all.length; i++) {
       order[all[i].id] = i;
     }
@@ -191,15 +194,21 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     });
   }
 
-  /// 后台数一数有多少书源同时收录了这本书（同名合并口径）。
+  /// 后台数一数有多少可用书源同时收录了这本书（同名合并口径）。
+  ///
+  /// 这个数字只是辅助信息，不该让详情页为它把 65 个源全搜一遍：
+  /// 真机上会持续几十秒占用网络/主 isolate，翻目录都发涩。
+  /// 所以限量 18 个源 + 8 秒硬截止，到点就显示已数到的数量。
   Future<void> _countSources() async {
     final key = bookKeyOf(_book);
     final title = _book.title;
     var count = 1; // 当前来源
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
     final jobs = <Future<void> Function()>[];
-    for (final s in collectSources()) {
+    for (final s in usableSources().take(18)) {
       if (s.id == _src.id) continue;
       jobs.add(() async {
+        if (DateTime.now().isAfter(deadline)) return;
         try {
           final r = await FeedCache.reach(
             FeedCache.key(['search', s.id, title]),
@@ -219,7 +228,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
         }
       });
     }
-    await runPooled(jobs);
+    await runPooled(jobs, maxParallel: 4);
     if (mounted) setState(() => _availSources = count);
   }
 
@@ -284,6 +293,16 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     if (d == null) return;
     // 搜索/发现找书 → 真的点开了一本：桌宠按「帮上忙了」给一次成长值
     PetStore.I.emit(PetAction.searchOpen);
+    // 漫画书源（bookSourceType=2）走漫画阅读器：页=图，无排版无听书
+    if (_src.isImageBook) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ImageReaderScreen(
+          book: d.book,
+          chapterIndex: chapterIndex,
+        ),
+      ));
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ReaderScreen(
         book: d.book,
@@ -607,6 +626,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                     spacing: 6,
                     runSpacing: 6,
                     children: [
+                      if (_src.isImageBook)
+                        _tagPill(theme, '漫画 · 图片源'),
                       if (b.status?.isNotEmpty ?? false)
                         _tagPill(theme, b.status!),
                       _tagPill(theme, '共 $n 章'),

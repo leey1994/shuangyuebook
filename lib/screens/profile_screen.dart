@@ -1,14 +1,17 @@
 // 我的：小墨陪伴面板 + 阅读统计（7 日柱状图）+ 成就徽章 + 全部设置。
 // 原「设置」独立页已整体并入本页，行卡片与面页其余部分保持同一风格。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/backup.dart';
 import '../data/format.dart';
 import '../data/shelf_sort.dart';
 import '../data/stats_store.dart';
+import '../data/webdav_backup.dart';
 import '../legado/source_store.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_painter.dart';
@@ -22,6 +25,8 @@ import '../ui/font_picker.dart';
 import '../ui/replace_rules_page.dart';
 import '../ui/source/source_manager_page.dart';
 import '../update_check.dart';
+import '../web_service.dart';
+import '../widgets.dart';
 import 'bookmarks_page.dart';
 import 'local_import_page.dart';
 import 'stats_page.dart';
@@ -37,6 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     with AutomaticKeepAliveClientMixin {
   int? _cacheBytes;
   bool _checking = false;
+  List<String> _lanUrls = const []; // 局域网服务地址（开启后填充）
 
   @override
   bool get wantKeepAlive => true;
@@ -45,11 +51,17 @@ class _ProfileScreenState extends State<ProfileScreen>
   void initState() {
     super.initState();
     _loadCacheSize();
+    if (WebService.I.running) unawaited(_refreshLanUrls());
+  }
+
+  Future<void> _refreshLanUrls() async {
+    final u = await WebService.I.urls();
+    if (mounted) setState(() => _lanUrls = u);
   }
 
   Future<void> _loadCacheSize() async {
     try {
-      final n = await AppStore.I.cacheSize();
+      final n = await AppStore.I.cacheSize() + await CoverCache.size();
       if (mounted) setState(() => _cacheBytes = n);
     } catch (_) {
       if (mounted) setState(() => _cacheBytes = 0);
@@ -81,7 +93,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         final theme = Theme.of(context);
         final narrow = MediaQuery.sizeOf(context).width < kNarrowBreakpoint;
         final body = ListView(
-          padding: EdgeInsets.fromLTRB(narrow ? 16 : 22, 0, narrow ? 16 : 22, 28),
+          padding:
+              EdgeInsets.fromLTRB(narrow ? 16 : 22, 0, narrow ? 16 : 22, 28),
           children: [
             _petCard(theme),
             const SizedBox(height: 14),
@@ -93,6 +106,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _petSection(theme),
             _cacheSection(theme),
             _backupSection(theme),
+            _lanSection(theme),
             _aboutSection(theme),
           ],
         );
@@ -174,15 +188,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Text(sub,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 11, color: Brand.fg3(context))),
+                    style: TextStyle(fontSize: 11, color: Brand.fg3(context))),
                 const SizedBox(height: 8),
                 ProgBar(
                   pet.stageProgress,
                   height: 6,
-                  track: dark
-                      ? const Color(0xFF23302A)
-                      : const Color(0xFFD9E7D3),
+                  track:
+                      dark ? const Color(0xFF23302A) : const Color(0xFFD9E7D3),
                 ),
               ],
             ),
@@ -310,8 +322,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         color: Brand.hair(context).withValues(alpha: 0.9),
       );
 
-  Widget _statItem(
-      ThemeData theme, String value, String unit, String label) {
+  Widget _statItem(ThemeData theme, String value, String unit, String label) {
     return Expanded(
       child: Column(
         children: [
@@ -354,8 +365,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             padding: const EdgeInsets.fromLTRB(0, 16, 0, 11),
             action: '查看全部 ${kReadingBadges.length} 枚 ›',
             grayAction: true,
-            onAction: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const StatsPage()))),
+            onAction: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const StatsPage()))),
         if (preview.isNotEmpty)
           Row(
             children: [
@@ -388,8 +399,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     };
   }
 
-  Widget _badgeChip(
-      ThemeData theme, ReadingBadge b, int index, bool earned) {
+  Widget _badgeChip(ThemeData theme, ReadingBadge b, int index, bool earned) {
     final (color, soft) = _badgeColors(b.id);
     final dark = theme.brightness == Brightness.dark;
     return Column(
@@ -408,9 +418,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               size: 21,
               color: earned
                   ? color
-                  : (dark
-                      ? const Color(0xFF5A6660)
-                      : const Color(0xFFB9C4B7)),
+                  : (dark ? const Color(0xFF5A6660) : const Color(0xFFB9C4B7)),
             ),
           ),
         ),
@@ -451,8 +459,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHead(title,
-            padding: const EdgeInsets.fromLTRB(0, 16, 0, 11),
-            grayAction: true),
+            padding: const EdgeInsets.fromLTRB(0, 16, 0, 11), grayAction: true),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
           decoration: BoxDecoration(
@@ -552,8 +559,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               const SizedBox(width: 12),
               Expanded(
                 child: Text(label,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontSize: 13.5)),
+                    style:
+                        theme.textTheme.bodyMedium?.copyWith(fontSize: 13.5)),
               ),
               Text(display,
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -603,8 +610,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         subtitle: '导入 / 停用 / 导出「阅读 3.0」书源',
         value: '${builtinSources.length} 内置 · ${store?.sources.length ?? 0} 导入',
         accent: true,
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => SourceManagerPage(store: store))),
+        onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => SourceManagerPage(store: store))),
       ),
       _divider(),
       _row(
@@ -772,8 +779,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         icon: Icons.bar_chart_outlined,
         label: '阅读记录',
         subtitle: '累计时长、连续天数、最近 7 天',
-        onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const StatsPage())),
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute<void>(builder: (_) => const StatsPage())),
       ),
       _divider(),
       _row(
@@ -883,9 +890,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         label: '自动缓存后续章节',
         subtitle: '阅读时在后台自动下载后面的章节，便于离线与加速翻页',
         trailing: DropdownButton<int>(
-          value: const [0, 20, 50, 100].contains(p.autoCache)
-              ? p.autoCache
-              : 50,
+          value:
+              const [0, 20, 50, 100].contains(p.autoCache) ? p.autoCache : 50,
           underline: const SizedBox.shrink(),
           items: const [
             DropdownMenuItem(value: 0, child: Text('关闭')),
@@ -937,6 +943,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
     if (ok != true) return;
     await AppStore.I.clearCache();
+    await CoverCache.clear();
     PetStore.I.emit(PetAction.clearCache);
     if (!mounted) return;
     setState(() => _cacheBytes = 0);
@@ -960,15 +967,178 @@ class _ProfileScreenState extends State<ProfileScreen>
         subtitle: '从备份目录里选一个文件覆盖当前数据',
         onTap: _restoreBackup,
       ),
+      _divider(),
+      _row(
+        icon: Icons.cloud_outlined,
+        label: 'WebDAV 服务器',
+        subtitle: WebDavBackup.configured
+            ? WebDavBackup.url
+            : '配置后可在云端备份 / 恢复（对齐阅读衍生版）',
+        onTap: _webdavSettings,
+      ),
+      _divider(),
+      _row(
+        icon: Icons.cloud_upload_outlined,
+        label: '上传到 WebDAV',
+        subtitle: '覆盖式上传到 shuangyue_backup.json',
+        onTap: _webdavUpload,
+      ),
+      _divider(),
+      _row(
+        icon: Icons.cloud_download_outlined,
+        label: '从 WebDAV 恢复',
+        subtitle: '拉取云端备份并覆盖当前数据',
+        onTap: _webdavDownload,
+      ),
     ]);
+  }
+
+  // ---- WiFi 传书 / 局域网书架
+  Widget _lanSection(ThemeData theme) {
+    final on = WebService.I.running;
+    return _section('WiFi 传书 · 局域网书架', [
+      _row(
+        icon: on ? Icons.wifi : Icons.wifi_off,
+        label: on ? '服务已开启' : '开启局域网服务',
+        subtitle: on
+            ? (_lanUrls.isEmpty ? '正在获取地址…' : _lanUrls.join('   '))
+            : '手机与电脑同一 WiFi，浏览器打开提示地址即可传书 / 导入书源 / 下载备份',
+        accent: on,
+        trailing: Switch(
+          value: on,
+          onChanged: (v) => unawaited(_toggleWebService(v)),
+        ),
+      ),
+      if (on && _lanUrls.isNotEmpty) ...[
+        _divider(),
+        _row(
+          icon: Icons.copy_all_outlined,
+          label: '复制访问地址',
+          subtitle: _lanUrls.length > 1 ? _lanUrls[1] : _lanUrls.first,
+          onTap: () async {
+            final u = _lanUrls.length > 1 ? _lanUrls[1] : _lanUrls.first;
+            await Clipboard.setData(ClipboardData(text: u));
+            if (mounted) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text('已复制 $u')));
+            }
+          },
+        ),
+      ],
+    ]);
+  }
+
+  Future<void> _toggleWebService(bool v) async {
+    try {
+      if (v) {
+        final urls = await WebService.I.start();
+        if (mounted) setState(() => _lanUrls = urls);
+      } else {
+        await WebService.I.stop();
+        if (mounted) setState(() => _lanUrls = const []);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('局域网服务：$e')));
+    }
+  }
+
+  Future<void> _webdavSettings() async {
+    final urlC = TextEditingController(text: WebDavBackup.url);
+    final userC = TextEditingController(text: WebDavBackup.user);
+    final passC = TextEditingController(text: WebDavBackup.password);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('WebDAV 服务器'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlC,
+              decoration: const InputDecoration(
+                  labelText: '地址（目录，例如 https://dav.example.com/爽阅/'),
+              keyboardType: TextInputType.url,
+            ),
+            TextField(
+                controller: userC,
+                decoration: const InputDecoration(labelText: '账号')),
+            TextField(
+                controller: passC,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '密码')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await WebDavBackup.save(urlC.text, userC.text, passC.text);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _webdavUpload() async {
+    if (!WebDavBackup.configured) {
+      await _webdavSettings();
+      if (!WebDavBackup.configured) return;
+    }
+    try {
+      await WebDavBackup.upload();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已上传到 WebDAV')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('WebDAV 上传失败：$e')));
+    }
+  }
+
+  Future<void> _webdavDownload() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从 WebDAV 恢复'),
+        content: const Text('云端备份会覆盖当前书架、进度、偏好与书源，确定继续？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('恢复')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await WebDavBackup.download();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('已从 WebDAV 恢复：${r.prefs} 项偏好 · ${r.sources} 个书源')));
+      _loadCacheSize();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('WebDAV 恢复失败：$e')));
+    }
   }
 
   Future<void> _exportBackup() async {
     try {
       final f = await BackupService.export();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已备份到 ${f.path}'), duration: const Duration(seconds: 4)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('已备份到 ${f.path}'),
+          duration: const Duration(seconds: 4)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -1028,8 +1198,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final r = await BackupService.restore(picked);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(r.error ??
-              '已恢复：${r.prefs} 项偏好 · ${r.sources} 个书源')));
+          content: Text(r.error ?? '已恢复：${r.prefs} 项偏好 · ${r.sources} 个书源')));
       _loadCacheSize();
     } catch (e) {
       if (!mounted) return;
@@ -1107,12 +1276,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      PillChip('系统语音',
-                          selected: prefs.ttsVoice.isEmpty,
+                      PillChip('系统语音', selected: prefs.ttsVoice.isEmpty,
                           onTap: () {
-                            AppStore.I.setTtsVoice('');
-                            setSheet(() {});
-                          }),
+                        AppStore.I.setTtsVoice('');
+                        setSheet(() {});
+                      }),
                       for (final e in kEdgeVoices.entries)
                         PillChip(
                           e.value.$1.replaceAll('（在线）', ''),

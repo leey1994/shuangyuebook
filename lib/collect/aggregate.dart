@@ -10,19 +10,23 @@ import 'dart:math';
 
 import '../feed_cache.dart';
 import '../models.dart';
-import '../sources/local_source.dart';
-import '../sources/registry.dart';
 import '../sources/source.dart';
+import 'usable_sources.dart';
 
 /// 书名 + 作者规范化（去空白与常见标点），跨源同名书合并键。
 /// 书名/作者的归一化正则（P2：原来每次调用都 new 一个 RegExp）。
 final RegExp _kBookKeyNoise = RegExp(
     r'''[\s·・,，。！!？?、:：;；"'“”‘’《》<>【】\[\]()（）\-—_…~～]''');
 
-String bookKeyOf(Book b) {
-  String norm(String s) => s.toLowerCase().replaceAll(_kBookKeyNoise, '');
-  return '${norm(b.title)}|${norm(b.author ?? '')}';
-}
+/// 书名/作者归一化：去空白与常见标点，转小写。
+///
+/// 公开给热榜匹配（[hotMatchScore]）复用 —— 同一套归一化口径，避免
+/// 「搜索页能合并、排行榜却匹配不上」这种两套规则打架的问题。
+String normBookText(String s) =>
+    s.toLowerCase().replaceAll(_kBookKeyNoise, '');
+
+String bookKeyOf(Book b) =>
+    '${normBookText(b.title)}|${normBookText(b.author ?? '')}';
 
 /// 合并后的一条书：同一个 [bookKeyOf] 的全部来源条目。
 class MergedBook {
@@ -57,9 +61,12 @@ List<MergedBook> mergeBooks(Iterable<(NovelSource, Book)> items) {
   return [for (final k in order) map[k]!];
 }
 
-/// 参与聚合的书源（本地书源没有线上榜单 / 搜索，排除）。
-List<NovelSource> collectSources() =>
-    [for (final s in allSources) if (s.id != LocalSource.sourceId) s];
+/// 参与聚合 / 搜索 / 换源的书源 = 「可用书源池」（内置源 + 没被判死的导入源）。
+///
+/// 本地书源没有线上榜单 / 搜索，排除；导入源里体检判为「请求层失败」的
+/// 也排除 —— 让一个连不上的源参与聚合，只会把整页拖慢、把换源拖进死循环。
+/// 判定细节见 [usableSources]。
+List<NovelSource> collectSources() => usableSources();
 
 // ---------------------------------------------------------------- 排行聚合
 
@@ -139,14 +146,20 @@ Future<void> runPooled(List<Future<void> Function()> jobs,
 
 /// 聚合指定榜单 × 分类；[onProgress] 每有一个源返回调用一次（done, total），
 /// [onPartial] 每次拿到「当前已合并」的部分榜单 —— 先到先上屏，不等最慢的源。
+///
+/// [comicOnly] 为 true 时只聚合漫画源（图片书源）的站内榜单，供「漫画榜」
+/// 页签使用 —— 漫画与文字小说分开排，不混在一起。
 Future<List<AggRankEntry>> aggregateRank(
   RankBoard board,
   String category, {
   void Function(int done, int total)? onProgress,
   void Function(List<AggRankEntry> partial)? onPartial,
   int maxParallel = 6,
+  bool comicOnly = false,
 }) async {
-  final sources = collectSources();
+  final sources = comicOnly
+      ? [for (final s in collectSources()) if (s.isImageBook) s]
+      : collectSources();
   final total = sources.length;
   var done = 0;
   final map = <String, AggRankEntry>{};
@@ -186,7 +199,8 @@ Future<List<AggRankEntry>> aggregateRank(
         try {
           final tabs = await FeedCache.reach(
               FeedCache.key(['rankTabs', s.id]), s.fetchRankTabs);
-          final pick = _pickTab(tabs, board, category);
+          final pick = _pickTab(tabs, board, category,
+              fallbackFirst: comicOnly);
           if (pick != null) {
             final p = await FeedCache.reach(
                 FeedCache.key(['rank', s.id, pick.url]),
@@ -217,7 +231,8 @@ Future<List<AggRankEntry>> aggregateRank(
   return snapshot();
 }
 
-RankTab? _pickTab(List<RankTab> tabs, RankBoard board, String category) {
+RankTab? _pickTab(List<RankTab> tabs, RankBoard board, String category,
+    {bool fallbackFirst = false}) {
   RankTab? best;
   var bestScore = 0;
   for (final t in tabs) {
@@ -227,9 +242,10 @@ RankTab? _pickTab(List<RankTab> tabs, RankBoard board, String category) {
       best = t;
     }
   }
-  if (best == null && board == RankBoard.praise && category == '全部') {
-    // 口碑榜不是所有源都有：没有时退回该源首个榜单，
-    // 收录面照样参与「多源共同收录数」统计。
+  if (best == null &&
+      (fallbackFirst || (board == RankBoard.praise && category == '全部'))) {
+    // 漫画源的发现页分类名常常不带「热销/新书」这类词（如「最新连载」），
+    // 一个都匹配不上时退回该源首个分类，别让整本漫画榜空掉。
     return tabs.isEmpty ? null : tabs.first;
   }
   return best;

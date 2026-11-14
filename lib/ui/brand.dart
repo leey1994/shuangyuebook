@@ -107,6 +107,11 @@ class _GradientCover extends StatelessWidget {
     return LayoutBuilder(builder: (context, c) {
       final h = c.maxHeight.isFinite ? c.maxHeight : 120.0;
       final fs = (h * 0.115).clamp(9.0, 14.0);
+      // 竖排书名是装饰：系统字号放大时按可用高度截断字符、禁用文字缩放，
+      // 再用 ClipRect 兜底 —— 否则小封面（列表行 40x54）会 RenderFlex
+      // overflow，debug 包在屏幕上画出红色 OVERFLOWED 警告条。
+      final maxChars = ((h - 14) / (fs * 1.22)).floor().clamp(1, 6);
+      final shown = chars.take(maxChars).toList();
       return DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -131,31 +136,34 @@ class _GradientCover extends StatelessWidget {
                 ),
               ),
             ),
-            Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.all(7),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final ch in chars)
-                      Text(
-                        ch,
-                        style: TextStyle(
-                          fontFamilyFallback: kSerifFallback,
-                          fontWeight: FontWeight.w700,
-                          fontSize: fs,
-                          height: 1.22,
-                          color: Colors.white.withValues(alpha: 0.93),
-                          shadows: const [
-                            Shadow(
-                                blurRadius: 3,
-                                color: Color(0x4D000000),
-                                offset: Offset(0, 1)),
-                          ],
+            ClipRect(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(7),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final ch in shown)
+                        Text(
+                          ch,
+                          textScaler: TextScaler.noScaling,
+                          style: TextStyle(
+                            fontFamilyFallback: kSerifFallback,
+                            fontWeight: FontWeight.w700,
+                            fontSize: fs,
+                            height: 1.22,
+                            color: Colors.white.withValues(alpha: 0.93),
+                            shadows: const [
+                              Shadow(
+                                  blurRadius: 3,
+                                  color: Color(0x4D000000),
+                                  offset: Offset(0, 1)),
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

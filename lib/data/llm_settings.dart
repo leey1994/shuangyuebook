@@ -1,5 +1,6 @@
-// 书源 AI 生成的模型配置（OpenAI 兼容接口）：存在 SharedPreferences，
-// 与书源一起走 App 自己的备份（所有 sp 键都会被导出）。
+// 书源 AI 生成的模型配置（OpenAI 兼容接口）：存在 SharedPreferences。
+// 注意 `llmApiKey` 是明文密钥，**不随 App 备份导出/恢复**（见 backup.dart
+// 的 _sensitiveKeys）—— 备份文件落在用户可见的文档目录，密钥不能跟着走。
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

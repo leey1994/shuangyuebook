@@ -216,11 +216,11 @@ class _PetBarState extends State<PetBar>
   /// 阅读器进出：钉住 / 放开。
   void _onPinnedChanged() {
     if (!mounted) return;
-    // 钉住时把 y 收到底部那条带子里；放开后重新选一个落点
+    // 钉住时把 y 收到底部那条带子里；放开后回到主页面底部区域溜达
     if (petPinned.value) {
       _step(x: _rnd.nextDouble(), y: 1);
     } else {
-      _step(x: _rnd.nextDouble(), y: 0.25 + _rnd.nextDouble() * 0.55);
+      _step(x: _rnd.nextDouble(), y: 0.72 + _rnd.nextDouble() * 0.16);
     }
   }
 
@@ -256,9 +256,10 @@ class _PetBarState extends State<PetBar>
   void _wander() {
     if (!mounted) return;
     final pinned = petPinned.value;
-    // 钉住时只沿窄带走；放开后整屏范围内溜达
+    // 钉住时只沿窄带走；主页面（首页/排行/书架）限制在屏幕底部 1/4，
+    // 免得飘在标题、榜单卡片、推荐位正中间挡住内容（真机截图确认过）。
     final x = _rnd.nextDouble();
-    final y = pinned ? 1.0 : 0.22 + _rnd.nextDouble() * 0.58;
+    final y = pinned ? 1.0 : 0.72 + _rnd.nextDouble() * 0.16;
     _step(x: x, y: y);
   }
 

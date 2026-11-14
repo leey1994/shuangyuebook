@@ -87,10 +87,33 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "next release: $FULL（上一版 tag: ${LAST_TAG:-无}）"
 
+  # ---------- 质量门：静态分析 + 离线测试 ----------
+  # 发版前置闸门：analyze 出 error、或离线测试挂了，直接不发版。
+  #   - analyze 用 --no-fatal-infos/--no-fatal-warnings：只对 error 红灯
+  #     （仓库现存 info 级噪音不阻塞，但要能看见）；
+  #   - 测试排除 @Tags(['native'])（需要 QuickJS 原生库，CI 没有该 DLL）
+  #     与 @Tags(['timing'])（性能阈值，共享 runner 抖动会误报）。
+  #     tagged 文件清单：test/*_test.dart 头部注释即说明。
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: 静态分析（error 级即失败）
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings
+      - name: 离线测试
+        run: flutter test --exclude-tags native,timing --reporter compact
+
   # ---------- Android（按 ABI 拆包，只发 arm64-v8a 与 armeabi-v7a）----------
   # release 签名走 build.gradle.kts 里既有的 debug  signingConfig，无需 secret。
   build-apk:
-    needs: version
+    needs: [version, quality]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -122,7 +145,7 @@ jobs:
 
   # ---------- Windows（含后台更新器 updater.exe，整目录打包）----------
   build-windows:
-    needs: version
+    needs: [version, quality]
     if: needs.version.outputs.publish == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
@@ -245,7 +268,9 @@ jobs:
         run: |
           set -euo pipefail
           FULL="${{ needs.version.outputs.full }}"
-          git add -A
+          # 只加版本号相关文件，绝不用 git add -A —— 防止 runner 上的意外
+          # 产物（研究数据/临时文件）混进版本提交
+          git add pubspec.yaml README.md docs/
           git diff --cached --quiet || git commit -m "chore(release): v$FULL [skip ci]"
           # GITHUB_TOKEN 产生的推送不会再触发 workflow，不会自触发循环
           git push origin HEAD:main

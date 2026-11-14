@@ -8,6 +8,22 @@ abstract class NovelSource {
   String get name;
   String get baseUrl;
 
+  /// 是否为图片书源（漫画）：章节正文是图片地址列表，阅读走漫画模式。
+  bool get isImageBook => false;
+
+  /// 能否只凭书名定位一本书（聚合搜索型源，如 owllook 的 /search?wd=）。
+  /// 为 true 时热榜匹配直接构造 [bookFromTitle]，不再发搜索请求。
+  bool get resolvesByTitle => false;
+
+  /// 按书名构造可进详情的书（仅 [resolvesByTitle] 源实现）。
+  Book? bookFromTitle(String title, {String? author}) => null;
+
+  /// 图片章节：返回该章的图片地址列表（仅 [isImageBook] 源支持）。
+  Future<List<String>> fetchChapterImages(
+      BookDetail detail, Chapter chapter) async {
+    throw UnsupportedError('$name 不支持图片章节');
+  }
+
   /// 站点首页推荐（无推荐内容的站返回空列表）。
   Future<List<Book>> fetchHome();
 

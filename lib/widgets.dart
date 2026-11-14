@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -43,10 +45,87 @@ class CoverImage extends StatefulWidget {
 }
 
 class _CoverImageState extends State<CoverImage> {
+  static const int _maxNetworkDownloads = 6;
   static Directory? _dir;
+  static Future<Directory?>? _dirFut;
   // 同一 URL 的下载在进程内共享，避免列表里同一封面并发重复下载
   static final Map<String, Future<File?>> _pending = {};
   static final Map<String, File?> _done = {};
+  static final Queue<Completer<void>> _downloadQueue = Queue();
+  static int _activeNetworkDownloads = 0;
+
+  /// 封面目录当前占用字节；-1 = 还没扫过（下次遍历时补算）。
+  static int _bytes = -1;
+  static Future<void>? _sweeping;
+
+  static Future<Directory?> _cacheDir() {
+    final f = _dirFut;
+    if (f != null) return f;
+    final nf = _openCacheDir();
+    _dirFut = nf;
+    // 打不开（路径服务偶发不可用）就别把这个失败结果常驻，下次再试。
+    nf.then((d) {
+      if (d == null && identical(_dirFut, nf)) _dirFut = null;
+    });
+    return nf;
+  }
+
+  static Future<Directory?> _openCacheDir() async {
+    try {
+      final d =
+          Directory('${(await getApplicationSupportDirectory()).path}/covers');
+      if (!await d.exists()) await d.create(recursive: true);
+      return _dir = d;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _touch(File f) async {
+    try {
+      await f.setLastModified(DateTime.now());
+    } catch (_) {}
+  }
+
+  /// 封面目录按字节上限 LRU 淘汰：超过 [CoverCache.maxBytes] 时删最久未用的，
+  /// 一次清到 80%，避免每下一张就全目录扫一遍。并发调用合并成一次。
+  static Future<void> _evictIfNeeded() {
+    if (_bytes >= 0 && _bytes <= CoverCache.maxBytes) return Future.value();
+    return _sweeping ??= _sweep().whenComplete(() => _sweeping = null);
+  }
+
+  static Future<void> _sweep([int limit = CoverCache.maxBytes]) async {
+    final d = _dir;
+    if (d == null) return;
+    try {
+      final files = <(File, DateTime, int)>[];
+      var total = 0;
+      await for (final e in d.list()) {
+        if (e is! File) continue;
+        try {
+          final st = await e.stat();
+          files.add((e, st.modified, st.size));
+          total += st.size;
+        } catch (_) {}
+      }
+      _bytes = total;
+      if (total <= limit) return;
+      files.sort((a, b) => a.$2.compareTo(b.$2)); // 旧 → 新
+      final target = limit * 8 ~/ 10;
+      final gone = <String>{};
+      for (final f in files) {
+        if (total <= target) break;
+        try {
+          await f.$1.delete();
+          total -= f.$3;
+          gone.add(f.$1.path);
+        } catch (_) {}
+      }
+      _bytes = total;
+      // 被淘汰的封面从进程内命中表里摘掉，下次出现会重新下载而不是永久占位。
+      _done.removeWhere((_, f) => f != null && gone.contains(f.path));
+    } catch (_) {}
+  }
 
   File? _file;
   bool _failed = false;
@@ -88,6 +167,26 @@ class _CoverImageState extends State<CoverImage> {
     return '${h.toRadixString(16)}.$ext';
   }
 
+  static Future<void> _acquireDownloadSlot() async {
+    if (_activeNetworkDownloads < _maxNetworkDownloads) {
+      _activeNetworkDownloads++;
+      return;
+    }
+    final waiter = Completer<void>();
+    _downloadQueue.add(waiter);
+    await waiter.future;
+  }
+
+  static void _releaseDownloadSlot() {
+    if (_downloadQueue.isNotEmpty) {
+      // 把当前占用的槽位直接交给队首，计数保持不变，避免释放与唤醒之间
+      // 新请求插队导致短暂突破并发上限。
+      _downloadQueue.removeFirst().complete();
+    } else {
+      _activeNetworkDownloads--;
+    }
+  }
+
   Future<File?> _fetch(String url) async {
     try {
       // 本地路径（EPUB 抽出的封面）：直接读文件，不走网络也不复制
@@ -95,17 +194,30 @@ class _CoverImageState extends State<CoverImage> {
         final local = File(url);
         return await local.exists() ? local : null;
       }
-      _dir ??=
-          Directory('${(await getApplicationSupportDirectory()).path}/covers');
-      if (!await _dir!.exists()) await _dir!.create(recursive: true);
-      final f = File('${_dir!.path}/${_name(url)}');
-      if (await f.exists()) return f;
-      final r = await Net.client
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode != 200 || r.bodyBytes.length < 500) return null;
-      await f.writeAsBytes(r.bodyBytes);
-      return f;
+      _dir ??= await _cacheDir();
+      final d = _dir;
+      if (d == null) return null;
+      final f = File('${d.path}/${_name(url)}');
+      if (await f.exists()) {
+        // 命中即刷新 mtime：淘汰按「最后使用时间」而不是「最后下载时间」。
+        unawaited(_touch(f));
+        return f;
+      }
+      // 推荐页一次会出现 30 张封面。限制并发下载，避免把连接池、带宽与
+      // 图片解码线程瞬间占满；磁盘已缓存的封面不经过此队列。
+      await _acquireDownloadSlot();
+      try {
+        final r = await Net.client
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 15));
+        if (r.statusCode != 200 || r.bodyBytes.length < 500) return null;
+        await f.writeAsBytes(r.bodyBytes);
+        if (_bytes >= 0) _bytes += r.bodyBytes.length;
+        unawaited(_evictIfNeeded());
+        return f;
+      } finally {
+        _releaseDownloadSlot();
+      }
     } catch (_) {
       return null;
     }
@@ -155,6 +267,65 @@ class _CoverImageState extends State<CoverImage> {
       errorBuilder: (_, __, ___) => _fallback,
     );
     return img;
+  }
+}
+
+/// 封面磁盘缓存（`<support>/covers`）的容量治理与统计入口。
+///
+/// 读写仍由 [CoverImage] 负责；设置页用这里拿占用大小、执行清理，
+/// 让「已缓存」统计和「清除缓存」覆盖到封面目录 —— 旧实现只算章节缓存，
+/// 封面目录只涨不降。
+class CoverCache {
+  CoverCache._();
+
+  /// 磁盘上限 64MB（约 1500 张 40KB 封面）。超过后按最后使用时间淘汰。
+  static const int maxBytes = 64 << 20;
+
+  /// 封面目录占用字节数（目录不存在 = 0）。
+  static Future<int> size() async {
+    final d = await _CoverImageState._cacheDir();
+    if (d == null) return 0;
+    var total = 0;
+    try {
+      await for (final e in d.list()) {
+        if (e is File) total += await e.length();
+      }
+    } catch (_) {}
+    return total;
+  }
+
+  /// 删掉全部封面文件并清空进程内命中表（正在下载的会在完成后重新落盘）。
+  static Future<void> clear() async {
+    _CoverImageState._done.clear();
+    final d = await _CoverImageState._cacheDir();
+    if (d == null) return;
+    try {
+      await for (final e in d.list()) {
+        if (e is File) {
+          try {
+            await e.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    _CoverImageState._bytes = 0;
+  }
+
+  /// 测试用：把目录压到 [limit] 字节以下（真机走下载后的自动淘汰）。
+  @visibleForTesting
+  static Future<void> trimForTest(int limit) async {
+    await _CoverImageState._cacheDir();
+    await _CoverImageState._sweep(limit);
+  }
+
+  /// 测试用：忘掉已缓存的目录与占用计数（换临时目录时调用）。
+  @visibleForTesting
+  static void resetForTest() {
+    _CoverImageState._dir = null;
+    _CoverImageState._dirFut = null;
+    _CoverImageState._bytes = -1;
+    _CoverImageState._sweeping = null;
+    _CoverImageState._done.clear();
   }
 }
 

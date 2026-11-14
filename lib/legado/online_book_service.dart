@@ -12,7 +12,10 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:html/dom.dart' as dom;
+import 'package:xml/xml.dart' as xml;
 
+import '../dom.dart';
 import '../models.dart';
 import 'analyze_rule.dart';
 import 'analyze_url.dart';
@@ -479,6 +482,174 @@ class OnlineBookService {
     return _applyReplace(source, text, vars);
   }
 
+  /// 取图片章节（漫画书源 bookSourceType=2）的图片地址列表。
+  ///
+  /// legado 图片源约定：ruleContent.content 逐条产出图片地址（相对地址按
+  /// 章节页解析；`url,{...}` 请求选项尾缀剥掉暂不用）。**不走正文清洗** ——
+  /// cleanChapterText 会把整行 URL 当水印行丢掉；也不套 replaceRegex
+  /// （文字净化规则对 URL 无意义）。支持 nextContentUrl 翻页追加。
+  Future<List<String>> fetchChapterImages(
+    BookSource source,
+    String chapterUrl, {
+    Map<String, dynamic>? book,
+  }) async {
+    final session = JsSession();
+    return runWithJsSession(
+      session,
+      () => _fetchChapterImagesInner(source, chapterUrl, book, session),
+      (e) => _resolveSuspend(source, session, e),
+    );
+  }
+
+  Future<List<String>> _fetchChapterImagesInner(
+    BookSource source,
+    String chapterUrl,
+    Map<String, dynamic>? book,
+    JsSession session,
+  ) async {
+    final vars = <String, dynamic>{
+      if (book != null) 'book': book,
+    };
+    final raw = source.contentRule?.content ?? '';
+    if (raw.trim().isEmpty) return const [];
+
+    final (plainUrl, suffix) = splitUrlSuffix(chapterUrl);
+    final suffixWebView = suffix.contains('webView');
+    final pageUrl = suffixWebView ? plainUrl : chapterUrl;
+    String html;
+    if (suffixWebView && WebViewEngine.supported) {
+      try {
+        html = await WebViewEngine.instance
+            .fetchRenderedHtml(url: webViewChapterUrl(source, plainUrl));
+      } catch (_) {
+        html = await _getHtml(source, plainUrl);
+      }
+    } else {
+      html = await _getHtml(source, pageUrl);
+    }
+
+    final out = <String>[];
+    late AnalyzeRule engine;
+
+    /// 漫画源的 ruleContent 常用 `<js>` 回读规则：
+    /// `java.getElements('class.comic-contain@amp-img')`（包子漫画式）。
+    /// 和文本链路一样把当前页的 AnalyzeRule 注入 JS 桥，否则脚本拿不到元素。
+    final env =
+        jsEnvFor(source, session, book: book, baseUrl: pageUrl).copyWith(
+      getString: (r) {
+        try {
+          return engine.getString(r);
+        } catch (_) {
+          return null;
+        }
+      },
+      getElements: (r) {
+        try {
+          return [
+            for (final e in engine.getElements(r))
+              if (e is dom.Element)
+                e.outerHtml
+              else if (e is xml.XmlElement)
+                e.toXmlString()
+              else
+                e.toString(),
+          ];
+        } catch (_) {
+          return <String>[];
+        }
+      },
+    );
+
+    engine = AnalyzeRule(html,
+        baseUrl: pageUrl, vars: vars, js: env);
+
+    // 逐条产出图片地址；相对地址按「该页」解析（翻页后 base 跟着换页）。
+    //
+    // 漫画源（包子漫画等）的 ruleContent 常直接返回 `<img src="…">` 或
+    // `<amp-img data-src="…">` 拼成的 HTML 片段，而不是一行一个 URL ——
+    // 只认纯 URL 会把这类源整章判空，必须从片段里把图片属性提出来。
+    void collect(String base) {
+      void addUrl(String candidate) {
+        final before = _dropUrlOptions(candidate);
+        final resolved = _dropUrlOptions(resolveUrl(before, base));
+        if (resolved.isEmpty) return;
+        if (resolved.startsWith('data:') || resolved.startsWith('http')) {
+          out.add(resolved);
+        }
+      }
+
+      for (final line in engine.getStrings(raw)) {
+        final l = line.trim();
+        if (l.isEmpty) continue;
+        final (target, _) = splitUrlSuffix(l);
+        final plain = _dropUrlOptions(target);
+        if (l.contains('<img') || l.contains('<amp-img')) {
+          final frag = parseHtml(plain);
+          for (final img in frag.querySelectorAll('img, amp-img')) {
+            for (final key in const [
+              'src',
+              'data-src',
+              'data-original',
+              'data-lazy-src'
+            ]) {
+              final v = img.attributes[key];
+              if (v != null && v.trim().isNotEmpty) addUrl(v.trim());
+            }
+          }
+          continue;
+        }
+        // 部分 @src 规则会先把相对地址解析好，并把 `,{` 编码成 `,%7B`
+        // —— 解析前后各剥一次选项尾缀，别把请求选项当成 URL 的一部分。
+        addUrl(plain);
+      }
+    }
+
+    collect(pageUrl);
+    // 规则只吐出 1 张（或 0 张）时，很多漫画站其实把整章图放在页面里做
+    // 懒加载（amp-img[data-src] / img[data-original]）—— 按容器扫一遍补齐，
+    // 否则用户看到「一章只有一张图」。只认懒加载属性，跳过广告位 src。
+    if (out.length < 2) _scanLazyImages(html, pageUrl, out);
+    // 还有一类站点把整章图片 URL 放在 JS 字符串里（`1.jpg'`、`2.jpg'`…），
+    // HTML 属性一个都没有：按已拿到的第一张图的目录前缀，把同目录的
+    // 「数字序号」图片按序补齐（包子漫画 CDN 就是这种布局）。
+    if (out.length < 2) _scanSiblingImageUrls(html, out);
+
+    // 图片分页（nextContentUrl）
+    final nextRule = source.contentRule?.nextContentUrl?.trim() ?? '';
+    if (nextRule.isNotEmpty && out.isNotEmpty) {
+      final visited = <String>{pageUrl};
+      for (var i = 0; i < 10; i++) {
+        List<String> nexts;
+        try {
+          nexts = engine
+              .getStrings(nextRule)
+              .map((u) => u.trim())
+              .where((u) => u.isNotEmpty)
+              .toList();
+        } catch (_) {
+          break;
+        }
+        if (nexts.isEmpty) break;
+        final next = resolveUrl(nexts.first, pageUrl);
+        if (next.isEmpty || !visited.add(next)) break;
+        String nextHtml;
+        try {
+          nextHtml = await _getHtml(source, next);
+        } catch (_) {
+          break;
+        }
+        engine = AnalyzeRule(nextHtml,
+            baseUrl: next,
+            vars: vars,
+            js: env); // 复用带 java.* 桥的环境（闭包跟着 engine 走）
+        final before = out.length;
+        collect(next);
+        if (out.length == before) break;
+      }
+    }
+    return out;
+  }
+
   /// 应用 `ruleContent.replaceRegex` 净化（模板先按上下文变量渲染）。
   String _applyReplace(
     BookSource source,
@@ -666,6 +837,80 @@ class OnlineBookService {
   }
 
   // ---------- 内部工具 ----------
+
+  /// 剥掉图片地址尾部的 `,{...}` 请求选项（含被 Uri 编码成 `,%7B` 的情形）。
+  static String _dropUrlOptions(String s) {
+    final m = RegExp(r',(?:\{|%7[bB])').firstMatch(s);
+    return m == null ? s : s.substring(0, m.start);
+  }
+
+  /// 漫画章节页懒加载图片兜底：从正文容器里扫 `data-src` / `data-original`。
+  /// 只补懒加载属性，不扫普通 `src`（广告位/UI 图标都挂在 src 上）。
+  static void _scanLazyImages(String html, String base, List<String> out) {
+    final doc = parseHtml(html);
+    final seen = out.toSet();
+
+    void scan(Element? box) {
+      if (box == null) return;
+      for (final img in box.querySelectorAll('amp-img, img')) {
+        for (final key in const ['data-src', 'data-original', 'data-lazy-src']) {
+          final v = img.attributes[key]?.trim();
+          if (v == null || v.isEmpty) continue;
+          final resolved =
+              _dropUrlOptions(resolveUrl(_dropUrlOptions(v), base));
+          if ((resolved.startsWith('http') || resolved.startsWith('data:')) &&
+              seen.add(resolved)) {
+            out.add(resolved);
+          }
+        }
+      }
+    }
+
+    final start = out.length;
+    // 优先正文容器（避开侧栏）；有的站把 comic-contain 当空 marker，
+    // 图片挂在兄弟节点上 —— 容器里一张都没扫到就退回整页再扫一遍。
+    final box = doc.querySelector('.comic-contain') ??
+        doc.querySelector('#htmlContent') ??
+        doc.querySelector('.show-content');
+    scan(box);
+    if (out.length == start) scan(doc.body);
+  }
+
+  /// 从页面源码（含 script 字符串）里补齐「同目录 + 数字序号」的章节图。
+  ///
+  /// 不按已拿到的第一张图目录找 —— 漫画站的规则常把「推荐位」图片当第一张
+  /// 解析出来，目录根本不对。改为全局扫 `…/数字.jpg`，按目录分组取条目最多的
+  /// 一组（那就是本章图），按序号升序补齐。
+  static void _scanSiblingImageUrls(String html, List<String> out) {
+    final re = RegExp(
+        r'''(https?://[^\s"'<>()]+?)/([0-9]{1,4})\.(jpg|jpeg|png|webp)''',
+        caseSensitive: false);
+    final groups = <String, Map<int, String>>{};
+    for (final m in re.allMatches(html)) {
+      final dir = m.group(1)!;
+      final n = int.tryParse(m.group(2)!);
+      if (n == null) continue;
+      // 广告 / UI 资源目录：跳过（含 logo、avatar、static、icon 等）
+      if (RegExp(r'/(static|img|images|assets|logo|avatar|icon)/',
+              caseSensitive: false)
+          .hasMatch(dir)) {
+        continue;
+      }
+      groups.putIfAbsent(dir, () => <int, String>{}).putIfAbsent(
+          n, () => m.group(0)!);
+    }
+    if (groups.isEmpty) return;
+    final best = groups.entries.reduce((a, b) =>
+        a.value.length >= b.value.length ? a : b);
+    if (best.value.length < 2) return;
+    final nums = best.value.keys.toList()..sort();
+    final chapter = [for (final n in nums) best.value[n]!];
+    final rest = [for (final u in out) if (!chapter.contains(u)) u];
+    out
+      ..clear()
+      ..addAll(chapter)
+      ..addAll(rest);
+  }
 
   /// 拆 `url,{...}` 请求选项尾缀（保留原文，选项语义如 webView 为 P2）。
   static (String, String) splitUrlSuffix(String s) {

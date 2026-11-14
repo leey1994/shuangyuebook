@@ -26,3 +26,7 @@ release-*/
 
 # 插件示例里的构建缓存
 third_party/*/example/*/Flutter/ephemeral/
+
+# 研究用抓包数据与本地笔记（一次性的书源调研产物，不进版本库）
+tool/.probe/
+/notes.md

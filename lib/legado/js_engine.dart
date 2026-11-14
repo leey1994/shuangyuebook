@@ -394,7 +394,7 @@ abstract final class JsBridge {
           '$_finalizeJs})()');
       // 部分书源在 @js 里直接写顶层 return（legado 的 Rhino 允许），
       // eval 下会 SyntaxError；此时把整段包进函数体再跑一次。
-      if (r.isError && '${r.stringResult}'.contains('return not in a function')) {
+      if (r.isError && r.stringResult.contains('return not in a function')) {
         r = rt.evaluate('${_setup(e, input)}\n'
             '(function () { var __r = (function () {\n$code\n})();'
             '$_finalizeJs})()');

@@ -66,6 +66,29 @@ class LegadoSource extends NovelSource {
   @override
   String get baseUrl => source.bookSourceUrl;
 
+  /// legado bookSourceType：2 = 图片书源（漫画）。
+  @override
+  bool get isImageBook => source.bookSourceType == 2;
+
+  /// 图片章节 ← ruleContent（逐条图片地址，相对地址按章节页解析）。
+  @override
+  Future<List<String>> fetchChapterImages(
+      BookDetail detail, Chapter chapter) async {
+    final b = detail.book;
+    final imgs = await _svc.fetchChapterImages(
+      source,
+      chapter.url,
+      book: {
+        'name': b.title,
+        'author': b.author,
+        'bookUrl': b.url,
+        'durChapterTitle': chapter.title,
+        'chapterTitle': chapter.title,
+      },
+    );
+    return imgs;
+  }
+
   /// 「首页推荐」← 本源第一个发现分类的前 [homePerSource] 本。
   ///
   /// Legado 书源没有真正的站点首页概念，但它的 `exploreUrl` 第一个分类

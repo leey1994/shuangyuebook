@@ -118,11 +118,9 @@ List<_Step>? _parseSteps(String expr) {
   final steps = <_Step>[...prefix];
   var i = 0;
   var pendingDescendant = false;
-  var sawSlash = false;
   while (i < s.length) {
     final c = s[i];
     if (c == '/') {
-      sawSlash = true;
       if (i + 1 < s.length && s[i + 1] == '/') {
         pendingDescendant = true;
         i += 2;

@@ -1,7 +1,7 @@
 name: shuangyue
 description: 爽阅·在线聚合阅读器（Android + Windows，多源实时聚合 + 阅读 3.0 书源引擎 + 桌宠小墨）
 publish_to: none
-version: 1.1.0+36
+version: 1.1.0+2047
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -29,6 +29,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  path_provider_platform_interface: ^2.1.0 # FeedCache 磁盘层测试用（假平台路径）
 
 # 本地固化 flutter_tts 补丁（Windows SAPI 引擎切换 + 崩溃守卫），见 third_party/flutter_tts
 dependency_overrides:

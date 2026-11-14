@@ -4,11 +4,14 @@
 //   1. 导入书源登记表：改一条书源不该重建全部适配器（原来是每次全量重建 1000 个对象）；
 //   2. allSources / sourceById 有缓存（原来每次访问都新建上千元素的列表）；
 //   3. 阅读器时钟不再整页 setState（每秒只更新一个 ValueNotifier）。
+@Tags(['timing'])
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/models.dart';
 import 'package:shuangyue/models.dart';
+import 'package:shuangyue/screens/home_screen.dart';
 import 'package:shuangyue/screens/reader_screen.dart';
 import 'package:shuangyue/sources/registry.dart';
 
@@ -42,8 +45,7 @@ void main() {
       syncImportedSources([a, b2]);
       final third = importedSources.toList();
       expect(identical(first[0], third[0]), isTrue);
-      expect(identical(first[1], third[1]), isFalse,
-          reason: '内容变了必须重建');
+      expect(identical(first[1], third[1]), isFalse, reason: '内容变了必须重建');
     });
 
     test('allSources 有缓存（不再每次新建上千元素列表）', () {
@@ -60,11 +62,17 @@ void main() {
     });
   });
 
+  group('首页推荐', () {
+    test('今日推荐每批展示 30 张卡片', () {
+      expect(kTodayRecommendationCount, 30);
+    });
+  });
+
   group('阅读器时钟', () {
     test('页脚时间是独立的 ValueNotifier，不走整页 setState', () {
       // 用反射确认字段类型，避免测试和实现「同源同错」
-      final f = ReaderScreen(
-              book: const Book(
+      final f = const ReaderScreen(
+              book: Book(
                 sourceId: 's',
                 id: 'b',
                 title: 't',
@@ -75,6 +83,7 @@ void main() {
       // 未挂载的 State 也能读字段（只是不要 build）
       final clock = (f as dynamic).debugClockText;
       expect(clock, isA<ValueListenable<String>>());
-      expect(f, isA<State<ReaderScreen>>());    });
+      expect(f, isA<State<ReaderScreen>>());
+    });
   });
 }

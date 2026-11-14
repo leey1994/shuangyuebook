@@ -4,6 +4,8 @@
 //   1. 列表视图是**稳定实例**（不每次访问都复制整表）——旧实现每帧白拷 1000 个引用；
 //   2. url → 下标走索引（O(1)），不是每行扫一遍（O(n²)）；
 //   3. 批量操作只发一次通知；大 JSON 的解析/落盘在后台 isolate，不卡 UI。
+@Tags(['timing'])
+
 import 'dart:convert';
 import 'dart:io';
 

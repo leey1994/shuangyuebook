@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -109,6 +110,28 @@ String? pickApkUrl(List<(String, String)> apks, String? deviceAbi) {
   return best;
 }
 
+/// 解析 Release 里的 SHA256SUMS.txt（CI 用 sha256sum 生成）：
+/// 行格式 `<64位hex>  <路径>`（路径形如 `apk/ShuangYue-v1.2.3+45-arm64-v8a.apk`）。
+/// 返回「资产文件名（小写）→ hash（小写）」；解析不出返回空表。
+Map<String, String> parseSha256Sums(String text) {
+  final out = <String, String>{};
+  final re = RegExp(r'^([0-9a-fA-F]{64})\s+\*?(.+)$');
+  for (final raw in text.split('\n')) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final m = re.firstMatch(line);
+    if (m == null) continue;
+    final name =
+        m.group(2)!.replaceAll('\\', '/').split('/').last.trim().toLowerCase();
+    if (name.isNotEmpty) out[name] = m.group(1)!.toLowerCase();
+  }
+  return out;
+}
+
+/// 流式计算文件 SHA256（不整包读进内存）。
+Future<String> sha256File(File f) async =>
+    (await sha256.bind(f.openRead()).first).toString();
+
 /// 启动时静默检查 GitHub Release：发现比当前更新的版本则弹窗提示，
 /// 公告内容即该 Release 的版本说明（body）。网络失败/无 Release 静默跳过。
 /// [manual] 为 true（设置页手动检查）时给出结果反馈：已是最新 / 检查失败。
@@ -161,6 +184,7 @@ class UpdateChecker {
           'https://github.com/$_repo/releases/latest';
       String? apkUrl;
       String? zipUrl;
+      String? sumsUrl; // SHA256SUMS.txt 资产（校验下载完整性用）
       final apkAssets = <(String, String)>[];
       for (final a in (j['assets'] as List? ?? [])) {
         final m = a as Map;
@@ -171,10 +195,27 @@ class UpdateChecker {
           apkAssets.add((name, url));
         } else if (name.endsWith('.zip') && name.contains('windows')) {
           zipUrl ??= url;
+        } else if (name == 'sha256sums.txt') {
+          sumsUrl = url;
         }
       }
       // 按设备架构挑包：arm64 机不再装到 32 位包（反之亦然）。
       apkUrl = pickApkUrl(apkAssets, deviceAbiTag());
+      // 拉 SHA256SUMS（几 KB）：拿得到就给下载加完整性校验，拿不到不影响更新
+      String? expectedSha;
+      final assetUrl = apkUrl ?? zipUrl;
+      if (sumsUrl != null && assetUrl != null) {
+        try {
+          final sr = await http.get(Uri.parse(sumsUrl)).timeout(
+                const Duration(seconds: 15),
+              );
+          if (sr.statusCode == 200) {
+            final base =
+                Uri.parse(assetUrl).pathSegments.last.toLowerCase();
+            expectedSha = parseSha256Sums(utf8.decode(sr.bodyBytes))[base];
+          }
+        } catch (_) {}
+      }
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
@@ -183,7 +224,8 @@ class UpdateChecker {
             notes: notes,
             htmlUrl: htmlUrl,
             apkUrl: apkUrl,
-            zipUrl: zipUrl),
+            zipUrl: zipUrl,
+            expectedSha: expectedSha),
       );
     } catch (_) {
       // 网络异常 / API 限流 / 无 release：静默跳过，不影响正常使用
@@ -203,12 +245,14 @@ class _UpdateDialog extends StatefulWidget {
   final String htmlUrl;
   final String? apkUrl; // 安卓安装包资产
   final String? zipUrl; // Windows 压缩包资产
+  final String? expectedSha; // SHA256SUMS 里的期望值（拿不到为 null，跳过校验）
   const _UpdateDialog({
     required this.tag,
     required this.notes,
     required this.htmlUrl,
     required this.apkUrl,
     required this.zipUrl,
+    this.expectedSha,
   });
 
   @override
@@ -276,7 +320,14 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           try {
             await Process.start(
               updater.path,
-              ['--appdir=$exeDir', '--appexe=$exeName', ...urlList],
+              [
+                '--appdir=$exeDir',
+                '--appexe=$exeName',
+                // 期望哈希交给更新器：它每条镜像下载完先验哈希再换下一条
+                if (widget.expectedSha != null)
+                  '--sha256=${widget.expectedSha}',
+                ...urlList,
+              ],
               mode: ProcessStartMode.detached,
             );
           } catch (e) {
@@ -298,6 +349,19 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         throw Exception('所有下载线路都失败了，请检查网络后重试');
       }
       if (!mounted) return;
+
+      // ---- SHA256 完整性校验（Release 提供 SHA256SUMS 时）----
+      // 镜像返回错误页/截断包/被污染包，大小可能恰好对得上，哈希骗不了人。
+      if (widget.expectedSha != null) {
+        setState(() => _phase = '正在校验安装包…');
+        final actual = await sha256File(target);
+        if (actual != widget.expectedSha) {
+          try {
+            target.deleteSync();
+          } catch (_) {}
+          throw Exception('安装包校验失败（SHA256 不符），下载源可能异常，请重试');
+        }
+      }
 
       if (isAndroid) {
         // ---- 安卓：拉起系统安装器（FileProvider 由原生侧包装）----

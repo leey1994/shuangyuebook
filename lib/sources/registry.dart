@@ -1,4 +1,5 @@
 import '../legado/models.dart';
+import '../models.dart';
 import 'douyinxs.dart';
 import 'gdbzkz.dart';
 import 'huangjinwu.dart';
@@ -6,6 +7,7 @@ import 'legado_source.dart';
 import 'libahao.dart';
 import 'local_source.dart';
 import 'minyuan.dart';
+import 'owllook_source.dart';
 import 'quanben.dart';
 import 'sanyt.dart';
 import 'shenwen.dart';
@@ -20,6 +22,7 @@ import 'yewa.dart';
 ///
 /// 这些是爽阅的立身之本：不依赖任何外部 JSON，改版前也不会失效。
 final List<NovelSource> builtinSources = <NovelSource>[
+  OwllookSource(), // owllook：自带榜单 / 聚合搜索 / 在线正文，纯 HTTP
   YewaSource(),
   SuduGuuSource(),
   HuangJinWuSource(),
@@ -110,6 +113,11 @@ NovelSource? sourceById(String id) {
 
 /// 书源展示名（找不到时回退 id，便于「书源已删除」这类提示）。
 String sourceNameOf(String id) => sourceById(id)?.name ?? id;
+
+/// 这本书是不是漫画（图片书源 bookSourceType=2）。
+///
+/// 源被删 / 换源后查不到时按「非漫画」处理 —— 宁可少标不可错标。
+bool isComicBook(Book b) => sourceById(b.sourceId)?.isImageBook ?? false;
 
 /// 仅固化书源（书源管理页展示用：导入书源单独一块）。
 List<NovelSource> get hardcodedSources => List.unmodifiable(builtinSources);

@@ -10,11 +10,13 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../collect/aggregate.dart';
+import '../collect/hot_board.dart';
 import '../feed_cache.dart';
 import '../legado/source_store.dart';
 import '../models.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
+import '../sources/owllook_source.dart';
 import '../sources/registry.dart';
 import '../sources/source.dart';
 import '../store.dart';
@@ -23,9 +25,13 @@ import '../ui/brand.dart';
 import '../ui/source/source_manager_page.dart';
 import 'book_detail_screen.dart';
 import 'local_import_page.dart';
+import 'image_reader_screen.dart';
 import 'rank_screen.dart';
 import 'reader_screen.dart';
 import 'search_screen.dart';
+
+/// 「今日推荐」每批展示的卡片数。
+const int kTodayRecommendationCount = 30;
 
 /// 首页参与聚合的来源：全部可用源，按用户「推荐来源」勾选过滤。
 List<NovelSource> _homeSources() =>
@@ -43,6 +49,9 @@ class _HomeScreenState extends State<HomeScreen>
   final _rng = Random();
   final Map<String, List<Book>> _bySource = {};
   List<Book> _rec = [];
+
+  /// 漫画推荐：从图片书源（漫画）的发现页单独收，不混进文字书推荐流。
+  List<Book> _comicRec = [];
   List<AggRankEntry> _hot = [];
 
   /// 推荐流来源筛选（null = 全部）——交互对齐搜索页的来源药丸。
@@ -92,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen>
       _loading = true;
       _emptyMsg = null;
       _rec = [];
+      _comicRec = [];
       _hot = [];
       _bySource.clear();
       _done = 0;
@@ -119,32 +129,61 @@ class _HomeScreenState extends State<HomeScreen>
           if (!mounted || gen != _gen) return;
           setState(() {
             _done++;
-            // 随机子集 + 交错：每次刷新各源贡献的条数和书目都不同
-            _bySource[s.id] = sampleBooks(books, _rng);
-            _rec = interleaveBooks(_bySource.values.toList());
-            if (_rec.isNotEmpty) _loading = false;
+            if (s.isImageBook) {
+              // 漫画单独成区：随机取样后按源交错，最多 12 本
+              final picked = sampleBooks(books, _rng).take(4).toList();
+              _comicRec = (interleaveBooks([
+                _comicRec,
+                picked,
+              ])).take(12).toList();
+            } else {
+              // 随机子集 + 交错：每次刷新各源贡献的条数和书目都不同
+              _bySource[s.id] = sampleBooks(books, _rng);
+              _rec = interleaveBooks(_bySource.values.toList());
+            }
+            if (_rec.isNotEmpty || _comicRec.isNotEmpty) _loading = false;
           });
         },
     ]);
 
-    // ---- 热榜速览：与推荐并行，失败不影响推荐；有源返回即填充 ----
-    final hotTask = aggregateRank(
-      RankBoard.hot,
-      '全部',
-      onPartial: (partial) {
-        if (!mounted || gen != _gen || partial.isEmpty) return;
-        setState(() => _hot = partial.take(9).toList());
-      },
-    ).then((list) {
-      if (!mounted || gen != _gen) return;
-      setState(() {
-        _hot = list.take(9).toList();
-        _loading = false;
-      });
-    }).catchError((_) {});
+    // ---- 热榜速览：直接读权威榜（owllook 起点榜，10 分钟缓存）----
+    //
+    // 旧实现在这里又跑一遍 aggregateRank：所有书源各发 rankTabs + rank 两个
+    // 请求，和推荐流同时扇出，首页首屏被几十个网络/解析任务一起压住 ——
+    // 这就是「首页有点卡」的主因。现在只发 1 个请求，且与排行页同源同缓存。
+    final hotTask = _loadHotPreview(gen);
 
     await Future.wait([recTask, hotTask]);
     if (mounted && gen == _gen) setState(() => _loading = false);
+  }
+
+  Future<void> _loadHotPreview(int gen) async {
+    try {
+      final data = await fetchHotBoard(HotBoard.owllookQidian);
+      if (!mounted || gen != _gen) return;
+      final entries = <AggRankEntry>[];
+      for (var i = 0; i < data.items.length && i < 9; i++) {
+        final it = data.items[i];
+        final url =
+            '$kOwllookBase/search?wd=${Uri.encodeQueryComponent(it.title)}';
+        final b = Book(
+          sourceId: OwllookSource.sourceId,
+          id: url,
+          url: url,
+          title: it.title,
+          author: it.author,
+          status: it.category,
+        );
+        entries.add(AggRankEntry(b)..add(OwllookSource.sourceId, i));
+      }
+      if (!mounted || gen != _gen) return;
+      setState(() {
+        _hot = entries;
+        _loading = false;
+      });
+    } catch (_) {
+      // 权威榜失败不影响推荐流
+    }
   }
 
   Future<void> _reload() async {
@@ -152,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen>
       FeedCache.invalidate(['home', s.id]);
     }
     FeedCache.invalidatePrefix('rank');
+    HotBoardCache.clear(); // 权威榜走独立缓存，下拉刷新也要作废
     if (mounted) {
       setState(() {
         _loading = true;
@@ -164,13 +204,22 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _openBook(Book b) {
     PetStore.I.emit(PetAction.discoverOpen);
-    Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => BookDetailScreen(book: b)));
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => BookDetailScreen(book: b)));
   }
 
   void _startReading(Book b) {
     PetStore.I.emit(PetAction.openBook);
     final e = AppStore.I.shelfEntry(b.url);
+    if (isComicBook(b)) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ImageReaderScreen(
+          book: b,
+          chapterIndex: e?.chapterIndex ?? 0,
+        ),
+      ));
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ReaderScreen(
         book: b,
@@ -212,8 +261,8 @@ class _HomeScreenState extends State<HomeScreen>
               subtitle: const Text('TXT / EPUB'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const LocalImportPage()));
+                Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LocalImportPage()));
               },
             ),
             ListTile(
@@ -257,8 +306,7 @@ class _HomeScreenState extends State<HomeScreen>
         PillChip(
           '${s.name}${_bySource.containsKey(s.id) ? ' ✓' : ''}',
           selected: _filter == s.id,
-          onTap: () =>
-              setState(() => _filter = _filter == s.id ? null : s.id),
+          onTap: () => setState(() => _filter = _filter == s.id ? null : s.id),
         ),
     ];
     Widget row(List<Widget> items) => Row(
@@ -335,6 +383,7 @@ class _HomeScreenState extends State<HomeScreen>
                   for (var i = 0; i < _hot.take(3).length; i++)
                     _hotRow(_hot[i], i + 1, theme),
                 ],
+                if (_comicRec.isNotEmpty) _comicStrip(theme, narrow: true),
                 if (_filteredRec.isNotEmpty) ...[
                   _sourceChipsRow(theme),
                   SectionHead('今日推荐',
@@ -433,6 +482,10 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: 18),
             if (_hot.isNotEmpty) _hotCard(theme),
             const SizedBox(height: 18),
+            if (_comicRec.isNotEmpty) ...[
+              _comicStrip(theme, narrow: false),
+              const SizedBox(height: 18),
+            ],
             if (_filteredRec.isNotEmpty) ...[
               _sourceChipsRow(theme),
               SectionHead('今日推荐',
@@ -484,9 +537,8 @@ class _HomeScreenState extends State<HomeScreen>
             IconButton(
               icon: Icon(Icons.dark_mode_outlined,
                   size: 20, color: theme.hintColor),
-              tooltip: AppStore.I.prefs.theme == AppThemes.black
-                  ? '切到锦绣白'
-                  : '切到极光黑',
+              tooltip:
+                  AppStore.I.prefs.theme == AppThemes.black ? '切到锦绣白' : '切到极光黑',
               onPressed: _toggleTheme,
             ),
             IconButton(
@@ -516,8 +568,7 @@ class _HomeScreenState extends State<HomeScreen>
               height: 13,
               child: CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 10),
-          Text('正在汇总 $_total 个书源…已完成 $_done',
-              style: theme.textTheme.bodySmall),
+          Text('正在汇总 $_total 个书源…已完成 $_done', style: theme.textTheme.bodySmall),
         ],
       ),
     );
@@ -533,8 +584,7 @@ class _HomeScreenState extends State<HomeScreen>
           Text(_emptyMsg ?? '暂时没有拿到推荐',
               textAlign: TextAlign.center, style: theme.textTheme.bodyMedium),
           const SizedBox(height: 10),
-          BrandBtn('重新加载',
-              style: BrandBtnStyle.outline, onTap: () => _load()),
+          BrandBtn('重新加载', style: BrandBtnStyle.outline, onTap: () => _load()),
         ],
       ),
     );
@@ -589,8 +639,8 @@ class _HomeScreenState extends State<HomeScreen>
                     Text(meta,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(fontSize: 11.5, color: Brand.fg3(context))),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 11.5, color: Brand.fg3(context))),
                   ],
                 ],
               ),
@@ -599,9 +649,8 @@ class _HomeScreenState extends State<HomeScreen>
             if (e.sourceCount > 1)
               SrcPill('${e.sourceCount} 个来源', accent: true)
             else
-              SrcPill(e.book.sourceId.isEmpty
-                  ? ''
-                  : sourceNameOf(e.book.sourceId)),
+              SrcPill(
+                  e.book.sourceId.isEmpty ? '' : sourceNameOf(e.book.sourceId)),
           ],
         ),
       ),
@@ -610,30 +659,103 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _recGrid(ThemeData theme, {required bool narrow}) {
     final rec = _filteredRec;
-    // 推荐池去掉已在横幅露脸的书，不足 6 本就不再剔除（宁可爱重复也要有内容）
-    final pool = rec.length > 6
-        ? rec.where((b) => !_bannerBooks.any((x) => x.url == b.url)).toList()
+    // 推荐池去掉已在横幅露脸的书；先建 URL 集合，避免每本书都线性扫描横幅。
+    // 数量不足一批时不剔除（宁可少量重复，也尽量把 30 张卡片补满）。
+    final bannerUrls = _bannerBooks.map((b) => b.url).toSet();
+    final pool = rec.length > kTodayRecommendationCount
+        ? rec.where((b) => !bannerUrls.contains(b.url)).toList()
         : rec;
-    final src = pool.length >= 6 ? pool : rec;
+    final src = pool.length >= kTodayRecommendationCount ? pool : rec;
     if (src.isEmpty) return const SizedBox.shrink();
-    final start = (_batch * 6) % src.length;
-    final items = [for (var i = 0; i < 6 && i < src.length; i++) src[(start + i) % src.length]];
+    final start = (_batch * kTodayRecommendationCount) % src.length;
+    final items = [
+      for (var i = 0; i < kTodayRecommendationCount && i < src.length; i++)
+        src[(start + i) % src.length],
+    ];
     return Padding(
-      padding: narrow
-          ? const EdgeInsets.symmetric(horizontal: 16)
-          : EdgeInsets.zero,
-      child: GridView.count(
-        crossAxisCount: narrow ? 3 : 4,
+      padding:
+          narrow ? const EdgeInsets.symmetric(horizontal: 16) : EdgeInsets.zero,
+      child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 14,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.5,
-        children: [
-          for (final b in items)
-            _RecCard(book: b, onTap: () => _openBook(b)),
-        ],
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: narrow ? 3 : 4,
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.5,
+        ),
+        // builder：不再每次 build 都预构造 30 个 widget 的 children 列表，
+        // 换一批 / 筛选时按 itemCount 逐个生成（shrinkWrap 下布局仍需全量）。
+        itemCount: items.length,
+        itemBuilder: (_, i) =>
+            _RecCard(book: items[i], onTap: () => _openBook(items[i])),
       ),
+    );
+  }
+
+  /// 漫画推荐条：与「今日推荐」（文字小说）分开，横向滑动、点开走漫画器。
+  Widget _comicStrip(ThemeData theme, {required bool narrow}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHead('漫画推荐',
+            padding: EdgeInsets.fromLTRB(narrow ? 16 : 0, 0, 0, 8),
+            action: '漫画榜 ›',
+            onAction: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const RankScreen(initialComic: true)))),
+        SizedBox(
+          height: 178,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.symmetric(horizontal: narrow ? 16 : 0),
+            itemCount: _comicRec.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (ctx, i) {
+              final b = _comicRec[i];
+              return GestureDetector(
+                onTap: () => _openBook(b),
+                behavior: HitTestBehavior.opaque,
+                child: SizedBox(
+                  width: 96,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Stack(
+                        children: [
+                          BookCover(b, width: 96, height: 130, radius: 9),
+                          Positioned(
+                            left: 5,
+                            top: 5,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: const Text('漫画',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(b.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 11, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -656,8 +778,8 @@ class _HomeScreenState extends State<HomeScreen>
                       ?.copyWith(fontSize: 14, fontWeight: FontWeight.w800)),
               const Spacer(),
               GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const RankScreen())),
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RankScreen())),
                 child: Text('全源聚合 · 更多 ›',
                     style: theme.textTheme.labelSmall
                         ?.copyWith(fontSize: 11, color: Brand.fg3(context))),
@@ -707,7 +829,9 @@ class _HomeScreenState extends State<HomeScreen>
                       fontWeight: FontWeight.w600)),
             ),
             const SizedBox(width: 6),
-            if (e.sourceCount > 1)
+            if (isComicBook(e.book))
+              const SrcPill('漫画')
+            else if (e.sourceCount > 1)
               SrcPill('${e.sourceCount} 源', accent: true)
             else
               SrcPill(sourceNameOf(e.book.sourceId)),
@@ -989,9 +1113,7 @@ class _HeroBannerState extends State<_HeroBanner> {
             if (b.status?.isNotEmpty ?? false) b.status!,
             srcName,
           ].join(' · ');
-          final intro = (b.intro ?? '')
-              .replaceAll(RegExp(r'\s+'), ' ')
-              .trim();
+          final intro = (b.intro ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
           return GestureDetector(
             onTap: () => widget.onTap(b),
             child: Container(
@@ -1016,7 +1138,8 @@ class _HeroBannerState extends State<_HeroBanner> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      BookCover(b, width: desktop ? 76 : 62, height: desktop ? 104 : 86),
+                      BookCover(b,
+                          width: desktop ? 76 : 62, height: desktop ? 104 : 86),
                       SizedBox(width: desktop ? 18 : 12),
                       Expanded(
                         child: Column(
@@ -1029,14 +1152,11 @@ class _HeroBannerState extends State<_HeroBanner> {
                               decoration: BoxDecoration(
                                 color: Brand.gold.withValues(alpha: 0.14),
                                 border: Border.all(
-                                    color:
-                                        Brand.gold.withValues(alpha: 0.4)),
+                                    color: Brand.gold.withValues(alpha: 0.4)),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                  widget.fromHot
-                                      ? '今日热榜 TOP${i + 1}'
-                                      : '多源推荐',
+                                  widget.fromHot ? '今日热榜 TOP${i + 1}' : '多源推荐',
                                   style: const TextStyle(
                                       fontSize: 10,
                                       color: Brand.gold,
@@ -1058,8 +1178,8 @@ class _HeroBannerState extends State<_HeroBanner> {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                       fontSize: desktop ? 12 : 11.5,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.72))),
+                                      color: Colors.white
+                                          .withValues(alpha: 0.72))),
                             ],
                             if (intro.isNotEmpty) ...[
                               SizedBox(height: desktop ? 9 : 8),
@@ -1095,13 +1215,13 @@ class _HeroBannerState extends State<_HeroBanner> {
                               onTap: () => widget.onShelf?.call(b),
                               child: Container(
                                 height: 36,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   border: Border.all(
-                                      color: Colors.white
-                                          .withValues(alpha: 0.5)),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.5)),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: const Text('加入书架',

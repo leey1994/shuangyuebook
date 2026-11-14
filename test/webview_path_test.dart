@@ -1,3 +1,5 @@
+@Tags(['native'])
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/models.dart';

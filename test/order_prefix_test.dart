@@ -1,4 +1,6 @@
 // 规则列表顺序前缀：`-` 反转、`+` 正序（legado AnalyzeRule 语义）。
+@Tags(['native'])
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/analyze_rule.dart';
 

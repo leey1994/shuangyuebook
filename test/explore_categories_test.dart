@@ -1,5 +1,7 @@
 // 发现页 exploreUrl 的三种写法：行格式 / JSON（含宽松 JSON）/ JS 脚本。
 // JS 形态是 legado 3.x 的主流写法（124 源里 27 个），原实现直接丢空。
+@Tags(['native'])
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';

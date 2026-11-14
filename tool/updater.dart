@@ -1,10 +1,15 @@
 // 爽阅 Windows 更新器（独立进程，随包发布放置在主程序同目录）。
 //
-// 职责收敛：多镜像流式下载 → 解压校验 → 等主程序退出 → 整体换装 → 重启主程序。
-// UI 进程只负责点确认并拉起本进程（detached）后退出 —— 下载/替换全程与 UI 无关。
+// 职责收敛：多镜像流式下载 → SHA256 校验 → 解压校验 → 等主程序退出 →
+// 整体换装 → 重启主程序。UI 进程只负责点确认并拉起本进程（detached）后退出
+// —— 下载/替换全程与 UI 无关。
 //
 // 用法（--appdir/--appexe 必传，其余为镜像下载地址，http(s)/file 均可）：
-//   updater.exe --appdir <运行目录> --appexe novel_reader.exe <url1> [url2] …
+//   updater.exe --appdir <运行目录> --appexe novel_reader.exe
+//               [--sha256 <期望哈希>] <url1> [url2] …
+// --sha256 由主程序从 Release 的 SHA256SUMS.txt 解出后传入；每条镜像下载完
+// 先验哈希，不符按该线路失败处理自动换下一条 —— 镜像出错页/被污染包到不了
+// 换装那一步。
 //
 // 关键设计：
 //  - 启动即把自身复制到 %TEMP% 再由副本接管：否则运行目录里的 updater.exe
@@ -16,6 +21,7 @@
 //    绝不把用户留在打不开的状态。
 import 'dart:io';
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 
 void _log(String dir, String msg) {
   try {
@@ -50,12 +56,18 @@ void _move(FileSystemEntity e, String to) {
 void main(List<String> rawArgs) async {
   var appDir = '';
   var appExe = '';
+  String? expectedSha;
   final urls = <String>[];
-  for (final a in rawArgs) {
+  for (var i = 0; i < rawArgs.length; i++) {
+    final a = rawArgs[i];
     if (a.startsWith('--appdir=')) {
       appDir = a.substring(9);
     } else if (a.startsWith('--appexe=')) {
       appExe = a.substring(9);
+    } else if (a == '--sha256' && i + 1 < rawArgs.length) {
+      expectedSha = rawArgs[++i].toLowerCase(); // 分离式参数：--sha256 <hex>
+    } else if (a.startsWith('--sha256=')) {
+      expectedSha = a.substring(9).toLowerCase();
     } else if (a.startsWith('http') || a.startsWith('file:')) {
       urls.add(a);
     }
@@ -117,6 +129,16 @@ void main(List<String> rawArgs) async {
         final len = tmpZip.lengthSync();
         if (len < 1024 * 1024) {
           throw Exception('内容过小（$len 字节），疑似错误页/截断');
+        }
+        // SHA256 校验（主程序从 SHA256SUMS.txt 传入时）：不符按本线路失败，
+        // 自动换下一条镜像 —— 错误页/截断/被污染的包到不了换装那一步。
+        if (expectedSha != null) {
+          _log(appDir, '校验 SHA256…');
+          final digest = await sha256.bind(tmpZip.openRead()).first;
+          if (digest.toString() != expectedSha) {
+            throw Exception('SHA256 不符（${digest.toString()}）');
+          }
+          _log(appDir, 'SHA256 校验通过');
         }
         ok = true;
         _log(appDir, '下载完成 ${len} 字节');

@@ -2,6 +2,8 @@
 //
 // 进度实时（已从 X/Y 源返回）、结果先到先上屏、同名书自动合并；
 // 空态给搜索历史 + 热词（热词只用「已缓存的首页推荐」，绝不为此单独拉网）。
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../collect/aggregate.dart';
@@ -66,6 +68,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _uiFlush?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -116,6 +119,9 @@ class _SearchScreenState extends State<SearchScreen> {
     });
     // 分池并发（上限 6）：每个源返回即上屏（慢源不拖住整页），但同时在跑的
     // 源数受控 —— 一次扇出全部源会在结果集中到达时把主 isolate 打满。
+    //
+    // 「上屏」不再每源一次 setState：几十个源陆续返回，每次都重建整页
+    // （含来源药丸区）就是打字都卡的元凶。改为置脏 + 90ms 合并刷新。
     final jobs = <Future<void> Function()>[];
     for (final s in targets) {
       jobs.add(() async {
@@ -130,17 +136,33 @@ class _SearchScreenState extends State<SearchScreen> {
           r = const [];
         }
         if (!mounted || gen != _gen) return;
-        setState(() {
-          _done++;
-          _returned.add(s.id);
-          if (r.isNotEmpty) _mergeIn(s, r);
-        });
+        _done++;
+        _returned.add(s.id);
+        if (r.isNotEmpty) _mergeIn(s, r);
+        _notifyResultsChanged();
       });
     }
     await runPooled(jobs);
+    _uiFlush?.cancel();
+    _uiFlush = null;
+    _dirty = false;
     if (!mounted || gen != _gen) return;
     setState(() => _searching = false);
     if (_merged.isNotEmpty) PetStore.I.emit(PetAction.searchOpen);
+  }
+
+  Timer? _uiFlush;
+  bool _dirty = false;
+
+  /// 结果数据已变：90ms 内的多次合并合并成一次整页刷新。
+  void _notifyResultsChanged() {
+    _dirty = true;
+    _uiFlush ??= Timer(const Duration(milliseconds: 90), () {
+      _uiFlush = null;
+      if (!mounted || !_dirty) return;
+      _dirty = false;
+      setState(() {});
+    });
   }
 
   void _resetMerged() {
@@ -262,6 +284,8 @@ class _SearchScreenState extends State<SearchScreen> {
                         textInputAction: TextInputAction.search,
                         style: theme.textTheme.bodyMedium
                             ?.copyWith(fontSize: 14),
+                        // 不 setState：打字时整页重建是搜索页卡顿的主因。
+                        // 清除按钮的显隐用 ValueListenableBuilder 局部刷新。
                         decoration: InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
@@ -271,16 +295,19 @@ class _SearchScreenState extends State<SearchScreen> {
                           contentPadding:
                               const EdgeInsets.symmetric(vertical: 10),
                         ),
-                        onChanged: (_) => setState(() {}),
                         onSubmitted: _search,
                       ),
                     ),
-                    if (_controller.text.isNotEmpty)
-                      GestureDetector(
-                        onTap: _clearInput,
-                        child: Icon(Icons.cancel,
-                            size: 17, color: Brand.fg3(context)),
-                      ),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _controller,
+                      builder: (context, v, _) => v.text.isEmpty
+                          ? const SizedBox.shrink()
+                          : GestureDetector(
+                              onTap: _clearInput,
+                              child: Icon(Icons.cancel,
+                                  size: 17, color: Brand.fg3(context)),
+                            ),
+                    ),
                   ],
                 ),
               ),
@@ -519,7 +546,9 @@ class _SearchScreenState extends State<SearchScreen> {
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      if (m.sourceCount > 1)
+                      if (isComicBook(b))
+                        const SrcPill('漫画')
+                      else if (m.sourceCount > 1)
                         SrcPill('${m.sourceCount} 个来源', accent: true)
                       else
                         SrcPill(sourceNameOf(b.sourceId)),

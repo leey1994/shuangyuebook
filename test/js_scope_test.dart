@@ -1,6 +1,8 @@
 // 书源 JS 作用域对齐：Rhino 里规则脚本就是「全局脚本」，var/function 落全局。
 // 于是「规则脚本定义的工具函数 → 被后面的规则或 jsLib 函数调用」这条链必须成立
 // （聚合类书源的 explore `<js>` 常这么写：先定义 styles()，再由后续动作调用）。
+@Tags(['native'])
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/models.dart';

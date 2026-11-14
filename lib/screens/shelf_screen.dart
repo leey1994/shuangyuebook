@@ -11,9 +11,11 @@ import '../models.dart';
 import '../pet/pet_event.dart';
 import '../pet/pet_store.dart';
 import '../sources/local_source.dart';
+import '../sources/registry.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../ui/brand.dart';
+import 'image_reader_screen.dart';
 import 'local_import_page.dart';
 import 'reader_screen.dart';
 
@@ -34,7 +36,11 @@ class _ShelfScreenState extends State<ShelfScreen> {
   /// 每个进程只自动补查一次；手动入口不受此限。
   static bool _sessionChecked = false;
 
-  int _seg = 0; // 0 = 在线书架，1 = 本地书
+  int _seg = 0; // 0 = 在线书架，1 = 漫画，2 = 本地书
+
+  /// 漫画书（图片书源 bookSourceType=2）：与文字小说分开筛选、分开阅读。
+  bool _isComic(ShelfEntry e) =>
+      sourceById(e.book.sourceId)?.isImageBook ?? false;
 
   /// 分组筛选：null = 全部，'' = 未分组，其余 = 分组名。
   String? _group;
@@ -60,16 +66,32 @@ class _ShelfScreenState extends State<ShelfScreen> {
           if (e.book.sourceId != LocalSource.sourceId) e
       ];
 
+  List<ShelfEntry> get _comic => [
+        for (final e in _online)
+          if (_isComic(e)) e
+      ];
+
   List<ShelfEntry> get _local => [
         for (final e in AppStore.I.shelf)
           if (e.book.sourceId == LocalSource.sourceId) e
       ];
 
   List<ShelfEntry> get _current {
-    final base = _seg == 0 ? _online : _local;
+    final List<ShelfEntry> base;
+    switch (_seg) {
+      case 1:
+        base = _comic;
+      case 2:
+        base = _local;
+      default:
+        base = _online;
+    }
     final g = _group;
     if (g == null) return base;
-    return [for (final e in base) if (e.group == g) e];
+    return [
+      for (final e in base)
+        if (e.group == g) e
+    ];
   }
 
   Future<void> _manualCheck() async {
@@ -153,8 +175,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
               title: const Text('阅读历史'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const HistoryPage()));
+                Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const HistoryPage()));
               },
             ),
             ListTile(
@@ -321,8 +343,10 @@ class _ShelfScreenState extends State<ShelfScreen> {
                   : null,
             ),
             child: Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: on ? FontWeight.w700 : FontWeight.w500,
                   color: on ? Brand.green : theme.hintColor,
                 )),
@@ -342,7 +366,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
         child: Row(
           children: [
             cell('在线书架', 0),
-            cell('本地书 · $local', 1),
+            cell('漫画 · ${_comic.length}', 1),
+            cell('本地书 · $local', 2),
           ],
         ),
       ),
@@ -366,20 +391,17 @@ class _ShelfScreenState extends State<ShelfScreen> {
           for (final m in quick)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: PillChip(m.label,
-                  selected: AppStore.I.shelfSort == m,
+              child: PillChip(m.label, selected: AppStore.I.shelfSort == m,
                   onTap: () {
-                    AppStore.I.setShelfSort(m);
-                    PetStore.I.emit(PetAction.shelfSort);
-                  }),
+                AppStore.I.setShelfSort(m);
+                PetStore.I.emit(PetAction.shelfSort);
+              }),
             ),
           // 分组筛选：始终在末尾，选中后 chip 变成组名
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: PillChip(
-                _group == null
-                    ? '分组'
-                    : (_group!.isEmpty ? '未分组' : _group!),
+                _group == null ? '分组' : (_group!.isEmpty ? '未分组' : _group!),
                 selected: _group != null,
                 onTap: _pickGroup),
           ),
@@ -432,8 +454,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
               ListTile(
                 leading: const Icon(Icons.label_outline),
                 title: Text(g),
-                subtitle: Text(
-                    '${store.shelf.where((e) => e.group == g).length} 本'),
+                subtitle:
+                    Text('${store.shelf.where((e) => e.group == g).length} 本'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -470,8 +492,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
   }
 
   Future<void> _pickGroup() async {
-    final picked = await _pickGroupSheet(
-        title: '按分组筛选', current: _group, allowAll: true);
+    final picked =
+        await _pickGroupSheet(title: '按分组筛选', current: _group, allowAll: true);
     if (!mounted) return;
     setState(() => _group = picked);
   }
@@ -564,7 +586,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
           const Spacer(),
           BrandBtn('分组',
               style: BrandBtnStyle.hairline,
-              onTap: _selected.isEmpty ? null : () => _assignSelectedGroup(null)),
+              onTap:
+                  _selected.isEmpty ? null : () => _assignSelectedGroup(null)),
           const SizedBox(width: 8),
           BrandBtn('移出书架',
               style: BrandBtnStyle.outline,
@@ -619,12 +642,12 @@ class _ShelfScreenState extends State<ShelfScreen> {
       builder: (context, box) {
         final avail = box.maxWidth - edge * 2;
         // 长卡片一行一卡：书名长的才显示得全（正方形卡片维持多列密度）。
-        final cols = square ? (narrow ? 3 : (avail / 176).floor().clamp(3, 6)) : 1;
+        final cols =
+            square ? (narrow ? 3 : (avail / 176).floor().clamp(3, 6)) : 1;
         final tileW = (avail - gap * (cols - 1)) / cols;
         // 「导入本地书」虚线块只跟在在线书架后面（本地书段顶部单独放）
         final tiles = <Widget>[
-          for (final e in entries)
-            _tile(theme, e, tileW, square: square),
+          for (final e in entries) _tile(theme, e, tileW, square: square),
           if (_seg == 0 && !_selecting) _importTile(theme),
         ];
         return GridView.builder(
@@ -660,8 +683,7 @@ class _ShelfScreenState extends State<ShelfScreen> {
                 Positioned.fill(
                   child: AspectRatio(
                     aspectRatio: 1.05,
-                    child: BookCover(e.book,
-                        width: double.infinity, radius: 9),
+                    child: BookCover(e.book, width: double.infinity, radius: 9),
                   ),
                 ),
                 if (upd > 0)
@@ -687,6 +709,24 @@ class _ShelfScreenState extends State<ShelfScreen> {
                     left: 5,
                     top: 5,
                     child: _checkDot(selected),
+                  ),
+                if (_isComic(e))
+                  Positioned(
+                    left: 5,
+                    bottom: 5,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('漫画',
+                          style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white)),
+                    ),
                   ),
               ],
             ),
@@ -724,8 +764,7 @@ class _ShelfScreenState extends State<ShelfScreen> {
             width: square ? 58 : 78,
             child: AspectRatio(
               aspectRatio: 0.74,
-              child:
-                  BookCover(e.book, width: double.infinity, radius: 6),
+              child: BookCover(e.book, width: double.infinity, radius: 6),
             ),
           ),
           const SizedBox(width: 10),
@@ -742,6 +781,22 @@ class _ShelfScreenState extends State<ShelfScreen> {
                           style: theme.textTheme.titleSmall
                               ?.copyWith(fontSize: 13.5)),
                     ),
+                    if (_isComic(e)) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Brand.green.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Text('漫画',
+                            style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: Brand.green)),
+                      ),
+                      const SizedBox(width: 5),
+                    ],
                     if (upd > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -763,8 +818,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
                   Text(e.book.author!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 11, color: Brand.fg3(context))),
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontSize: 11, color: Brand.fg3(context))),
                 ],
                 const Spacer(),
                 ProgBar(shelfProgressOf(e), height: 4),
@@ -774,11 +829,13 @@ class _ShelfScreenState extends State<ShelfScreen> {
                       ? '已读完'
                       : e.chapterCount > 0
                           ? '${e.chapterIndex + 1}/${e.chapterCount} 章 · $pct%'
-                          : (e.chapterIndex > 0 ? '已读第 ${e.chapterIndex + 1} 章' : '未开始'),
+                          : (e.chapterIndex > 0
+                              ? '已读第 ${e.chapterIndex + 1} 章'
+                              : '未开始'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: 10.5, color: Brand.fg3(context)),
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(fontSize: 10.5, color: Brand.fg3(context)),
                 ),
               ],
             ),
@@ -793,6 +850,16 @@ class _ShelfScreenState extends State<ShelfScreen> {
           setState(() {
             if (!_selected.remove(e.book.url)) _selected.add(e.book.url);
           });
+          return;
+        }
+        // 漫画书直达漫画阅读器（章内页从进度记录恢复，与文字书同一条通路）
+        if (_isComic(e)) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ImageReaderScreen(
+              book: e.book,
+              chapterIndex: e.chapterIndex,
+            ),
+          ));
           return;
         }
         Navigator.of(context).push(MaterialPageRoute(
@@ -825,7 +892,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
         color: selected ? Brand.green : Colors.white.withValues(alpha: 0.9),
         shape: BoxShape.circle,
         border: Border.all(
-            color: selected ? Brand.green : const Color(0xFFB9C6B4), width: 1.5),
+            color: selected ? Brand.green : const Color(0xFFB9C6B4),
+            width: 1.5),
       ),
       child: selected
           ? const Icon(Icons.check, size: 13, color: Colors.white)
@@ -856,8 +924,8 @@ class _ShelfScreenState extends State<ShelfScreen> {
                       color: theme.hintColor)),
               const SizedBox(height: 2),
               Text('TXT / EPUB',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: 10, color: Brand.fg3(context))),
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(fontSize: 10, color: Brand.fg3(context))),
             ],
           ),
         ),

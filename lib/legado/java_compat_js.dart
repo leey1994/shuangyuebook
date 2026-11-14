@@ -1080,6 +1080,10 @@ const String kJavaCompatShim = r'''
     for (var kk in root) { if (g.java[kk] === undefined) g.java[kk] = root[kk]; }
   }
   g.__lgJava = root;
+  // 真机书源（sfacg 等）直接裸用 `Jsoup.parse(...)`：Rhino 里 importClass
+  // 后类名可裸写，这里也把常用类挂到全局，否则脚本 ReferenceError → 整条规则空。
+  g.Jsoup = Jsoup;
+  g.JsoupDocument = JsoupDocument;
   g.__lgBits = { b64enc: b64enc, b64dec: b64dec, toBytes: toBytes, toStr: toStr, hexOf: hexOf, unhex: unhex };
 })(this);
 ''';

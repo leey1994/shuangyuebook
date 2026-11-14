@@ -1,6 +1,8 @@
 // java.getElements / htmlFormat / strToBytes / bytesToStr：
 // 上游这几个成员缺失时是 TypeError，整条规则直接空
 // （巴卡漫画靠 getElements 一次取全部章节 li）。
+@Tags(['native'])
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -33,6 +35,16 @@ String _run(String code, {List<String> Function(String)? getElements}) {
 }
 
 void main() {
+  test('裸用 Jsoup（Rhino importClass 写法）不再 ReferenceError', () {
+    // 真机书源（sfacg 等）直接 `Jsoup.parse(html).select(...)`，
+    // 兼容层必须把它挂到全局，而不只是 Packages.org.jsoup.Jsoup。
+    final out = _run(
+      'typeof Jsoup + "|" + '
+      '(Jsoup.parse("<div><p>甲</p><p>乙</p></div>").select("p").size());',
+    );
+    expect(out, 'object|2');
+  });
+
   test('java.getElements 返回可迭代 Elements', () {
     final out = _run(
       'var els = java.getElements("class.list@li");'

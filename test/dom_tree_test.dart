@@ -2,6 +2,8 @@
 //
 // 上游 `result` 是 jsoup Element，源脚本用这些做「上一条标题」定位
 // （如有度中文：分卷标题在卷首章节的上一兄弟节点）。
+@Tags(['native'])
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/models.dart';

@@ -1,6 +1,8 @@
 // 引擎兼容性修复的单测：URL 模板（含 2.0 旧语法）/ :has 选择器 / POST 默认表单头与
 // 编码 / 请求头清洗 / 搜索结果明细归因 / 模板引擎（{{}}·@put·@get）/ JSONPath 增强 /
 // CSS 阶段（排除·切片·jsoup 伪类）/ XPath 谓词与自动路由。全部离线，不打真实网络。
+@Tags(['native'])
+
 import 'dart:convert';
 
 import 'package:fast_gbk/fast_gbk.dart';

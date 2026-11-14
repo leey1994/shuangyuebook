@@ -1,8 +1,8 @@
-
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -97,6 +97,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   final _scrollCtrl = ScrollController();
   Timer? _scrollSave;
 
+  /// 宽屏目录抽屉的列表控制器。旧实现每次 build new 一个、从不 dispose，
+  /// 抽屉开着时翻页/时钟 tick 每次都泄漏一个挂着的 controller。
+  final _tocCtrl = ScrollController();
+
+  /// 自动翻页（对齐 legado 系衍生版的「自动滚屏/自动翻页」）。
+  /// 分页模式按设定秒数翻下一页；滚动模式平滑下滚约一屏。
+  Timer? _autoFlipTimer;
+
   /// 分页模式的页面控制器（滑动 / 覆盖 / 淡入共用）。
   final _pageCtrl = PageController();
 
@@ -170,10 +178,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   String get _sleepLeft => _ttsSession.sleepLeft;
 
   /// 正在朗读的段落（高亮/跟随）：只在「同一本书、同一章」时对得上号。
-  int get _ttsCur => (_ttsSession.isReading(_book) &&
-          _ttsSession.chapterIndex == _chIdx)
-      ? _ttsSession.paraIndex
-      : -1;
+  int get _ttsCur =>
+      (_ttsSession.isReading(_book) && _ttsSession.chapterIndex == _chIdx)
+          ? _ttsSession.paraIndex
+          : -1;
 
   bool _ttsAutostartDone = false; // 听书直达只自动开播一次
   bool _ttsPage = false; // 全屏听书页（效果图 08）
@@ -392,7 +400,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     AppStore.I.cancelPrefetch();
     _scrollSave?.cancel();
     _repagTimer?.cancel();
+    _autoFlipTimer?.cancel();
     _scrollCtrl.dispose();
+    _tocCtrl.dispose();
     _pageCtrl.dispose();
     _pageCountTick.dispose();
     super.dispose();
@@ -550,7 +560,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
       // 滚动模式：本章不足一屏（短章）时自动续载下一章
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && g == _gen && !_prefs.paginate && _scrollCtrl.hasClients) {
+        if (mounted &&
+            g == _gen &&
+            !_prefs.paginate &&
+            _scrollCtrl.hasClients) {
           if (_scrollCtrl.position.maxScrollExtent < 300) _loadMore();
         }
       });
@@ -708,6 +721,61 @@ class _ReaderScreenState extends State<ReaderScreen>
     PetStore.I.emit(PetAction.finishBook);
   }
 
+  /// 自动翻页：点一下选间隔开始，再点一下（菜单栏）停下。
+  Future<void> _toggleAutoFlip() async {
+    if (_autoFlipTimer != null) return _stopAutoFlip();
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text('自动翻页',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            ),
+            for (final s in const [3, 5, 8, 12, 20, 30])
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.schedule, size: 18),
+                title: Text('每 $s 秒翻一页'),
+                onTap: () => Navigator.pop(ctx, s),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _autoFlipTimer = Timer.periodic(Duration(seconds: picked), (_) {
+      if (!mounted) return _stopAutoFlip();
+      if (_prefs.paginate) {
+        _goNext();
+      } else if (_scrollCtrl.hasClients) {
+        final pos = _scrollCtrl.position;
+        if (pos.pixels >= pos.maxScrollExtent - 2) {
+          // 滚到底：自动续载下一章（滚动模式本来就是「一滚到底接下一章」）
+          unawaited(_loadMore());
+        } else {
+          final h = MediaQuery.sizeOf(context).height * 0.9;
+          final target = (pos.pixels + h).clamp(0.0, pos.maxScrollExtent);
+          _scrollCtrl.animateTo(target,
+              duration: const Duration(milliseconds: 380),
+              curve: Curves.easeOut);
+        }
+      }
+    });
+    if (mounted) setState(() {});
+    _snack('自动翻页已开启（每 $picked 秒），再点一下「停翻页」可关闭');
+  }
+
+  void _stopAutoFlip() {
+    _autoFlipTimer?.cancel();
+    _autoFlipTimer = null;
+    if (mounted) setState(() {});
+  }
+
   void _goPrev() {
     if (_loading || _detail == null) return;
     if (_page > 0) {
@@ -769,7 +837,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 返回 [KeyEventResult.handled] 才能真正吞掉按键（否则系统音量条会跟着
   /// 弹）；up / repeat 事件也吞 —— 长按不连翻、听书外的场景不漏音量变化。
   KeyEventResult _onVolumeKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyUpEvent && event is! KeyRepeatEvent) {
+    if (event is! KeyDownEvent &&
+        event is! KeyUpEvent &&
+        event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final k = event.logicalKey;
@@ -876,130 +946,138 @@ class _ReaderScreenState extends State<ReaderScreen>
         autofocus: true,
         onKeyEvent: _onVolumeKey,
         child: Scaffold(
-      backgroundColor: c.bg,
-      body: Stack(
-        children: [
-          MediaQuery(
-            data: mq.copyWith(
-              padding: mq.padding.copyWith(top: _reservedTop),
-              viewPadding: mq.viewPadding.copyWith(top: _reservedTop),
-            ),
-            child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, box) {
-                  // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
-                  final w = box.maxWidth - _prefs.marginH * 2;
-                  final h =
-                      box.maxHeight - _prefs.marginV * 2 - _headerH - _footerH;
-                  _lastW = w;
-                  _lastH = h;
-                  final ts = MediaQuery.textScalerOf(context);
-                  _lastScaler = ts;
-                  if (w > 0 && h > 0) {
-                    final key = Object.hash(identityHashCode(_paras), w, h,
-                        _layoutSig, ts.toString());
-                    if (_pages == null) {
-                      // 新章节首排：只排一个时间预算（首屏立即有字），
-                      // 余下部分让出一帧后分批补排，避免长章节卡住这一帧
-                      final pager = ParaPaginator(
-                        paras: _paras,
-                        width: w,
-                        height: h,
-                        style: _bodyStyle,
-                        paraSpacing: _prefs.fontSize * 0.6,
-                        textScaler: ts,
-                        indent: _prefs.indentFirstLine ? '　　' : '',
-                        // 插图段落按固定块高测量，否则图片会被当成一行字
-                        heightOf: (p) => imagePathOf(p) == null
-                            ? null
-                            : imageBlockHeight(h),
-                      );
-                      _pagerGen++;
-                      final gen = _pagerGen;
-                      _pager = pager;
-                      pager.pump(const Duration(milliseconds: 8));
-                      _pages = pager.pages;
-                      _pagesKey = key;
-                      if (_startPage != 0) {
-                        _page = _startPage >= _pages!.length
-                            ? _pages!.length - 1
-                            : _startPage;
-                        _startPage = 0;
+          backgroundColor: c.bg,
+          body: Stack(
+            children: [
+              MediaQuery(
+                data: mq.copyWith(
+                  padding: mq.padding.copyWith(top: _reservedTop),
+                  viewPadding: mq.viewPadding.copyWith(top: _reservedTop),
+                ),
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      // 正文可用区：扣掉左右页边距、上下留白，以及页眉 / 页脚占位
+                      final w = box.maxWidth - _prefs.marginH * 2;
+                      final h = box.maxHeight -
+                          _prefs.marginV * 2 -
+                          _headerH -
+                          _footerH;
+                      _lastW = w;
+                      _lastH = h;
+                      final ts = MediaQuery.textScalerOf(context);
+                      _lastScaler = ts;
+                      if (w > 0 && h > 0) {
+                        final key = Object.hash(identityHashCode(_paras), w, h,
+                            _layoutSig, ts.toString());
+                        if (_pages == null) {
+                          // 新章节首排：只排一个时间预算（首屏立即有字），
+                          // 余下部分让出一帧后分批补排，避免长章节卡住这一帧
+                          final pager = ParaPaginator(
+                            paras: _paras,
+                            width: w,
+                            height: h,
+                            style: _bodyStyle,
+                            paraSpacing: _prefs.fontSize * 0.6,
+                            textScaler: ts,
+                            indent: _prefs.indentFirstLine ? '　　' : '',
+                            // 插图段落按固定块高测量，否则图片会被当成一行字
+                            heightOf: (p) => imagePathOf(p) == null
+                                ? null
+                                : imageBlockHeight(h),
+                          );
+                          _pagerGen++;
+                          final gen = _pagerGen;
+                          _pager = pager;
+                          pager.pump(const Duration(milliseconds: 8));
+                          _pages = pager.pages;
+                          _pagesKey = key;
+                          if (_startPage != 0) {
+                            _page = _startPage >= _pages!.length
+                                ? _pages!.length - 1
+                                : _startPage;
+                            _startPage = 0;
+                          }
+                          if (!pager.done) unawaited(_pumpRest(gen, pager));
+                        } else if (_pagesKey != key) {
+                          // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
+                          _repagTimer?.cancel();
+                          _repagTimer = Timer(
+                              const Duration(milliseconds: 160), _repaginate);
+                        }
                       }
-                      if (!pager.done) unawaited(_pumpRest(gen, pager));
-                    } else if (_pagesKey != key) {
-                      // 窗口拖拽/字号变化：防抖重排，期间沿用旧分页（防止每帧全量重排卡死）
-                      _repagTimer?.cancel();
-                      _repagTimer =
-                          Timer(const Duration(milliseconds: 160), _repaginate);
-                    }
-                  }
-                  if (_pages != null && _pages!.isNotEmpty) {
-                    _page = _page.clamp(0, _pages!.length - 1).toInt();
-                  }
+                      if (_pages != null && _pages!.isNotEmpty) {
+                        _page = _page.clamp(0, _pages!.length - 1).toInt();
+                      }
 
-                  final wide = box.maxWidth > kNarrowBreakpoint;
-                  return Stack(
-                    children: [
-                      Padding(
-                        padding:
-                            EdgeInsets.only(top: _headerH, bottom: _footerH),
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: (d) {
-                            if (_prefs.pageMode == PageMode.scroll) {
-                              setState(() => _menu = !_menu);
-                              return;
-                            }
-                            final third = box.maxWidth / 3;
-                            if (d.globalPosition.dx < third) {
-                              _goPrev();
-                            } else if (d.globalPosition.dx > third * 2) {
-                              _goNext();
-                            } else {
-                              setState(() => _menu = !_menu);
-                            }
-                          },
-                          child: _buildContent(),
-                        ),
-                      ),
-                      if (_prefs.showHeader)
-                        Positioned(
-                            top: 0, left: 0, right: 0, child: _buildHeader(c)),
-                      if (_prefs.showFooter)
-                        Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            child: _buildFooter(c)),
-                      if (_loading) _overlay(const CircularProgressIndicator()),
-                      if (_error != null) _overlay(_errorView()),
-                      // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
-                      if ((_loading || _error != null) &&
-                          Navigator.of(context).canPop())
-                        Positioned(
-                          top: 4,
-                          left: 4,
-                          child: IconButton(
-                            icon: Icon(Icons.arrow_back, color: _colors().fg),
-                            tooltip: '返回',
-                            onPressed: () => Navigator.of(context).maybePop(),
+                      final wide = box.maxWidth > kNarrowBreakpoint;
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: EdgeInsets.only(
+                                top: _headerH, bottom: _footerH),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTapUp: (d) {
+                                if (_prefs.pageMode == PageMode.scroll) {
+                                  setState(() => _menu = !_menu);
+                                  return;
+                                }
+                                final third = box.maxWidth / 3;
+                                if (d.globalPosition.dx < third) {
+                                  _goPrev();
+                                } else if (d.globalPosition.dx > third * 2) {
+                                  _goNext();
+                                } else {
+                                  setState(() => _menu = !_menu);
+                                }
+                              },
+                              child: _buildContent(),
+                            ),
                           ),
-                        ),
-                      if (_menu) _topBar(c),
-                      if (_menu) _bottomPanel(c),
-                      if (wide && _tocOpen) _tocDrawerOverlay(c),
-                      if (_speaking && !_menu) _ttsBar(c),
-                      if (_ttsPage) _ttsPageOverlay(c),
-                    ],
-                  );
-                },
+                          if (_prefs.showHeader)
+                            Positioned(
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                child: _buildHeader(c)),
+                          if (_prefs.showFooter)
+                            Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: _buildFooter(c)),
+                          if (_loading)
+                            _overlay(const CircularProgressIndicator()),
+                          if (_error != null) _overlay(_errorView()),
+                          // 加载/出错期间没有菜单入口，提供返回控件防止“出不去”
+                          if ((_loading || _error != null) &&
+                              Navigator.of(context).canPop())
+                            Positioned(
+                              top: 4,
+                              left: 4,
+                              child: IconButton(
+                                icon:
+                                    Icon(Icons.arrow_back, color: _colors().fg),
+                                tooltip: '返回',
+                                onPressed: () =>
+                                    Navigator.of(context).maybePop(),
+                              ),
+                            ),
+                          if (_menu) _topBar(c),
+                          if (_menu) _bottomPanel(c),
+                          if (wide && _tocOpen) _tocDrawerOverlay(c),
+                          if (_speaking && !_menu) _ttsBar(c),
+                          if (_ttsPage) _ttsPageOverlay(c),
+                        ],
+                      );
+                    },
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    ),
+        ),
       ),
     );
   }
@@ -1016,9 +1094,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       paraSpacing: _prefs.fontSize * 0.6,
       textScaler: _lastScaler,
       indent: _prefs.indentFirstLine ? '　　' : '',
-      heightOf: (p) => imagePathOf(p) == null
-          ? null
-          : imageBlockHeight(_lastH),
+      heightOf: (p) => imagePathOf(p) == null ? null : imageBlockHeight(_lastH),
     );
     _pagerGen++;
     final gen = _pagerGen;
@@ -1039,7 +1115,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 章节切换 / 重排会自增 [_pagerGen]，过期任务在此退出（P1-7）。
   Future<void> _pumpRest(int gen, ParaPaginator pager) async {
     await Future<void>.delayed(Duration.zero); // 先让首屏那一帧渲染出来
-    while (mounted && gen == _pagerGen && identical(_pager, pager) && !pager.done) {
+    while (mounted &&
+        gen == _pagerGen &&
+        identical(_pager, pager) &&
+        !pager.done) {
       pager.pump(const Duration(milliseconds: 6));
       if (!mounted || gen != _pagerGen || !identical(_pager, pager)) return;
       _pageCountTick.value++; // 页脚「第 x/y 页」跟着涨
@@ -1147,6 +1226,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     final img = imagePathOf(para);
     if (img != null) {
       final f = File(img);
+      // EPUB 插图常是整页扫描图（几千像素宽），不解上限一页插图就是几十 MB
+      // 常驻内存。解码宽度封顶到「屏宽 × dpr」，既清晰又不超采样。
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final decodeW =
+          (MediaQuery.sizeOf(context).width * dpr).clamp(560.0, 1600.0).round();
       return SizedBox(
         height: blockH,
         width: double.infinity,
@@ -1156,6 +1240,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.medium,
                 gaplessPlayback: true,
+                cacheWidth: decodeW,
               )
             : Center(
                 child: Text('［插图］',
@@ -1166,9 +1251,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     final t = _indent(para);
     return highlight
         ? ColoredBox(
-            color: _isNightBg
-                ? const Color(0x333DDC97)
-                : const Color(0x222F6B3C),
+            color:
+                _isNightBg ? const Color(0x333DDC97) : const Color(0x222F6B3C),
             child: Text(t, style: _bodyStyle),
           )
         : Text(t, style: _bodyStyle);
@@ -1413,8 +1497,8 @@ class _ReaderScreenState extends State<ReaderScreen>
             children: [
               ValueListenableBuilder<String>(
                 valueListenable: _clockText,
-                builder: (_, text, __) => Text(text,
-                    style: TextStyle(color: c.dim, fontSize: 11.5)),
+                builder: (_, text, __) =>
+                    Text(text, style: TextStyle(color: c.dim, fontSize: 11.5)),
               ),
               const Spacer(),
               if (_detail != null)
@@ -1514,7 +1598,8 @@ class _ReaderScreenState extends State<ReaderScreen>
               offset: const Offset(0, 10)),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(wide ? 22 : 8, 7, wide ? 22 : 8, wide ? 7 : 8),
+      padding:
+          EdgeInsets.fromLTRB(wide ? 22 : 8, 7, wide ? 22 : 8, wide ? 7 : 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1563,6 +1648,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                         ? () => setState(() => _ttsPage = true)
                         : () => unawaited(_toggleTts())),
                 _barBtn(
+                    icon: _autoFlipTimer != null
+                        ? Icons.pause_circle_outline
+                        : Icons.slow_motion_video,
+                    label: _autoFlipTimer != null ? '停翻页' : '自动翻页',
+                    color: _autoFlipTimer != null ? barOn : barDim,
+                    wide: true,
+                    onTap: () => unawaited(_toggleAutoFlip())),
+                _barBtn(
                     icon: Icons.tune,
                     label: '设置',
                     color: _showSettings ? barOn : barDim,
@@ -1599,6 +1692,15 @@ class _ReaderScreenState extends State<ReaderScreen>
                 ),
                 Expanded(
                   child: _barBtn(
+                      icon: _autoFlipTimer != null
+                          ? Icons.pause_circle_outline
+                          : Icons.slow_motion_video,
+                      label: _autoFlipTimer != null ? '停翻页' : '自动翻页',
+                      color: _autoFlipTimer != null ? barOn : barDim,
+                      onTap: () => unawaited(_toggleAutoFlip())),
+                ),
+                Expanded(
+                  child: _barBtn(
                       icon: Icons.tune,
                       label: '设置',
                       color: _showSettings ? barOn : barDim,
@@ -1630,7 +1732,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                       borderRadius: BorderRadius.circular(18),
                       boxShadow: [
                         BoxShadow(
-                            color: Colors.black.withValues(alpha: darkBg ? 0.4 : 0.12),
+                            color: Colors.black
+                                .withValues(alpha: darkBg ? 0.4 : 0.12),
                             blurRadius: 22,
                             offset: const Offset(0, 8)),
                       ],
@@ -1816,9 +1919,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (!mounted) return;
     _dlAll = false;
     messenger.showSnackBar(SnackBar(
-        content: Text(ok
-            ? '全书缓存完成（$done 章）'
-            : '缓存中断（$done/${d.chapters.length} 章）')));
+        content: Text(
+            ok ? '全书缓存完成（$done 章）' : '缓存中断（$done/${d.chapters.length} 章）')));
   }
 
   /// 宽屏右侧目录抽屉（效果图 12）：当前章高亮 + 「在读」标记。
@@ -1828,10 +1930,14 @@ class _ReaderScreenState extends State<ReaderScreen>
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     const extent = 38.0;
-    final ctrl = ScrollController(
-      initialScrollOffset:
-          (_chIdx * extent - 190).clamp(0.0, double.infinity).toDouble(),
-    );
+    // 控制器是状态字段（dispose 统一释放）；换章后每帧把视口对到当前章。
+    final target =
+        (_chIdx * extent - 190).clamp(0.0, double.infinity).toDouble();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tocOpen || !_tocCtrl.hasClients) return;
+      if ((_tocCtrl.offset - target).abs() > 1) _tocCtrl.jumpTo(target);
+    });
+    final ctrl = _tocCtrl;
     return Positioned(
       top: 0,
       right: 0,
@@ -1854,8 +1960,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text('共 ${d.chapters.length} 章',
-                        style: TextStyle(
-                            fontSize: 11, color: Brand.fg3(context))),
+                        style:
+                            TextStyle(fontSize: 11, color: Brand.fg3(context))),
                   ),
                   IconButton(
                     icon: Icon(Icons.close, size: 18, color: theme.hintColor),
@@ -1901,16 +2007,13 @@ class _ReaderScreenState extends State<ReaderScreen>
                                     fontSize: 12.5,
                                     fontWeight:
                                         cur ? FontWeight.w700 : FontWeight.w400,
-                                    color: cur
-                                        ? Brand.green
-                                        : theme.hintColor,
+                                    color: cur ? Brand.green : theme.hintColor,
                                   )),
                             ),
                             if (cur)
                               Text('在读',
                                   style: TextStyle(
-                                      fontSize: 10,
-                                      color: Brand.fg3(context))),
+                                      fontSize: 10, color: Brand.fg3(context))),
                           ],
                         ),
                       ),
@@ -2036,8 +2139,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           children: [
             SizedBox(
                 width: 44,
-                child: Text('字体',
-                    style: TextStyle(color: c.dim, fontSize: 12))),
+                child:
+                    Text('字体', style: TextStyle(color: c.dim, fontSize: 12))),
             Expanded(
               child: Row(
                 children: [
@@ -2198,8 +2301,8 @@ class _ReaderScreenState extends State<ReaderScreen>
             children: [
               SizedBox(
                   width: 44,
-                  child: Text('定时',
-                      style: TextStyle(color: c.dim, fontSize: 12))),
+                  child:
+                      Text('定时', style: TextStyle(color: c.dim, fontSize: 12))),
               for (final m in const [0, 15, 30, 60])
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
@@ -2247,7 +2350,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   // ---- 在线音色（Edge TTS）----
 
   /// 当前是否选中在线音色。
-
 
   /// 段落 → 本地缓存 mp3 路径（<缓存>/tts/<sha1(voice|text)>.mp3，命中直接复用）。
 
@@ -2369,8 +2471,42 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// 波形高度百分比（效果图 08 的静态形态，按播放进度染色）。
   static const List<int> _waveHeights = [
-    24, 40, 58, 32, 68, 46, 26, 54, 72, 38, 30, 62, 48, 34, 56, 66, 42, 28,
-    60, 50, 36, 70, 52, 32, 58, 64, 40, 26, 54, 68, 44, 30, 52, 62, 40, 32,
+    24,
+    40,
+    58,
+    32,
+    68,
+    46,
+    26,
+    54,
+    72,
+    38,
+    30,
+    62,
+    48,
+    34,
+    56,
+    66,
+    42,
+    28,
+    60,
+    50,
+    36,
+    70,
+    52,
+    32,
+    58,
+    64,
+    40,
+    26,
+    54,
+    68,
+    44,
+    30,
+    52,
+    62,
+    40,
+    32,
   ];
 
   String _fmtDur(Duration d) =>
@@ -2462,8 +2598,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        border:
-                            Border.all(color: c.dim.withValues(alpha: 0.4)),
+                        border: Border.all(color: c.dim.withValues(alpha: 0.4)),
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Row(
@@ -2471,8 +2606,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                           Icon(Icons.schedule, size: 12, color: c.dim),
                           const SizedBox(width: 4),
                           Text(_sleepMin > 0 ? _sleepLeft : '定时',
-                              style:
-                                  TextStyle(color: c.dim, fontSize: 11.5)),
+                              style: TextStyle(color: c.dim, fontSize: 11.5)),
                         ],
                       ),
                     ),
@@ -2641,8 +2775,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   children: [
                     _voiceChip(c, '', '系统'),
                     for (final e in kEdgeVoices.entries)
-                      _voiceChip(
-                          c, e.key, e.value.$1.replaceAll('（在线）', '')),
+                      _voiceChip(c, e.key, e.value.$1.replaceAll('（在线）', '')),
                   ],
                 ),
               ),
@@ -2676,8 +2809,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                           style: TextStyle(
                             fontSize: 12,
                             color: _sleepMin == m ? Colors.white : c.dim,
-                            fontWeight:
-                                _sleepMin == m ? FontWeight.w700 : null,
+                            fontWeight: _sleepMin == m ? FontWeight.w700 : null,
                           ),
                         ),
                       ),
@@ -2824,9 +2956,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 controller: ctrl,
                 itemCount: d.chapters.length,
                 itemBuilder: (ctx2, i) => ListTile(
-                  key: i == 0
-                      ? probeKey
-                      : (i == chIdx ? curKey : null),
+                  key: i == 0 ? probeKey : (i == chIdx ? curKey : null),
                   dense: true,
                   title: Text(
                     d.chapters[i].title,
@@ -2860,8 +2990,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       final h = box?.size.height ?? 36;
       if (h <= 0) return;
       final pos = ctrl.position;
-      final target =
-          (chIdx * h).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
+      final target = (chIdx * h)
+          .clamp(pos.minScrollExtent, pos.maxScrollExtent)
+          .toDouble();
       if ((target - pos.pixels).abs() < 1) return;
       try {
         await ctrl.animateTo(target,
@@ -2874,8 +3005,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       final c = curKey.currentContext;
       if (c == null || !c.mounted) return;
       Scrollable.ensureVisible(c,
-          duration: const Duration(milliseconds: 120),
-          alignment: 0.5);
+          duration: const Duration(milliseconds: 120), alignment: 0.5);
     });
   }
 

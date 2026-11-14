@@ -6,6 +6,7 @@
 //   - `text.X` 选择器（ownText 包含，大小写不敏感）
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/legado/analyze_rule.dart';
+import 'package:shuangyue/legado/js_engine.dart';
 import 'package:shuangyue/legado/rule_analyzer.dart';
 
 void main() {
@@ -69,7 +70,7 @@ void main() {
     expect(eng.getString('text.不存在@href'), isNull);
   });
 
-  test('xpath 元素 ctx：//@href 与 <js> outerHtml result', () {
+  test('xpath 元素 ctx：//@href（纯规则，离线可跑）', () {
     const html = '<html><body><div class="float-list"><ul>'
         '<li><span class="time">3-28</span><a href="https://www.heiyan.com/book/155711/13443829" class="name">第1章 阎王帖</a></li>'
         '<li><span class="time">3-28</span><a href="https://www.heiyan.com/book/155711/13443830" class="name">第2章 上门女婿</a></li>'
@@ -78,19 +79,44 @@ void main() {
     final els = eng.getElements('//li[span]/a');
     expect(els.length, 2);
     final first = els.first;
-    print('EL_TYPE=${first.runtimeType}');
     final href = eng.getString(r'//@href', ctx: first);
-    print('HREF_EVAL=[$href]');
     expect(href, 'https://www.heiyan.com/book/155711/13443829');
+  });
+
+  test('xpath 元素 ctx：<js> 链取 outerHtml/result', () {
+    // 需要 QuickJS 原生库（本仓库其余 js_* 测试同一约定）：
+    //   $env:PATH = "<quickjs_engine_native 的构建输出目录>;$env:PATH"
+    // 库不在 PATH 时跳过（CI / 未配置的机器不红）。
+    // 注意：markTestSkipped 只记「跳过」不中断执行，必须跟上 return。
+    if (!_quickJsAvailable()) {
+      markTestSkipped('QuickJS 原生库不在 PATH，跳过 <js> 规则用例');
+      return;
+    }
+    const html = '<html><body><div class="float-list"><ul>'
+        '<li><span class="time">3-28</span><a href="https://www.heiyan.com/book/155711/13443829" class="name">第1章 阎王帖</a></li>'
+        '<li><span class="time">3-28</span><a href="https://www.heiyan.com/book/155711/13443830" class="name">第2章 上门女婿</a></li>'
+        '</ul></div></body></html>';
+    final eng = AnalyzeRule(html, baseUrl: 'https://www.heiyan.com/');
+    final els = eng.getElements('//li[span]/a');
+    expect(els.length, 2);
+    final first = els.first;
     final nm = eng.getString(
         "<js>(/isvip/.test(String(result))?'L':'') + String(result).match(/>(.*?)</)[1]</js>",
         ctx: first);
-    print('NM_EVAL=[$nm]');
     expect(nm, '第1章 阎王帖');
     final cu = eng.getString(
         "//@href<js>'https://a.heiyan.com/ajax/chapter/content/'+result.match(/\\d+\$/)[0]</js>",
         ctx: first);
-    print('CU_EVAL=[$cu]');
     expect(cu, 'https://a.heiyan.com/ajax/chapter/content/13443829');
   });
+}
+
+/// QuickJS 是否真的可用：试求值一段极小脚本。
+/// 只看 `JsBridge.available` 不够 —— 那是「上次用失败后」才翻 false 的惰性标记。
+bool _quickJsAvailable() {
+  try {
+    return JsBridge.evalCode('1+1') == '2';
+  } catch (_) {
+    return false;
+  }
 }

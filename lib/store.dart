@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data/image_downloader.dart';
+import 'data/image_file_cache.dart';
 import 'data/replace_rules.dart';
 import 'data/shelf_sort.dart';
 import 'legado/models.dart';
@@ -1051,9 +1053,52 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  /// 已缓存的章节数。
-  Future<int> cachedChapterCount(String bookUrl) async {
+  /// 取图片章节（漫画）：内存 → 磁盘 → 网络，缓存键与正文共用同一空间
+  /// （一本书要么是图片源要么是文本源，同名键不会是两种内容）。
+  /// 值即图片地址列表；净化规则不适用（URL 不是正文）。
+  Future<List<String>> chapterImages(
+    NovelSource src,
+    BookDetail detail,
+    Chapter ch,
+  ) async {
+    final key = _chKey(detail.book.url, ch.url);
+    final mem = _memGet(key);
+    if (mem != null) return mem;
+    final pend = _inflightChapter[key];
+    if (pend != null) return await pend;
+    final fut = _chapterImagesInner(src, detail, ch, key);
+    _inflightChapter[key] = fut;
+    try {
+      return await fut;
+    } finally {
+      if (identical(_inflightChapter[key], fut)) _inflightChapter.remove(key);
+    }
+  }
+
+  Future<List<String>> _chapterImagesInner(
+    NovelSource src,
+    BookDetail detail,
+    Chapter ch,
+    String key,
+  ) async {
+    final bookUrl = detail.book.url;
     await _meta(bookUrl);
+    final hit = await _readChapter(bookUrl, ch.url);
+    if (hit != null) {
+      _memPut(key, hit);
+      return hit;
+    }
+    final imgs = await src.fetchChapterImages(detail, ch);
+    if (imgs.isNotEmpty) {
+      _memPut(key, imgs);
+      await _writeChapter(bookUrl, ch.url, imgs); // 空结果不入缓存（可重试）
+    }
+    await _rememberDetail(detail);
+    return imgs;
+  }
+
+  /// 已缓存的章节数。
+  Future<int> cachedChapterCount(String bookUrl) async {    await _meta(bookUrl);
     final dir = _bookDir(bookUrl);
     if (dir == null) return 0;
     var n = 0;
@@ -1237,6 +1282,8 @@ class AppStore extends ChangeNotifier {
   /// 下载整本书离线；[onProgress] (已完成, 总数)；返回是否全部完成。
   ///
   /// 一章一文件，无需批量落盘：已存在的章节直接跳过（文件存在即命中）。
+  /// 图片书源除 URL 列表外还会把图片字节缓存到 image_cache（连读 3 张失败
+  /// 就放弃本章剩余，避免站点挂掉时整本下载卡在超时里）。
   Future<bool> downloadBook(
     NovelSource src,
     BookDetail detail, {
@@ -1254,14 +1301,45 @@ class AppStore extends ChangeNotifier {
         continue;
       }
       try {
-        final t = await src.fetchChapter(detail, ch);
-        if (t.isNotEmpty) await _writeChapter(bookUrl, ch.url, t);
+        final t = src.isImageBook
+            ? await src.fetchChapterImages(detail, ch)
+            : await src.fetchChapter(detail, ch);
+        if (t.isNotEmpty) {
+          await _writeChapter(bookUrl, ch.url, t);
+          // 图片书源：只存 URL 列表断网照样白屏，字节一并落盘才是真离线
+          if (src.isImageBook) {
+            await _cacheImagesForChapter(src, detail.book.url, t);
+          }
+        }
       } catch (_) {
         // 单章失败不中断整本下载
       }
       onProgress?.call(i + 1, total);
     }
     return true;
+  }
+
+  /// 图片书源：把一章的图片字节落盘（已缓存的跳过）。
+  Future<void> _cacheImagesForChapter(
+    NovelSource src,
+    String referer,
+    List<String> urls,
+  ) async {
+    var consecutiveFailures = 0;
+    for (final u in urls) {
+      if (!u.startsWith('http')) continue; // data:URI 内嵌图无需下载
+      if (await ImageFileCache.has(u)) {
+        consecutiveFailures = 0;
+        continue;
+      }
+      try {
+        final bytes = await fetchImageBytes(u, src: src, referer: referer);
+        await ImageFileCache.write(u, bytes);
+        consecutiveFailures = 0;
+      } catch (_) {
+        if (++consecutiveFailures >= 3) break; // 站点挂了：别把整本拖进超时
+      }
+    }
   }
 
   // ---------- 自动预取后续章节 ----------
@@ -1342,6 +1420,13 @@ class AppStore extends ChangeNotifier {
     _metaFut.clear(); // 目录与章节都已删掉，别拿旧缓存糊回去
     _metaSig.clear();
     // 章节缓存已删；Expando 随对象回收，不需要手动清
+    // 内存正文 + 在途请求一并作废：否则刚清完，chapterText 仍从 _memChapter
+    // 返回旧文（用户以为清了其实还在），在途请求完成后又会把文件写回
+    // 「已清空」的目录；预取循环同理，先取消别让它一格格灌回来。
+    _memChapter.clear();
+    _memOrder.clear();
+    _inflightChapter.clear();
+    cancelPrefetch();
     notifyListeners();
   }
 }

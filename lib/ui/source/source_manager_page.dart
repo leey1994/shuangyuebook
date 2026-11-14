@@ -30,6 +30,60 @@ import 'source_list_filter.dart';
 /// 书源管理页。
 ///
 /// [store] 省略时用全局 [SourceStore.shared]（main.dart 启动时创建并已加载）。
+/// 输入对话框：控制器自己持有、自己释放（见 [_SourceManagerPageState._prompt]）。
+class _PromptDialog extends StatefulWidget {
+  const _PromptDialog({
+    required this.title,
+    required this.hint,
+    required this.confirm,
+    this.keyboard,
+    this.maxLines = 1,
+  });
+
+  final String title;
+  final String hint;
+  final String confirm;
+  final TextInputType? keyboard;
+  final int maxLines;
+
+  @override
+  State<_PromptDialog> createState() => _PromptDialogState();
+}
+
+class _PromptDialogState extends State<_PromptDialog> {
+  final TextEditingController _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        maxLines: widget.maxLines,
+        keyboardType: widget.keyboard,
+        decoration: InputDecoration(hintText: widget.hint),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          child: Text(widget.confirm),
+        ),
+      ],
+    );
+  }
+}
+
 class SourceManagerPage extends StatefulWidget {
   const SourceManagerPage({super.key, this.store});
 
@@ -167,31 +221,35 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     }
     return AppBar(
       title: const Text('书源管理'),
+      // 大字体/窄屏下 5 个 IconButton 会把标题挤没、+ 号贴边被裁。
+      // 只留最常用的「搜索」和「导入(+ )」，其余收进更多菜单。
       actions: [
         IconButton(
           icon: const Icon(Icons.search),
           tooltip: '搜索书源',
           onPressed: _openSearch,
         ),
-        IconButton(
-          icon: const Icon(Icons.checklist),
-          tooltip: '批量管理',
-          onPressed: _store.isEmpty
-              ? null
-              : () => setState(() {
-                    _bulkMode = true;
-                    _selected.clear();
-                  }),
-        ),
-        IconButton(
-          icon: const Icon(Icons.ios_share),
-          tooltip: '导出书源',
-          onPressed: _export,
-        ),
-        IconButton(
-          icon: const Icon(Icons.fact_check_outlined),
-          tooltip: '检测书源可用性',
-          onPressed: _manualCheck,
+        PopupMenuButton<String>(
+          tooltip: '更多操作',
+          onSelected: (v) {
+            switch (v) {
+              case 'bulk':
+                if (_store.isEmpty) return;
+                setState(() {
+                  _bulkMode = true;
+                  _selected.clear();
+                });
+              case 'export':
+                _export();
+              case 'check':
+                _manualCheck();
+            }
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'bulk', child: Text('批量管理')),
+            PopupMenuItem(value: 'export', child: Text('导出书源')),
+            PopupMenuItem(value: 'check', child: Text('检测书源可用性')),
+          ],
         ),
         IconButton(
           icon: const Icon(Icons.add),
@@ -847,79 +905,76 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   void _showImportSheet() {
-    showModalBottomSheet<void>(
+    // 注意：这里不能在 ListTile.onTap 里「先 pop 弹层、紧接着 showDialog」——
+    // pop 是异步的且关的是当前栈顶，对话框抢先入栈后路由栈会错乱，
+    // 表现就是「从订阅链接导入 → 返回」时弹层莫名其妙又出现。
+    // 改为弹层返回一个动作名，等它真正关闭后（then）再打开对应流程。
+    showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+      ),
       builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: Text('导入书源'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.content_paste),
-              title: const Text('粘贴导入'),
-              subtitle: const Text('粘贴「阅读 3.0」格式的书源 JSON'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _importFromText();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.insert_drive_file),
-              title: const Text('从文件导入'),
-              subtitle: const Text('浏览手机 / 电脑上的 JSON 文件'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _importFromFile();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('内置精选书源'),
-              subtitle: const Text('离线内置书源包（无需联网），导入后可在本页单独删除'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _importBuiltin();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('用 AI 生成书源'),
-              subtitle: const Text('填站点地址与模型接口，自动生成并实测通过后入库'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                showAiSource(context, _store);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.link),
-              title: const Text('从订阅链接导入'),
-              subtitle: const Text('用网络地址获取书源 JSON'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _importFromUrl();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.travel_explore),
-              title: const Text('从网络获取并测试'),
-              subtitle: const Text('下载公开书源合集，全链路测试后一键导入可用源'),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => SourceFetchPage(store: _store),
-                  ),
-                );
-              },
-            ),
-          ],
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom + 12,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 4),
+                child: Text('导入书源'),
+              ),
+              for (final opt in const [
+                (Icons.content_paste, '粘贴导入', '粘贴「阅读 3.0」格式的书源 JSON', 'paste'),
+                (Icons.insert_drive_file, '从文件导入', '浏览手机 / 电脑上的 JSON 文件', 'file'),
+                (Icons.auto_awesome, '内置精选书源', '离线内置书源包（无需联网），导入后可在本页单独删除', 'builtin'),
+                (Icons.auto_awesome, '用 AI 生成书源', '填站点地址与模型接口，自动生成并实测通过后入库', 'ai'),
+                (Icons.link, '从订阅链接导入', '用网络地址获取书源 JSON', 'url'),
+                (Icons.travel_explore, '从网络获取并测试', '下载公开书源合集，全链路测试后一键导入可用源', 'fetch'),
+              ])
+                ListTile(
+                  dense: true,
+                  leading: Icon(opt.$1),
+                  title: Text(opt.$2),
+                  subtitle: Text(opt.$3,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.pop(sheetCtx, opt.$4),
+                ),
+            ],
+          ),
         ),
       ),
-    );
+    ).then((action) {
+      if (!mounted || action == null) return;
+      // 弹层 route 的 InheritedElement 要等下一帧才 debugDeactivated 完，
+      // 立刻 push 新 route 会让两边的依赖关系交错（真机红屏
+      // `_dependents.isEmpty`）。延一帧，等路由彻底收尾再开下一个界面。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        switch (action) {
+          case 'paste':
+            _importFromText();
+          case 'file':
+            _importFromFile();
+          case 'builtin':
+            _importBuiltin();
+          case 'ai':
+            showAiSource(context, _store);
+          case 'url':
+            _importFromUrl();
+          case 'fetch':
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SourceFetchPage(store: _store),
+              ),
+            );
+        }
+      });
+    });
   }
 
   void _report(SourceImportReport r) {
@@ -1077,32 +1132,21 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     TextInputType? keyboard,
     int maxLines = 1,
   }) async {
-    final controller = TextEditingController();
-    final text = await showDialog<String>(
+    // 文本框控制器由对话框自己的 State 持有并在其 dispose 里释放：
+    // 之前在 showDialog 外面创建、await 后立刻 dispose，对话框的
+    // InheritedElement 还在 deactivate，会触发 Flutter 断言红屏
+    // （`_dependents.isEmpty`）。
+    return showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: maxLines,
-          keyboardType: keyboard,
-          decoration: InputDecoration(hintText: hint),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: Text(confirm),
-          ),
-        ],
+      useRootNavigator: true,
+      builder: (_) => _PromptDialog(
+        title: title,
+        hint: hint,
+        confirm: confirm,
+        keyboard: keyboard,
+        maxLines: maxLines,
       ),
     );
-    controller.dispose();
-    return text;
   }
 
   Future<void> _importFromText() async {
