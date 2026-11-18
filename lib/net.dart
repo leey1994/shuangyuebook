@@ -34,12 +34,10 @@ class Net {
     return (_cookies[host] ?? '').isNotEmpty;
   }
 
-  static Map<String, String> _headers(String url,
-      {String? referer, String? userAgent}) {
+  static Map<String, String> _headers(String url, {String? referer}) {
     final host = Uri.parse(url).host;
     final h = <String, String>{
-      // 个别站（起点移动站）只认移动 UA，其余站沿用统一的桌面 UA
-      'User-Agent': userAgent ?? _ua,
+      'User-Agent': _ua,
       'Accept':
           'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'zh-CN,zh;q=0.9',
@@ -117,9 +115,8 @@ class Net {
   }
 
   /// GET；浏览器检查/JS 种 cookie 挑战则解锁后重试（最多 4 轮，兼容多轮种罐）。
-  static Future<Resp> get(String url,
-      {String? referer, String? userAgent}) async {
-    var r = await _get(url, referer: referer, userAgent: userAgent);
+  static Future<Resp> get(String url, {String? referer}) async {
+    var r = await _get(url, referer: referer);
     var guard = 0;
     while (guard < 4 && _needsRetry(r)) {
       if (_isJsChallenge(r)) {
@@ -132,17 +129,15 @@ class Net {
           _cookies[host] = '$jar; __sc_clearance=1'.trim();
         }
       }
-      r = await _get(url, referer: referer, userAgent: userAgent);
+      r = await _get(url, referer: referer);
       guard++;
     }
     return r;
   }
 
-  static Future<Resp> _get(String url,
-      {String? referer, String? userAgent}) async {
+  static Future<Resp> _get(String url, {String? referer}) async {
     final r = await _client
-        .get(Uri.parse(url),
-            headers: _headers(url, referer: referer, userAgent: userAgent))
+        .get(Uri.parse(url), headers: _headers(url, referer: referer))
         .timeout(_timeout);
     _absorbCookies(url, r);
     return Resp(r.statusCode, decodeBody(r.bodyBytes), url,

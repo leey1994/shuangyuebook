@@ -9,7 +9,6 @@ import 'libahao.dart';
 import 'local_source.dart';
 import 'minyuan.dart';
 import 'owllook_source.dart';
-import 'qidian.dart';
 import 'quanben.dart';
 import 'sanyt.dart';
 import 'shenwen.dart';
@@ -25,7 +24,6 @@ import 'yewa.dart';
 /// 这些是爽阅的立身之本：不依赖任何外部 JSON，改版前也不会失效。
 final List<NovelSource> builtinSources = <NovelSource>[
   FanqieSource(),
-  QidianSource(),
   OwllookSource(), // owllook：自带榜单 / 聚合搜索 / 在线正文，纯 HTTP
   YewaSource(),
   SuduGuuSource(),
