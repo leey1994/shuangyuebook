@@ -1,6 +1,7 @@
 import '../legado/models.dart';
 import '../models.dart';
 import 'douyinxs.dart';
+import 'fanqie.dart';
 import 'gdbzkz.dart';
 import 'huangjinwu.dart';
 import 'legado_source.dart';
@@ -22,6 +23,7 @@ import 'yewa.dart';
 ///
 /// 这些是爽阅的立身之本：不依赖任何外部 JSON，改版前也不会失效。
 final List<NovelSource> builtinSources = <NovelSource>[
+  FanqieSource(),
   OwllookSource(), // owllook：自带榜单 / 聚合搜索 / 在线正文，纯 HTTP
   YewaSource(),
   SuduGuuSource(),
