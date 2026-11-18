@@ -1,4 +1,4 @@
-// 权威榜单：owllook 起点榜 / 纵横榜 / Owllook 搜索榜。
+// 权威榜单：owllook 起点榜 / 番茄榜 / Owllook 搜索榜。
 //
 // 为什么不再只吃书源自己的榜单：站内「热销 / 新书」榜是各聚合站按自己的
 // 镜像顺序排的，排在前面常常是没人读的老书或推广位，而且同一个站一天里
@@ -6,12 +6,12 @@
 //
 // 这里读 owllook（小说搜索引擎）汇总的权威榜单整页：
 //   · 起点榜   ← https://www.owllook.top/md/qidian（起点月票/畅销/阅读指数等）
-//   · 纵横榜   ← https://www.owllook.top/md/zongheng（纵横月票/畅销/新书等）
+//   · 番茄榜   ← https://fanqienovel.com/rank/<gender>_<type>（番茄官方阅读/新书榜，
+//                 男频女频各取前 10，书名/简介带 PUA 字体反爬，本地还原）
 //   · Owllook榜 ← https://www.owllook.top/md/（站内搜索次数排行）
 //
-// 起点主站有 WAF（probe.js 挑战 + majax 需要 WebView 才能取得的
-// _csrfToken），纯 HTTP 客户端拿不到稳定数据；owllook 的 /md/* 是服务端
-// 渲染的表格，纯 HTTP 可稳定直连。
+// 起点主站有 WAF（probe.js 挑战），owllook 的 /md/qidian 是服务端渲染的
+// 表格，纯 HTTP 可稳定直连；番茄榜读官方榜单页的 __INITIAL_STATE__。
 //
 // 榜单只给出「书名」，能不能读不取决于榜单站 —— 由
 // [resolveHotItems]（见 hot_resolver.dart）拿回用户自己的可用书源里匹配。
@@ -24,7 +24,10 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../dom.dart';
+import '../models.dart';
 import '../net.dart';
+import '../sources/fanqie.dart';
+import '../sources/fanqie_font.dart';
 
 /// 榜单语义：热搜（大家都在搜）还是热读（大家都在看）。
 enum HotBoardKind { search, read }
@@ -41,6 +44,7 @@ class HotItem {
     this.status,
     this.cover,
     this.hint,
+    this.book,
   });
 
   /// 榜单内名次（1 起）。
@@ -66,6 +70,9 @@ class HotItem {
 
   /// 榜单口径数值（订阅金额名次说明等），原样展示。
   final String? hint;
+
+  /// 榜单直接给出的可读书（番茄榜带 bookId，不用再拿书名回书源里匹配）。
+  final Book? book;
 
   @override
   String toString() => 'HotItem($rank, $title, $site)';
@@ -112,16 +119,28 @@ class HotBoard {
         '按榜单优先序合并去重，每条标注来自哪个分榜。',
   );
 
-  /// 纵横榜：owllook 汇总的纵横中文网人气榜（月票 / 24小时畅销 / 新书…）。
-  static const HotBoard owllookZongheng = HotBoard(
-    id: 'owllook_zongheng',
-    label: '纵横榜',
-    site: 'owllook·纵横榜',
+  /// 番茄榜：番茄小说官方榜单（男频 / 女频 × 阅读榜 / 新书榜，各前 10）。
+  ///
+  /// 榜单条目自带 bookId，点进去就是番茄详情页 —— 不用再拿书名回书源里搜，
+  /// 也就绕开了番茄站内搜索的人机验证。书名 / 简介是 PUA 字体反爬，本地还原。
+  static const HotBoard fanqieRank = HotBoard(
+    id: 'fanqie_rank',
+    label: '番茄榜',
+    site: '番茄小说',
     kind: HotBoardKind.read,
-    url: 'https://www.owllook.top/md/zongheng',
-    note: 'owllook 汇总的纵横中文网人气榜：月票榜 / 24小时畅销榜 / 新书榜等，'
-        '按榜单优先序合并去重。',
+    url: 'https://fanqienovel.com/rank/1_1',
+    note: '番茄官方榜单：男频 / 女频 × 阅读榜 / 新书榜，各取前 10（共 40 本）。'
+        '阅读榜按在读数据排（30 万字以上），新书榜是 30 万字以下的新书。'
+        '条目自带 bookId，点开直接读。',
   );
+
+  /// 番茄四个分榜：`/rank/<性别>_<榜单>`，1=男频 0=女频，1=阅读榜 2=新书榜。
+  static const List<(String, String)> fanqieBoards = <(String, String)>[
+    ('男频阅读榜', 'https://fanqienovel.com/rank/1_1'),
+    ('男频新书榜', 'https://fanqienovel.com/rank/1_2'),
+    ('女频阅读榜', 'https://fanqienovel.com/rank/0_1'),
+    ('女频新书榜', 'https://fanqienovel.com/rank/0_2'),
+  ];
 
   /// Owllook 榜：站内小说搜索次数排行（大家都在搜什么书）。
   static const HotBoard owllookHot = HotBoard(
@@ -134,10 +153,10 @@ class HotBoard {
         '注意 /md（无斜杠）会 403 跳转，必须用带斜杠的地址。',
   );
 
-  /// 页签顺序即优先级：起点榜、纵横榜、Owllook 搜索榜。
+  /// 页签顺序即优先级：起点榜、番茄榜、Owllook 搜索榜。
   static const List<HotBoard> all = <HotBoard>[
     owllookQidian,
-    owllookZongheng,
+    fanqieRank,
     owllookHot,
   ];
 
@@ -215,6 +234,7 @@ Future<HotBoardData> fetchHotBoard(HotBoard board, {bool force = false}) async {
 }
 
 Future<HotBoardData> _fetch(HotBoard board) async {
+  if (board.id == HotBoard.fanqieRank.id) return _fetchFanqieRank(board);
   final resp = await Net.get(board.url);
   if (resp.status != 200) {
     throw Exception('${board.site} 榜单暂时取不到（HTTP ${resp.status}）');
@@ -231,12 +251,92 @@ Future<HotBoardData> _fetch(HotBoard board) async {
   );
 }
 
+/// 番茄榜：4 个分榜并发取页，按声明顺序合并（男频阅读 → 男频新书 → 女频…）。
+///
+/// 单个分榜抽风返回空就跳过，不全盘失败；4 个都空才报错。
+Future<HotBoardData> _fetchFanqieRank(HotBoard board) async {
+  final results = await Future.wait([
+    for (final (_, url) in HotBoard.fanqieBoards)
+      Net.get(url).then((r) => r.status == 200 ? r.body : '').catchError(
+            (Object _) => '',
+          ),
+  ]);
+  final items = <HotItem>[];
+  for (var i = 0; i < results.length; i++) {
+    if (results[i].isEmpty) continue;
+    final label = HotBoard.fanqieBoards[i].$1;
+    items.addAll(parseFanqieRank(results[i], site: board.site, board: label));
+  }
+  if (items.isEmpty) {
+    throw Exception('${board.site} 榜单解析为空，站点可能改版了');
+  }
+  return HotBoardData(
+    board: board,
+    items: items,
+    fetchedAt: DateTime.now(),
+    siteUpdated: null,
+  );
+}
+
+/// 解析番茄榜单页 `__INITIAL_STATE__.rank.book_list`（纯函数，可离线单测）。
+///
+/// 每个条目自带 bookId / 书名 / 作者 / 简介 / 封面 / 状态，直接落成 [Book]：
+/// 点进去就是番茄详情页，不需要再用书名回书源里匹配。
+List<HotItem> parseFanqieRank(
+  String body, {
+  required String site,
+  required String board,
+}) {
+  final rank = FanqieSource.initialState(body)?['rank'];
+  if (rank is! Map) return const [];
+  final list = rank['book_list'];
+  if (list is! List) return const [];
+  final out = <HotItem>[];
+  for (var i = 0; i < list.length; i++) {
+    final e = list[i];
+    if (e is! Map) continue;
+    final id = (e['bookId']?.toString() ?? '').trim();
+    final title = decodeFanqieText((e['bookName']?.toString() ?? '').trim());
+    if (id.isEmpty || title.isEmpty) continue;
+    final status = switch ((e['creationStatus']?.toString() ?? '').trim()) {
+      '1' => '完结',
+      '0' => '连载',
+      _ => null,
+    };
+    final book = Book(
+      sourceId: FanqieSource.sourceId,
+      id: id,
+      url: '$kFanqieBase/page/$id',
+      title: title,
+      author: _nz(decodeFanqieText(e['author']?.toString() ?? '')),
+      cover: _nz(e['thumbUri']?.toString() ??
+          e['thumbUrl']?.toString() ??
+          ''),
+      intro: _nz(decodeFanqieText(e['abstract']?.toString() ?? '')),
+      status: status,
+      latest: _nz(decodeFanqieText(e['lastChapterTitle']?.toString() ?? '')),
+    );
+    out.add(HotItem(
+      rank: i + 1,
+      title: title,
+      site: site,
+      author: book.author,
+      category: board,
+      status: status,
+      cover: book.cover,
+      book: book,
+    ));
+  }
+  return out;
+}
+
+String? _nz(String s) => s.trim().isEmpty ? null : s.trim();
+
 /// 解析结果（站点自带更新时间可选）。
 typedef _ParsedBoard = ({List<HotItem> items, String? siteUpdated});
 
 _ParsedBoard _parse(HotBoard board, String body) => switch (board.id) {
       'owllook_qidian' => parseOwllookBoard(body, site: board.site),
-      'owllook_zongheng' => parseOwllookBoard(body, site: board.site),
       'owllook_hot' =>
         parseOwllookBoard(body, site: board.site, withSearchCount: true),
       _ => (items: const <HotItem>[], siteUpdated: null),

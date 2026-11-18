@@ -1,15 +1,17 @@
 // 排行：权威热读榜 + 书源站内榜。
 //
 // 页面分两组：
-//   ① 权威榜（起点榜 / 纵横榜 / Owllook榜）：读 owllook 汇总的榜单整页，
+//   ① 权威榜（起点榜 / 番茄榜 / Owllook榜）：读 owllook 汇总的榜单整页 / 番茄官方榜，
 //      再把书名拿回用户自己的可用书源里匹配 —— 「大家在看什么」和
 //      「我能不能读」两件事都在这里解决。点进去直接是可读书的详情页；
 //      没匹配上的给「去书源里搜」。
 //   ② 书源榜（热销 / 新书 / 完结 / 口碑）：各书源站内榜单实时聚合。
 //      口径见设计稿 §4.3：按源内名次加权，同名书跨源累加；口碑按多源收录数。
 //
-// 刷新：下拉 / 右上角刷新都会先作废缓存（并等磁盘删完）再重新拉 ——
-// 旧实现作废是异步的，紧接着的取数会把磁盘旧值读回来，「刷了等于没刷」。
+// 刷新：右上角刷新按钮，以及列表**滑到底部继续上滑**（不做下拉刷新）——
+// 还有没落地的条目就先加载剩余，全部显示完了再上滑就整榜重拉。重拉同样要
+// 先作废缓存（并等磁盘删完）—— 旧实现作废是异步的，紧接着的取数会把磁盘
+// 旧值读回来，「刷了等于没刷」。
 import 'package:flutter/material.dart';
 
 import '../collect/aggregate.dart';
@@ -28,7 +30,7 @@ import 'search_screen.dart';
 /// 页面页签。
 enum _Tab {
   qidian('起点榜'),
-  zongheng('纵横榜'),
+  fanqie('番茄榜'),
   owllook('Owllook榜'),
   comic('漫画榜'),
   sales('热销榜'),
@@ -42,7 +44,7 @@ enum _Tab {
   /// 权威榜对应的抓取定义（书源榜为 null）。
   HotBoard? get hotBoard => switch (this) {
         _Tab.qidian => HotBoard.owllookQidian,
-        _Tab.zongheng => HotBoard.owllookZongheng,
+        _Tab.fanqie => HotBoard.fanqieRank,
         _Tab.owllook => HotBoard.owllookHot,
         _ => null,
       };
@@ -103,6 +105,13 @@ class _RankScreenState extends State<RankScreen>
   int _hotTotal = 0;
   String? _hotError;
 
+  /// 热榜一次落地多少本；滑到底部再上滑就加一档（榜单条目多于这个数时）。
+  static const int _hotStep = 30;
+  int _hotLimit = _hotStep;
+
+  /// 上滑触发的节流时间戳（越界会连发十几条通知）。
+  DateTime? _lastMoreAt;
+
   int _gen = 0;
   bool _loading = true;
 
@@ -158,16 +167,18 @@ class _RankScreenState extends State<RankScreen>
   }
 
   /// 权威榜：先取榜单，再逐本落到可用书源（先到先上屏）。
-  Future<void> _loadHot() async {
+  Future<void> _loadHot({bool keep = false}) async {
     final gen = ++_gen;
     final board = _tab.hotBoard!;
     setState(() {
       _loading = true;
-      _hotData = null;
-      _hotEntries = null;
+      // keep：上滑加载更多时别把已经上屏的列表清空，否则整页闪一下
+      if (!keep) {
+        _hotData = null;
+        _hotEntries = null;
+      }
       _hotError = null;
       _hotDone = 0;
-      _hotTotal = 0;
     });
     try {
       final data = await fetchHotBoard(board);
@@ -178,6 +189,7 @@ class _RankScreenState extends State<RankScreen>
       });
       final entries = await resolveHotItems(
         data.items,
+        maxItems: _hotLimit,
         isCancelled: () => !mounted || gen != _gen,
         onProgress: (done, total) {
           if (!mounted || gen != _gen) return;
@@ -208,8 +220,38 @@ class _RankScreenState extends State<RankScreen>
     }
   }
 
+  /// 列表滑到底部后继续上滑：还有没落地的条目就加载剩余，没有就整榜重拉。
+  bool _onScroll(ScrollNotification n) {
+    if (n is! OverscrollNotification || n.overscroll <= 0) return false;
+    if (n.metrics.extentAfter > 0) return false; // 还没到底
+    final now = DateTime.now();
+    if (_lastMoreAt != null &&
+        now.difference(_lastMoreAt!) < const Duration(milliseconds: 900)) {
+      return false;
+    }
+    _lastMoreAt = now;
+    _loadMore();
+    return false;
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading) return;
+    if (_tab.isHot) {
+      final total = _hotData?.items.length ?? 0;
+      final shown = _hotEntries?.length ?? 0;
+      if (total > shown) {
+        // 榜单条目比已落地的多（番茄榜 40 本、默认只落地 30）→ 继续落地剩余。
+        _hotLimit = shown + _hotStep;
+        await _loadHot(keep: true);
+        return;
+      }
+    }
+    await _reload();
+  }
+
   Future<void> _reload() async {
     if (mounted) setState(() => _loading = true);
+    _hotLimit = _hotStep;
     if (_tab.isHot) {
       // 榜单自己缓存 10 分钟，刷新时连匹配记忆一起作废 —— 用户按刷新就是
       // 想看到「现在的榜单 + 现在的可读情况」，不是再看一遍十年前的结论。
@@ -306,8 +348,9 @@ class _RankScreenState extends State<RankScreen>
                 ? _comicStatusBar(theme, narrow: narrow)
                 : _categoryChips(narrow: narrow)),
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: _reload,
+          // 不做下拉刷新：滑到底部继续上滑才加载 / 刷新（见 [_onScroll]）。
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _onScroll,
             child: narrow
                 ? body
                 : Center(
@@ -380,7 +423,7 @@ class _RankScreenState extends State<RankScreen>
         final r = i - head.length;
         if (r < rows) return _listRow(items![r + 3], r + 4, theme);
         if (r == rows) return const SizedBox(height: 18);
-        return Text('数据来自各书源站内榜单实时抓取 · 下拉刷新',
+        return Text('数据来自各书源站内榜单实时抓取 · 上滑加载更多 / 到底再上滑刷新',
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall
                 ?.copyWith(fontSize: 11, color: Brand.fg3(context)));
@@ -501,7 +544,7 @@ class _RankScreenState extends State<RankScreen>
         return Text(
           entries == null || entries.isEmpty
               ? '榜单来自 ${_tab.hotBoard!.site} 的公开数据'
-              : '榜单来自 ${_tab.hotBoard!.site} · 书名已在你启用的书源里匹配 · 下拉刷新',
+              : '榜单来自 ${_tab.hotBoard!.site} · 继续上滑加载剩余 / 到底再上滑刷新',
           textAlign: TextAlign.center,
           style: theme.textTheme.labelSmall
               ?.copyWith(fontSize: 11, color: Brand.fg3(context)),
@@ -539,8 +582,8 @@ class _RankScreenState extends State<RankScreen>
               child: Text(
                 board.id == HotBoard.owllookQidian.id
                     ? '起点官方榜单汇总 · 月票 / 畅销 / 阅读指数'
-                    : board.id == HotBoard.owllookZongheng.id
-                        ? '纵横中文网人气榜 · 月票 / 畅销 / 新书'
+                    : board.id == HotBoard.fanqieRank.id
+                        ? '番茄官方榜 · 男频 / 女频 × 阅读 / 新书'
                         : 'owllook 站内搜索次数榜 · 大家都在搜',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -765,6 +808,7 @@ class _RankScreenState extends State<RankScreen>
                     _hotEntries = null;
                     _hotData = null;
                     _hotError = null;
+                    _hotLimit = _hotStep;
                   });
                   _load();
                 },

@@ -202,11 +202,13 @@ void main() {
   });
 
   group('榜单定义与缓存', () {
-    test('三个 owllook 权威榜：起点 / 纵横 / 搜索榜，id 稳定', () {
+    test('三个权威榜：起点 / 番茄 / 搜索榜，id 稳定', () {
       expect(HotBoard.all.length, 3);
       expect(HotBoard.all[0].id, 'owllook_qidian');
-      expect(HotBoard.all[1].id, 'owllook_zongheng');
+      expect(HotBoard.all[1].id, 'fanqie_rank');
       expect(HotBoard.all[2].id, 'owllook_hot');
+      // 纵横榜已下线，别再被谁加回来
+      expect(HotBoard.all.any((b) => b.id == 'owllook_zongheng'), isFalse);
       expect(HotBoard.all[2].kind, HotBoardKind.search);
       expect(HotBoard.all[2].url, endsWith('/md/'));
       expect(HotBoard.byId('owllook_qidian').site, 'owllook·起点榜');

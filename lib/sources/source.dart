@@ -70,11 +70,11 @@ abstract class NovelSource {
   }
 
   /// GET 并要求 200；失败短暂等待后重试，共 3 次机会，仍失败抛错。
-  Future<Resp> getOk(String url, {String? referer}) async {
+  Future<Resp> getOk(String url, {String? referer, String? userAgent}) async {
     Object? last;
     for (var i = 0; i < 3; i++) {
       try {
-        final r = await Net.get(url, referer: referer);
+        final r = await Net.get(url, referer: referer, userAgent: userAgent);
         if (r.status == 200) return r;
         last = 'HTTP ${r.status}';
       } catch (e) {

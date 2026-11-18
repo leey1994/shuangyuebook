@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuangyue/models.dart';
+import 'package:shuangyue/collect/hot_board.dart';
 import 'package:shuangyue/sources/fanqie.dart';
 import 'package:shuangyue/sources/fanqie_font.dart';
 
@@ -106,6 +107,42 @@ void main() {
           '{"content":""}}};';
       expect(() => FanqieSource.parseChapterBody(page),
           throwsA(isA<Exception>()));
+    });
+  });
+
+  group('番茄榜（权威榜页）', () {
+    // e3e9=在 e3ea=主 e3eb=特 e3ec=家
+    const page = '__INITIAL_STATE__={"rank":{"book_list":[{'
+        '"bookId":"7690783449048697881","bookName":"",'
+        '"author":"","abstract":"","creationStatus":"0",'
+        '"lastChapterTitle":"第1章","thumbUri":"https://x/c.jpg"}]}};';
+
+    test('条目直接带 book（bookId 就是详情页），书名 / 简介回落 PUA 解码', () {
+      final items = parseFanqieRank(page, site: '番茄小说', board: '男频阅读榜');
+      expect(items.length, 1);
+      final i = items.single;
+      expect(i.title, '在主');
+      expect(i.author, '特');
+      expect(i.category, '男频阅读榜');
+      expect(i.status, '连载');
+      expect(i.book, isNotNull);
+      expect(i.book!.id, '7690783449048697881');
+      expect(i.book!.sourceId, 'fanqie');
+      expect(i.book!.url, 'https://fanqienovel.com/page/7690783449048697881');
+    });
+
+    test('结构不对 / 榜单为空 → 空列表（让上层报「站点改版」）', () {
+      expect(parseFanqieRank('<html></html>', site: 'x', board: 'y'), isEmpty);
+      expect(
+          parseFanqieRank('__INITIAL_STATE__={"rank":{}};',
+              site: 'x', board: 'y'),
+          isEmpty);
+    });
+
+    test('番茄榜挂在权威榜第二位（替换原纵横榜）', () {
+      expect(HotBoard.all[1].id, 'fanqie_rank');
+      expect(HotBoard.all[1].label, '番茄榜');
+      expect(HotBoard.fanqieBoards.length, 4);
     });
   });
 }

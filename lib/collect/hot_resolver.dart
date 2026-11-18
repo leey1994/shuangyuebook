@@ -183,6 +183,15 @@ Future<void> resolveOneHotEntry(
     return;
   }
 
+  // 榜单自带书（番茄榜有 bookId）：直接落地，不再拿书名去搜。
+  // 番茄站内搜索有人机验证，搜是搜不到的 —— 这条路径是它唯一入口。
+  final direct = e.item.book;
+  if (direct != null) {
+    e.book = direct;
+    e.source = sourceById(direct.sourceId);
+    return;
+  }
+
   final keyword = hotSearchKeyword(e.item);
   if (keyword.isEmpty) return;
 
@@ -191,11 +200,11 @@ Future<void> resolveOneHotEntry(
     // 聚合搜索型源（owllook）：书名即定位，直接构造条目，零网络请求。
     // 权威榜 30 本 × 1 次搜索 = 30 个 100~250KB 页面，是切榜卡顿的主因。
     if (s.resolvesByTitle) {
-      final direct = s.bookFromTitle(keyword, author: e.item.author);
-      if (direct != null) {
-        e.book = direct;
+      final byTitle = s.bookFromTitle(keyword, author: e.item.author);
+      if (byTitle != null) {
+        e.book = byTitle;
         e.source = s;
-        HotMatchCache.put(memKey, direct, s.id);
+        HotMatchCache.put(memKey, byTitle, s.id);
         return;
       }
       continue;
